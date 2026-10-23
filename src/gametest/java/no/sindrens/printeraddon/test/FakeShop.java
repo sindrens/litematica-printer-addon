@@ -32,7 +32,7 @@ public final class FakeShop {
     public static int otherShopClicks;
     /** Clicks on items for sale (each opens the buy screen). */
     public static int itemClicks;
-    /** Clicks on confirm (would buy). */
+    /** Clicks on purchase. */
     public static int confirmClicks;
     /** Items bought with confirm: item id -> amount. */
     public static final Map<String, Integer> bought = new HashMap<>();
@@ -139,25 +139,51 @@ public final class FakeShop {
         menu.open(player);
     }
 
-    /** "Buying → item": choose the amount, then confirm. */
+    /**
+     * The buy screen as on the real server: "Buying ➠ item", small-caps "Purchase item" (with the cost) and
+     * "Purchase stacks", +1/+16/+32 (and -1/-16/-32 once the amount is above 1), the item with "x N", at most 64.
+     * The screen stays open after a purchase.
+     */
     private static void openBuy(ServerPlayer player, Item item, Runnable back) {
         itemClicks++;
         int[] amount = {1};
-        Menu menu = new Menu("Buying → " + new ItemStack(item).getHoverName().getString());
+        String name = new ItemStack(item).getHoverName().getString();
+        Menu menu = new Menu("Buying ➠ " + name, 5);
         Runnable[] refresh = new Runnable[1];
-        refresh[0] = () -> menu.container.setItem(22, new ItemStack(item, Math.min(amount[0], item.getDefaultMaxStackSize())));
-        menu.button(19, named(Items.STAINED_GLASS_PANE.red(), "-1"), p -> { amount[0] = Math.max(1, amount[0] - 1); refresh[0].run(); });
-        menu.button(20, named(Items.STAINED_GLASS_PANE.lime(), "+1"), p -> { amount[0]++; refresh[0].run(); });
-        menu.button(23, named(Items.STAINED_GLASS_PANE.lime(), "+16"), p -> { amount[0] += 16; refresh[0].run(); });
-        menu.button(24, named(Items.STAINED_GLASS_PANE.lime(), "+32"), p -> { amount[0] += 32; refresh[0].run(); });
-        menu.button(31, named(Items.CHEST, "Buy more stacks"), p -> { });
-        menu.button(39, named(Items.STAINED_GLASS.green(), "Confirm"), p -> {
+        Consumer<Integer> change = step -> {
+            amount[0] = Math.max(1, Math.min(64, amount[0] + step));
+            refresh[0].run();
+        };
+        refresh[0] = () -> {
+            menu.container.setItem(22, withLore(new ItemStack(item, Math.min(amount[0], item.getDefaultMaxStackSize())),
+                    List.of("x " + amount[0])));
+            for (int[] button : new int[][]{{11, -1}, {20, -16}, {29, -32}}) {
+                menu.container.setItem(button[0], amount[0] > 1
+                        ? named(Items.DYED_TERRACOTTA.red(), "-" + -button[1]) : new ItemStack(Items.STAINED_GLASS_PANE.gray()));
+            }
+        };
+        for (int[] button : new int[][]{{11, -1}, {20, -16}, {29, -32}}) {
+            menu.actions.put(button[0], p -> change.accept(button[1]));
+        }
+        menu.button(15, named(Items.DYED_TERRACOTTA.lime(), "+1"), p -> change.accept(1));
+        menu.button(24, new ItemStack(Items.DYED_TERRACOTTA.lime(), 16), p -> change.accept(16));
+        menu.container.getItem(24).set(DataComponents.CUSTOM_NAME, Component.literal("+16"));
+        menu.button(33, new ItemStack(Items.DYED_TERRACOTTA.lime(), 32), p -> change.accept(32));
+        menu.container.getItem(33).set(DataComponents.CUSTOM_NAME, Component.literal("+32"));
+        menu.button(13, named(Items.PAPER, "ᴘᴜʀᴄʜᴀѕᴇ ɪᴛᴇᴍ",
+                "ᴄᴏѕᴛ: $0.10", "", "→ ᴄʟɪᴄᴋ ᴛᴏ ʙᴜʏ"), p -> {
             confirmClicks++;
-            int n = Math.min(amount[0], item.getDefaultMaxStackSize());
-            bought.merge(net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(item).toString(), n, Integer::sum);
-            p.getInventory().add(new ItemStack(item, n));
+            bought.merge(net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(item).toString(), amount[0], Integer::sum);
+            int left = amount[0];
+            while (left > 0) {
+                int n = Math.min(left, item.getDefaultMaxStackSize());
+                p.getInventory().add(new ItemStack(item, n));
+                left -= n;
+            }
         });
-        menu.button(41, named(Items.STAINED_GLASS.red(), "Cancel"), p -> back.run());
+        menu.button(31, named(Items.NETHER_STAR, "ᴘᴜʀᴄʜᴀѕᴇ ѕᴛᴀᴄᴋѕ"),
+                p -> otherShopClicks++);
+        menu.button(40, named(Items.BARRIER, "Back"), p -> back.run());
         refresh[0].run();
         menu.open(player);
     }
@@ -181,11 +207,17 @@ public final class FakeShop {
     private static class Menu {
         final String title;
         final SimpleContainer container = new SimpleContainer(54);
+        int rows = 6;
         final Map<Integer, Consumer<ServerPlayer>> actions = new HashMap<>();
 
         Menu(String title) {
+            this(title, 6);
+        }
+
+        Menu(String title, int rows) {
             this.title = title;
-            for (int i = 0; i < 54; i++) {
+            this.rows = rows;
+            for (int i = 0; i < rows * 9; i++) {
                 container.setItem(i, new ItemStack(Items.STAINED_GLASS_PANE.gray()));
             }
         }
@@ -205,7 +237,7 @@ public final class FakeShop {
         private final Menu menu;
 
         ShopMenu(int id, Inventory inventory, Menu menu) {
-            super(MenuType.GENERIC_9x6, id, inventory, menu.container, 6);
+            super(menu.rows == 5 ? MenuType.GENERIC_9x5 : MenuType.GENERIC_9x6, id, inventory, menu.container, menu.rows);
             this.menu = menu;
         }
 

@@ -260,10 +260,17 @@ public class RailHelper {
         };
     }
 
-    /** A temporary rail only goes where the schematic has nothing (else it would stand where a block belongs). */
+    /**
+     * A temporary rail only goes where the schematic has nothing, or only flowing water (else it would stand where
+     * a block belongs). Flowing water is fine: a rail stands in it, and the water comes back when it's removed.
+     */
     private static boolean canHoldTemp(Level level, WorldSchematic schematic, BlockPos at) {
         BlockState here = level.getBlockState(at);
-        return schematic.getBlockState(at).isAir() && (here.isAir() || here.canBeReplaced()) && here.getFluidState().isEmpty()
+        BlockState target = schematic.getBlockState(at);
+        boolean freeInSchematic = target.isAir() || (target.getBlock() instanceof net.minecraft.world.level.block.LiquidBlock
+                && !target.getFluidState().isSource());
+        return freeInSchematic && (here.isAir() || here.canBeReplaced())
+                && (here.getFluidState().isEmpty() || !here.getFluidState().isSource())
                 && level.getBlockState(at.below()).isFaceSturdy(level, at.below(), Direction.UP);
     }
 

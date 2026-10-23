@@ -25,6 +25,13 @@ public class AutoBuild {
     /** Temporary rails are removed through the same list as misplaced air-placed blocks. */
     public final RailHelper rails = new RailHelper(airPlace.misplaced());
     public final EntityPlacer entities = new EntityPlacer();
+    private final InventoryCleaner cleaner = new InventoryCleaner();
+    /** What the whole schematic still needs (item -> count), including what's in the inventory. */
+    private final java.util.Map<net.minecraft.world.item.Item, Integer> neededWhole = new java.util.HashMap<>();
+    /** Items the shop couldn't sell or deliver during this build: not tried again. */
+    private final java.util.Set<net.minecraft.world.item.Item> couldntBuy = new java.util.HashSet<>();
+    private boolean buying;
+    private int buyCooldown;
     private final Safety safety = new Safety();
 
     private boolean running;
@@ -58,7 +65,8 @@ public class AutoBuild {
 
     /** The printer is paused while a block is being broken, so the two don't swap the held item. */
     public boolean shouldPausePrinter() {
-        return breaker.isBusy() || fluids.isBusy() || rails.isBusy() || entities.isBusy();
+        return breaker.isBusy() || fluids.isBusy() || rails.isBusy() || entities.isBusy()
+                || no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.isRunning();
     }
 
     public boolean isRunning() {
@@ -174,6 +182,9 @@ public class AutoBuild {
                 && !mc.player.getInventory().contains(net.minecraft.tags.ItemTags.HOES)) {
             needs.put(net.minecraft.world.item.Items.IRON_HOE, 1);
         }
+        neededWhole.clear();
+        neededWhole.putAll(needs);
+        cleaner.remember(needs);
         missingWhole.clear();
         needs.forEach((item, count) -> {
             int have = mc.player.getInventory().countItem(item);
@@ -199,6 +210,48 @@ public class AutoBuild {
         return manualTask != ManualTask.NONE;
     }
 
+    /**
+     * Buys what the current layer still needs from /shop (as much as fits). When the layer can't go on because of
+     * items the shop doesn't have (or couldn't deliver), auto build pauses and says what to bring.
+     */
+    private boolean buyMissing(Minecraft mc) {
+        if (shoppingList.isEmpty() || mc.player.getAbilities().instabuild) {
+            return false;
+        }
+        if (buyCooldown > 0) {
+            buyCooldown--;
+            return false;
+        }
+        java.util.Map<net.minecraft.world.item.Item, Integer> list = new java.util.LinkedHashMap<>();
+        shoppingList.forEach((item, count) -> {
+            if (!couldntBuy.contains(item)) {
+                list.put(item, count);
+            }
+        });
+
+        if (list.isEmpty() || !Configs.Shop.AUTO_BUY.getBooleanValue()) {
+            if (layers.stalledFor(20 * 20)) {
+                StringBuilder sb = new StringBuilder();
+                shoppingList.forEach((item, count) -> sb.append(count).append(' ')
+                        .append(new net.minecraft.world.item.ItemStack(item).getHoverName().getString()).append(", "));
+                stop(mc, "missing " + sb.substring(0, sb.length() - 2)
+                        + ". Put them in your inventory and turn auto build on again (J+B)");
+                return true;
+            }
+            return false;
+        }
+
+        buyCooldown = 20 * 30;
+        if (no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.start(mc, list)) {
+            buying = true;
+            mover.stop(mc);
+            return true;
+        }
+        couldntBuy.addAll(no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.notSold());
+        couldntBuy.addAll(no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.notBought());
+        return false;
+    }
+
     public void start(Minecraft mc) {
         if (running) {
             return;
@@ -217,6 +270,11 @@ public class AutoBuild {
         couldNotPlace.clear();
         shoppingList.clear();
         missingWhole.clear();
+        neededWhole.clear();
+        couldntBuy.clear();
+        buying = false;
+        buyCooldown = 0;
+        cleaner.reset();
         nextBlock = null;
         breaker.reset();
         mover.reset();
@@ -245,6 +303,8 @@ public class AutoBuild {
     public void stop(Minecraft mc, String reason) {
         boolean wasRunning = running;
         running = false;
+        no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.cancel(null);
+        buying = false;
         Configs.Generic.AUTO_BUILD.setBooleanValue(false);
         layers.stop();
         breaker.stop(mc);
@@ -332,6 +392,21 @@ public class AutoBuild {
         }
 
         PrinterBridge.applySettings(mc.player);
+
+        // Buying from the shop: nothing else happens meanwhile
+        no.sindrens.printeraddon.shop.ShopBuyer buyer = no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE;
+        if (buyer.isRunning()) {
+            buyer.tick(mc);
+            return;
+        }
+        if (buying) {
+            buying = false;
+            couldntBuy.addAll(buyer.notSold());
+            couldntBuy.addAll(buyer.notBought());
+            couldntBuy.removeAll(buyer.bought().keySet());
+            buyCooldown = 40;
+        }
+
         closeUnwantedMenu(mc);
 
         if (++debugTicks % 40 == 0) {
@@ -364,6 +439,15 @@ public class AutoBuild {
         if (layers.isActive() && !layers.tick(mc)) {
             stop(mc, null);
             return;
+        }
+
+        if (PrinterBridge.isIdle() && !breaker.isBusy() && !fluids.isBusy() && !rails.isBusy() && !entities.isBusy()) {
+            if (cleaner.tick(mc, neededWhole)) {
+                return;
+            }
+            if (buyMissing(mc)) {
+                return;
+            }
         }
 
         mover.tick(mc);

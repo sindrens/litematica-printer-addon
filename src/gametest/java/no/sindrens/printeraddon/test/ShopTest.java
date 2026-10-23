@@ -9,7 +9,13 @@ import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
 import no.sindrens.printeraddon.config.Configs;
+import no.sindrens.printeraddon.shop.ShopBuyer;
 import no.sindrens.printeraddon.shop.ShopScanner;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -88,6 +94,52 @@ public class ShopTest implements FabricClientGameTest {
                 check(items.has(id), id + " (no price text) wasn't found");
             }
             check(!items.has("minecraft:diamond") && !items.has("minecraft:tripwire_hook"), "read items from another shop");
+
+            // Buying with what the scan found
+            FakeShop.reset();
+            context.runOnClient(mc -> {
+                Map<Item, Integer> list = new LinkedHashMap<>();
+                list.put(Items.HOPPER, 100);
+                list.put(Items.STONE, 10);
+                list.put(Items.CAULDRON, 3);          // on page 2
+                list.put(Items.PUMPKIN_SEEDS, 5);
+                list.put(Items.LAVA_BUCKET, 2);
+                list.put(Items.HOPPER_MINECART, 2);   // not sold
+                check(ShopBuyer.INSTANCE.start(mc, list), "the buyer didn't start");
+            });
+            long buyStarted = System.currentTimeMillis();
+            ticks = 0;
+            while (ticks < MAX_TICKS && context.computeOnClient(mc -> ShopBuyer.INSTANCE.isRunning())) {
+                context.waitTicks(10);
+                ticks += 10;
+                if (ticks % 100 == 0) {
+                    context.takeScreenshot("buy");
+                }
+            }
+            double buySeconds = (System.currentTimeMillis() - buyStarted) / 1000.0;
+            check(ticks < MAX_TICKS, "buying didn't finish");
+            String have = context.computeOnClient(mc -> {
+                StringBuilder sb = new StringBuilder();
+                for (Item item : new Item[]{Items.HOPPER, Items.STONE, Items.CAULDRON, Items.PUMPKIN_SEEDS, Items.LAVA_BUCKET, Items.HOPPER_MINECART}) {
+                    sb.append(BuiltInRegistries.ITEM.getKey(item).getPath()).append('=').append(mc.player.getInventory().countItem(item)).append(' ');
+                }
+                return sb.toString();
+            });
+            System.out.println("SHOP BUY TEST: took " + buySeconds + " s, purchases " + FakeShop.confirmClicks
+                    + ", item clicks " + FakeShop.itemClicks + ", bought " + FakeShop.bought + "\n  inventory: " + have
+                    + "\n  not sold: " + context.computeOnClient(mc -> ShopBuyer.INSTANCE.notSold().toString()));
+            check(FakeShop.otherShopClicks == 0, "the buyer opened another shop or 'purchase stacks'");
+            int[] counts = context.computeOnClient(mc -> new int[]{
+                    mc.player.getInventory().countItem(Items.HOPPER), mc.player.getInventory().countItem(Items.STONE),
+                    mc.player.getInventory().countItem(Items.CAULDRON), mc.player.getInventory().countItem(Items.PUMPKIN_SEEDS),
+                    mc.player.getInventory().countItem(Items.LAVA_BUCKET)});
+            check(counts[0] == 100, "hoppers: " + counts[0] + ", wanted 100");
+            check(counts[1] == 10, "stone: " + counts[1] + ", wanted 10");
+            check(counts[2] == 3, "cauldrons: " + counts[2] + ", wanted 3");
+            check(counts[3] == 5, "pumpkin seeds: " + counts[3] + ", wanted 5");
+            check(counts[4] == 2, "lava buckets: " + counts[4] + ", wanted 2");
+            check(context.computeOnClient(mc -> ShopBuyer.INSTANCE.notSold().contains(Items.HOPPER_MINECART)),
+                    "hopper minecart should be reported as not sold");
         } catch (IOException e) {
             throw new RuntimeException(e);
         }

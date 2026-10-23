@@ -190,6 +190,10 @@ public class FarmTest implements FabricClientGameTest {
             }
         }
 
+        // Buckets don't stack: a few at a time, like a player would carry
+        for (Item bucket : new Item[]{Items.WATER_BUCKET, Items.LAVA_BUCKET, Items.POWDER_SNOW_BUCKET}) {
+            needed.computeIfPresent(bucket, (item, count) -> Math.min(count, 4));
+        }
         // Spare rails for the temporary rails the rail planner puts down
         if (needed.containsKey(Items.RAIL) || needed.containsKey(Items.POWERED_RAIL)) {
             needed.merge(Items.RAIL, 8, Integer::sum);

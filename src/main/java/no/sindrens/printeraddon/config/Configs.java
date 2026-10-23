@@ -174,6 +174,10 @@ public class Configs implements IConfigHandler {
         public static final ConfigString SHOP_COMMAND = new ConfigString("shopCommand", "shop",
                 "Command that opens the shop, without the slash.",
                 "Shop command");
+        public static final ConfigBoolean AUTO_BUY = new ConfigBoolean("autoBuy", true,
+                "During auto build, buy what the current layer is missing from the shop (as much as fits in the inventory).\n"
+                        + "Needs a shop scan of the server first (J+S). No spending limit.",
+                "Buy missing items");
         public static final ConfigString SHOP_SECTION = new ConfigString("shopSection", "minecraft:paper",
                 "Which button in the /shop main menu leads to the money shop. Only that one is opened.\n"
                         + "An item id (minecraft:paper) or part of the button's name. Empty = open every button.",
@@ -190,7 +194,7 @@ public class Configs implements IConfigHandler {
                 "Shop menu timeout (ticks)");
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                SHOP_COMMAND, SHOP_SECTION, PROBE_BUY_SCREEN, MAX_PAGES, WAIT_TIMEOUT_TICKS);
+                AUTO_BUY, SHOP_COMMAND, SHOP_SECTION, PROBE_BUY_SCREEN, MAX_PAGES, WAIT_TIMEOUT_TICKS);
     }
 
     public static class Speed {

@@ -96,6 +96,11 @@ public class LayerManager {
         return true;
     }
 
+    /** True when the current layer hasn't changed for this many ticks. */
+    public boolean stalledFor(int ticks) {
+        return active && ticksWithoutProgress >= ticks;
+    }
+
     public void stop() {
         finishingDeferred = false;
         retriedSkipped = false;

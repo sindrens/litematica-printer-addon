@@ -49,6 +49,7 @@ public class KeyCallbacks {
                 ShopScanner.INSTANCE.start(mc);
             } else if (key == Hotkeys.STOP_ALL.getKeybind()) {
                 ShopScanner.INSTANCE.cancel("stopped");
+                no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.cancel("stopped");
                 build.stopEverything(mc);
             } else {
                 return false;

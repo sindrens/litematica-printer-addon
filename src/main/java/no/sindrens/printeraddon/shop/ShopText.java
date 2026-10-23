@@ -17,8 +17,22 @@ public final class ShopText {
     private static final Pattern NUMBER = Pattern.compile("([0-9][0-9,]*(?:\\.[0-9]+)?)\\s*([kmb])?\\b(?!\\s*x\\b)",
             Pattern.CASE_INSENSITIVE);
 
+    /** Small-caps letters some servers use ("ᴘᴜʀᴄʜᴀѕᴇ ɪᴛᴇᴍ") and the plain letters they stand for. */
+    private static final String SMALL_CAPS = "ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀѕꜱᴛᴜᴠᴡʏᴢ";
+    private static final String PLAIN = "abcdefghijklmnopqrsstuvwyz";
+
     public static String lower(String text) {
         return text.toLowerCase(Locale.ROOT).trim();
+    }
+
+    /** Lower case with small-caps letters turned into plain ones, for matching words. */
+    public static String plain(String text) {
+        StringBuilder sb = new StringBuilder(text.length());
+        for (char c : lower(text).toCharArray()) {
+            int i = SMALL_CAPS.indexOf(c);
+            sb.append(i >= 0 ? PLAIN.charAt(i) : c);
+        }
+        return sb.toString();
     }
 
     public static boolean isFiller(String itemId, String name) {
@@ -34,7 +48,7 @@ public final class ShopText {
     }
 
     public static Nav navOf(String name) {
-        String n = lower(name);
+        String n = plain(name);
         if (n.contains("previous") || n.contains("prev page") || n.equals("<") || n.equals("<<")
                 || n.contains("←") || n.contains("«")) {
             return Nav.PREVIOUS;
