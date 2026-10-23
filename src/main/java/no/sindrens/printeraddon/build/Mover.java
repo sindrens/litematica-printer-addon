@@ -233,6 +233,10 @@ public class Mover {
                     break;
                 }
             }
+            // Rails the printer won't place but the add-on can (they get the right shape)
+            if (result == BlockCheck.Result.MISSING && AutoBuild.INSTANCE.rails.selfPlaceFacing(mc.level, schematic, p, schematic.getBlockState(p)) != null) {
+                return true;
+            }
             // Blocks with nothing to place them against: the add-on clicks the right face itself
             if (result == BlockCheck.Result.MISSING && FacePlace.isCandidate(mc.level, p, schematic.getBlockState(p))) {
                 return true;
@@ -275,15 +279,31 @@ public class Mover {
         List<BlockPos> sorted = new ArrayList<>(work);
         sorted.sort(java.util.Comparator.comparingDouble(p -> from.distanceToSqr(Vec3.atCenterOf(p))));
         List<BlockPos> near = sorted.subList(0, Math.min(NEARBY_FOR_SPOT, sorted.size()));
+        // Sweep the layer from north to south: only spots near the most northern unfinished row, so no holes are left
+        int northRow = Integer.MAX_VALUE;
+        for (BlockPos pos : work) {
+            northRow = Math.min(northRow, pos.getZ());
+        }
+        int bandEnd = northRow + 3;
         double r = reach - 0.25;
         double eyeHeight = player.getEyeHeight();
 
         BlockPos best = null;
         double bestScore = -Double.MAX_VALUE;
         int candidates = 0;
+        List<BlockPos> band = new ArrayList<>();
+        for (BlockPos pos : sorted) {
+            if (pos.getZ() <= bandEnd) {
+                band.add(pos);
+            }
+        }
+        if (band.isEmpty()) {
+            band = sorted;
+        }
+        near = band.subList(0, Math.min(NEARBY_FOR_SPOT, band.size()));
         for (int i = 0; i < near.size() && i < CANDIDATES_TO_CHECK * 2 && candidates < CANDIDATES_TO_CHECK; i++) {
             BlockPos candidate = near.get(i);
-            if (!canDoNow(mc, schematic, candidate)) {
+            if (candidate.getZ() > bandEnd || !canDoNow(mc, schematic, candidate)) {
                 continue;
             }
             candidates++;

@@ -48,7 +48,12 @@ public class RailHelper {
     private BlockPos pendingTemp;
     @Nullable
     private Direction pendingFacing;
+    /** A rail the printer won't place that this places itself (with the player facing east-west or not). */
+    @Nullable
+    private BlockPos pendingRail;
+    private boolean pendingRailEastWest;
     private int cooldown;
+    private final me.aleksilassila.litematica.printer.guides.Guides printerGuides = new me.aleksilassila.litematica.printer.guides.Guides();
 
     public RailHelper(Set<BlockPos> release) {
         this.release = release;
@@ -57,10 +62,11 @@ public class RailHelper {
     public void reset() {
         temps.clear();
         pendingTemp = null;
+        pendingRail = null;
     }
 
     public boolean isBusy() {
-        return pendingTemp != null;
+        return pendingTemp != null || pendingRail != null;
     }
 
     public boolean isTemp(BlockPos pos) {
@@ -180,6 +186,12 @@ public class RailHelper {
             cooldown = COOLDOWN;
             return;
         }
+        if (pendingRail != null) {
+            placeRail(mc, player, schematic, pendingRail, pendingRailEastWest);
+            pendingRail = null;
+            cooldown = Math.max(COOLDOWN, no.sindrens.printeraddon.config.Configs.Speed.printerInterval());
+            return;
+        }
         if (cooldown > 0) {
             cooldown--;
             return;
@@ -187,6 +199,7 @@ public class RailHelper {
 
         BlockPos[] next = findTempToPlace(mc, player, schematic);
         if (next == null) {
+            findRailToPlace(mc, player, schematic);
             return;
         }
 
@@ -204,6 +217,144 @@ public class RailHelper {
         // Face along the line from the rail it locks, so a lone temporary rail lies that way
         pendingFacing = Direction.getApproximateNearest(next[1].getX() - next[2].getX(), 0, next[1].getZ() - next[2].getZ());
         temps.put(next[1], next[0]);
+    }
+
+    /**
+     * How a rail the printer won't place could be placed now: east-west facing or not, or null if no way works. A way
+     * works when the predicted shape is the right one, or joins only rails it's meant to join (it turns into the
+     * right shape when its other rails come).
+     */
+    @Nullable
+    public Boolean selfPlaceFacing(Level level, WorldSchematic schematic, BlockPos pos, BlockState target) {
+        if (!isRail(target) || temps.containsKey(pos)) {
+            return null;
+        }
+        Plan plan = plan(level, schematic, pos, target);
+        if (!plan.temps().isEmpty()) {
+            return null;
+        }
+        String wait = PlacementOrder.whyNotReady(level, schematic, pos, target);
+        if (wait != null && !wait.startsWith("rail curve waits") && !wait.startsWith("slope waits for the rail at its top")) {
+            return null;
+        }
+        if (!target.canSurvive(level, pos)) {
+            return null;
+        }
+        RailShape want = target.getValue(((BaseRailBlock) target.getBlock()).getShapeProperty());
+        boolean straightOnly = ((BaseRailBlock) target.getBlock()).isStraight();
+        List<Direction> wantDirections = RailPredict.directions(want);
+        Boolean compatible = null;
+        for (boolean eastWest : new boolean[]{want == RailShape.EAST_WEST || want == RailShape.ASCENDING_EAST || want == RailShape.ASCENDING_WEST, !(want == RailShape.EAST_WEST || want == RailShape.ASCENDING_EAST || want == RailShape.ASCENDING_WEST)}) {
+            RailShape shape = RailPredict.shapeIfPlaced(level, pos, straightOnly, eastWest);
+            if (shape == want) {
+                return eastWest;
+            }
+            List<Direction> links = RailPredict.links(level, pos, shape);
+            boolean slopeOk = !shape.isSlope() || shape == want;
+            if (compatible == null && slopeOk && wantDirections.containsAll(links)
+                    && (wantDirections.containsAll(RailPredict.directions(shape)) || links.size() < 2)) {
+                compatible = eastWest;
+            }
+        }
+        return compatible;
+    }
+
+    /** Places a missing rail in reach that the printer won't place, if it can be placed right (see selfPlaceFacing). */
+    private void findRailToPlace(Minecraft mc, LocalPlayer player, WorldSchematic schematic) {
+        double reach = player.blockInteractionRange() - 0.5;
+        int r = (int) Math.ceil(reach);
+        Vec3 eye = player.getEyePosition();
+        BlockPos center = BlockPos.containing(eye);
+        List<SchematicHelper.Area> areas = SchematicHelper.areas();
+        BlockPos best = null;
+        boolean bestEastWest = false;
+        boolean bestExact = false;
+        double bestDistance = Double.MAX_VALUE;
+
+        for (BlockPos pos : BlockPos.betweenClosed(center.offset(-r, -r, -r), center.offset(r, r, r))) {
+            double distance = eye.distanceToSqr(Vec3.atCenterOf(pos));
+            if (distance > reach * reach || distance <= 1.5) {
+                continue;
+            }
+            boolean deferred = AutoBuild.INSTANCE.deferred.contains(pos);
+            if ((!deferred && !DataManager.getRenderLayerRange().isPositionWithinRange(pos)) || !SchematicHelper.isInAnyArea(areas, pos)) {
+                continue;
+            }
+            BlockState target = schematic.getBlockState(pos);
+            if (!isRail(target) || BlockCheck.check(mc.level, schematic, pos) != BlockCheck.Result.MISSING) {
+                continue;
+            }
+            if (printerCanPlace(mc, schematic, pos)) {
+                continue;
+            }
+            ItemStack item = fi.dy.masa.litematica.materials.MaterialCache.getInstance().getRequiredBuildItemForState(target);
+            if (item.isEmpty() || !player.getInventory().contains(s -> s.is(item.getItem()))) {
+                continue;
+            }
+            Boolean eastWest = selfPlaceFacing(mc.level, schematic, pos, target);
+            if (eastWest == null) {
+                continue;
+            }
+            RailShape want = target.getValue(((BaseRailBlock) target.getBlock()).getShapeProperty());
+            boolean exact = RailPredict.shapeIfPlaced(mc.level, pos, ((BaseRailBlock) target.getBlock()).isStraight(), eastWest) == want;
+            if ((exact && !bestExact) || (exact == bestExact && distance < bestDistance)) {
+                best = pos.immutable();
+                bestEastWest = eastWest;
+                bestExact = exact;
+                bestDistance = distance;
+            }
+        }
+        if (best == null) {
+            return;
+        }
+
+        ItemStack item = fi.dy.masa.litematica.materials.MaterialCache.getInstance().getRequiredBuildItemForState(schematic.getBlockState(best));
+        Inventory inventory = player.getInventory();
+        int slot = inventory.findSlotMatchingItem(item);
+        if (slot == -1) {
+            return;
+        }
+        if (Inventory.isHotbarSlot(slot)) {
+            inventory.setSelectedSlot(slot);
+        } else {
+            InventoryUtils.setPickedItemToHand(slot, item, mc);
+        }
+        pendingRail = best;
+        pendingRailEastWest = bestEastWest;
+    }
+
+    private boolean printerCanPlace(Minecraft mc, WorldSchematic schematic, BlockPos pos) {
+        if (!PlacementOrder.isReady(mc.level, schematic, pos, schematic.getBlockState(pos))) {
+            return false;
+        }
+        me.aleksilassila.litematica.printer.SchematicBlockState state =
+                new me.aleksilassila.litematica.printer.SchematicBlockState(mc.level, schematic, pos.immutable());
+        for (me.aleksilassila.litematica.printer.guides.Guide guide : printerGuides.getInteractionGuides(state)) {
+            if (guide.canExecute(mc.player)) {
+                return true;
+            }
+            if (guide.skipOtherGuides()) {
+                break;
+            }
+        }
+        return false;
+    }
+
+    private void placeRail(Minecraft mc, LocalPlayer player, WorldSchematic schematic, BlockPos at, boolean eastWest) {
+        BlockState target = schematic.getBlockState(at);
+        ItemStack item = fi.dy.masa.litematica.materials.MaterialCache.getInstance().getRequiredBuildItemForState(target);
+        if (item.isEmpty() || !player.getMainHandItem().is(item.getItem()) || selfPlaceFacing(mc.level, schematic, at, target) == null) {
+            return;
+        }
+        float yaw = eastWest ? 90 : 0;
+        player.setYRot(yaw);
+        player.yRotO = yaw;
+        BlockPos below = at.below();
+        mc.gameMode.useItemOn(player, InteractionHand.MAIN_HAND,
+                new BlockHitResult(Vec3.atCenterOf(below).add(0, 0.5, 0), Direction.UP, below, false));
+        AutoBuild.INSTANCE.stats.placed();
+        PrinterAddon.debug("Placed {} at {} myself (facing {}), the printer wouldn't", target.getBlock().getName().getString(),
+                at.toShortString(), eastWest ? "east-west" : "north-south");
     }
 
     /** A missing rail within reach whose plan needs a temporary rail: returns {rail, temp spot, locked neighbour}. */

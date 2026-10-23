@@ -27,13 +27,15 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Places blocks whose direction comes from the clicked face (hoppers, logs, chains...) when the block they must be
- * placed against isn't there, like the first row of a floor of hoppers that all face north. The printer can't
- * do those (it needs that block to click on); this clicks the right face of the empty spot itself, so the block
- * gets the right direction. One block per printer interval. Everything else stays with the printer.
+ * Places blocks whose direction comes from the clicked face (hoppers, logs, chains...) with one click on the right
+ * face of the empty spot, so the block always gets the right direction. The printer needs several actions for
+ * these (look, sneak, click into the hopper in front, stop sneaking: 3-4 printer intervals each) and can't do them
+ * at all when the block in front isn't there yet. One block per printer interval, nearest row first, so a floor
+ * fills row by row without holes. Everything else stays with the printer.
  */
 public class FacePlace {
-    private static final int SKIP_TICKS = 20 * 30;
+    /** A spot just clicked isn't tried again for this long (the server's answer takes a moment). */
+    private static final int SKIP_TICKS = 20 * 3;
 
     @Nullable
     private BlockPos pending;
@@ -68,18 +70,13 @@ public class FacePlace {
         return null;
     }
 
-    /**
-     * True for a missing block that only this can place: its direction comes from the clicked face, and the
-     * block it would normally be placed against (on that side) isn't there.
-     */
+    /** True for a block this places: its direction comes from the clicked face, and its spot is empty. */
     public static boolean isCandidate(Level level, BlockPos pos, BlockState target) {
-        Direction face = faceFor(target);
-        if (face == null) {
+        if (faceFor(target) == null) {
             return false;
         }
-        BlockPos against = pos.relative(face.getOpposite());
-        BlockState there = level.getBlockState(against);
-        return there.isAir() || there.canBeReplaced();
+        BlockState here = level.getBlockState(pos);
+        return here.isAir() || here.canBeReplaced();
     }
 
     /** Returns true if it did something this tick. */
@@ -134,11 +131,13 @@ public class FacePlace {
         BlockPos center = BlockPos.containing(eye);
         List<SchematicHelper.Area> areas = SchematicHelper.areas();
         BlockPos best = null;
-        double bestDistance = Double.MAX_VALUE;
+        double bestScore = Double.MAX_VALUE;
 
         for (BlockPos pos : BlockPos.betweenClosed(center.offset(-r, -r, -r), center.offset(r, r, r))) {
             double distance = eye.distanceToSqr(Vec3.atCenterOf(pos));
-            if (distance > reach * reach || distance >= bestDistance || distance <= 1.5 || skipped.containsKey(pos)) {
+            // Row by row: the most northern row in reach first, then from west to east
+            double score = pos.getZ() * 1000 + pos.getX() + pos.getY() * 0.001;
+            if (distance > reach * reach || score >= bestScore || distance <= 1.5 || skipped.containsKey(pos)) {
                 continue;
             }
             if (!DataManager.getRenderLayerRange().isPositionWithinRange(pos) && !AutoBuild.INSTANCE.deferred.contains(pos)) {
@@ -160,7 +159,7 @@ public class FacePlace {
                 continue;
             }
             best = pos.immutable();
-            bestDistance = distance;
+            bestScore = score;
         }
         return best;
     }

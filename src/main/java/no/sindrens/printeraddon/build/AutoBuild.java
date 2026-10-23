@@ -100,7 +100,14 @@ public class AutoBuild {
                 }
             }
         }
-        java.util.List<net.minecraft.core.BlockPos> ordered = PlacementOrder.order(mc.level, schematic, all, mc.player.position());
+        // Blocks FacePlace does with one click (hoppers, logs, chains) aren't the printer's: it spends its turns on the rest
+        java.util.List<net.minecraft.core.BlockPos> forPrinter = new java.util.ArrayList<>(all.size());
+        for (net.minecraft.core.BlockPos pos : all) {
+            if (!FacePlace.isCandidate(mc.level, pos, schematic.getBlockState(pos))) {
+                forPrinter.add(pos);
+            }
+        }
+        java.util.List<net.minecraft.core.BlockPos> ordered = PlacementOrder.order(mc.level, schematic, forPrinter, mc.player.position());
         if (!ordered.isEmpty()) {
             nextBlock = ordered.getFirst();
         }
