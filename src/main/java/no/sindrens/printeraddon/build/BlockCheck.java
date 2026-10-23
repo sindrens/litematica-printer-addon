@@ -5,6 +5,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.Container;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.AbstractCauldronBlock;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.ChestBlock;
@@ -49,7 +50,9 @@ public final class BlockCheck {
         /** Wrong, but must not be broken automatically (container, unbreakable). */
         PROTECTED,
         /** Chunk not loaded on the client: unknown. */
-        UNLOADED;
+        UNLOADED,
+        /** Something the printer can't place (water/lava source, filled cauldron): listed for the player. */
+        MANUAL;
 
         public boolean needsBreaking() {
             return this == WRONG_BLOCK || this == WRONG_STATE;
@@ -73,6 +76,28 @@ public final class BlockCheck {
         BlockState target = schematic.getBlockState(pos);
         BlockState current = level.getBlockState(pos);
 
+        // A piston that was moving when the schematic was saved: nothing to place there
+        if (target.getBlock() == Blocks.MOVING_PISTON) {
+            return Result.OK;
+        }
+
+        if (target.getBlock() instanceof LiquidBlock) {
+            if (current.getFluidState().getType().isSame(target.getFluidState().getType())) {
+                return Result.OK;
+            }
+            // Flowing water/lava comes from its source by itself
+            if (!target.getFluidState().isSource()) {
+                return Result.OK;
+            }
+            return current.isAir() || current.canBeReplaced() ? Result.MANUAL : Result.WRONG_BLOCK;
+        }
+
+        // Lava/water/powder snow in a cauldron needs a bucket
+        if (target.getBlock() instanceof AbstractCauldronBlock && target.getBlock() != Blocks.CAULDRON
+                && current.getBlock() == Blocks.CAULDRON) {
+            return Result.MANUAL;
+        }
+
         if (target.isAir()) {
             if (current.isAir() || current.getBlock() instanceof LiquidBlock) {
                 return Result.OK;
@@ -88,7 +113,7 @@ public final class BlockCheck {
             return compareSameBlock(level, pos, target, current);
         }
 
-        if (isGrowthVariant(target, current) ) {
+        if (StateRules.isGrowthVariant(target.getBlock(), current.getBlock())) {
             return Result.OK;
         }
 
@@ -160,16 +185,6 @@ public final class BlockCheck {
         return block instanceof DoorBlock || block instanceof FenceGateBlock || block instanceof TrapDoorBlock
                 || block instanceof LeverBlock || block instanceof RepeaterBlock || block instanceof ComparatorBlock
                 || block instanceof NoteBlock;
-    }
-
-    /** A stem that has grown a fruit (or the reverse) is still correct. */
-    private static boolean isGrowthVariant(BlockState target, BlockState current) {
-        Block t = target.getBlock();
-        Block c = current.getBlock();
-        return (t == Blocks.ATTACHED_PUMPKIN_STEM && c == Blocks.PUMPKIN_STEM)
-                || (t == Blocks.PUMPKIN_STEM && c == Blocks.ATTACHED_PUMPKIN_STEM)
-                || (t == Blocks.ATTACHED_MELON_STEM && c == Blocks.MELON_STEM)
-                || (t == Blocks.MELON_STEM && c == Blocks.ATTACHED_MELON_STEM);
     }
 
     /** Cases the printer fixes without breaking: tilling, stripping logs, filling flower pots. */

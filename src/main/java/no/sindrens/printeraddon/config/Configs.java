@@ -29,8 +29,9 @@ public class Configs implements IConfigHandler {
                 "How fast everything runs. Safe / Normal / Fast, or Custom to use the values in the Speed tab.",
                 "Speed preset");
         public static final ConfigBoolean APPLY_SPEED_TO_PRINTER = new ConfigBoolean("applySpeedToPrinter", true,
-                "Also set Litematica Printer's printing interval from the speed preset.",
-                "Apply speed to printer");
+                "During auto build, set Litematica Printer's settings for reliable building: interval from the speed preset (12),\n"
+                        + "range to your reach (4.5 in survival), rotate and interact blocks on. Your own values come back when it stops.",
+                "Set printer settings");
         public static final ConfigBoolean CHAT_MESSAGES = new ConfigBoolean("chatMessages", true,
                 "Show status messages in chat (layer done, stuck, scan results...).",
                 "Chat messages");
@@ -100,8 +101,45 @@ public class Configs implements IConfigHandler {
                         + "Off: only blocks the schematic needs count. Use the 'Clear extra blocks' key to remove them.",
                 "Extra blocks keep layer open");
 
+        public static final ConfigBoolean PLANT_WITH_TILLING = new ConfigBoolean("plantWithTilling", true,
+                "When a layer has farmland, build it together with the layer above, so seeds and stems are planted\n"
+                        + "right after tilling. Farmland without a crop and without water dries back to dirt.",
+                "Plant right after tilling");
+
+        public static final ConfigBoolean USE_AIR_PLACE = new ConfigBoolean("useAirPlace", true,
+                "When every missing block within reach floats (nothing next to it to place it against), turn on the\n"
+                        + "printer's 'printInAir' for exactly one block, then off again. Blocks it puts in the wrong spot are broken.",
+                "Use printer's air place");
+
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                AUTO_LAYER, LAYER_CHECK_INTERVAL, STUCK_REPORT_SECONDS, EXTRA_BLOCKS_BLOCK_LAYER);
+                AUTO_LAYER, LAYER_CHECK_INTERVAL, STUCK_REPORT_SECONDS, EXTRA_BLOCKS_BLOCK_LAYER, PLANT_WITH_TILLING,
+                USE_AIR_PLACE);
+    }
+
+    public static class Movement {
+        public static final ConfigOptionList MOVE_MODE = new ConfigOptionList("moveMode", MoveMode.WALK_AND_FLY,
+                "How auto build gets you to the next unfinished blocks: walk, fly, walk and fly when needed, or not at all.",
+                "Movement");
+        public static final ConfigString FLY_COMMAND = new ConfigString("flyCommand", "fly",
+                "Command (without the slash) sent once if flying is needed but not allowed yet. Empty: never send one.",
+                "Fly command");
+        public static final ConfigInteger HOVER_HEIGHT = new ConfigInteger("hoverHeight", 2, 1, 4,
+                "When flying, hover this many blocks above the layer being built.",
+                "Hover height");
+        public static final ConfigInteger WORK_WAIT_SECONDS = new ConfigInteger("workWaitSeconds", 4, 1, 60,
+                "If nothing within reach gets done for this long (missing item, printer can't place it...),\n"
+                        + "move on and come back to those blocks later.",
+                "Wait for blocks in reach (seconds)");
+        public static final ConfigInteger MAX_WALK_DISTANCE = new ConfigInteger("maxWalkDistance", 48, 8, 128,
+                "Farthest the pathfinder looks for a walking route. Farther away: fly (if allowed).",
+                "Max walk distance");
+
+        public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
+                MOVE_MODE, FLY_COMMAND, HOVER_HEIGHT, WORK_WAIT_SECONDS, MAX_WALK_DISTANCE);
+
+        public static MoveMode mode() {
+            return (MoveMode) MOVE_MODE.getOptionListValue();
+        }
     }
 
     public static class Safety {
@@ -139,8 +177,8 @@ public class Configs implements IConfigHandler {
     }
 
     public static class Speed {
-        public static final ConfigInteger PRINTER_INTERVAL = new ConfigInteger("customPrinterInterval", 6, 1, 40,
-                "Custom preset: the printer's printing interval (lower is faster).",
+        public static final ConfigInteger PRINTER_INTERVAL = new ConfigInteger("customPrinterInterval", 12, 1, 40,
+                "Custom preset: the printer's printing interval (lower is faster). Below 12 the printer often places blocks wrong.",
                 "Custom: printer interval");
         public static final ConfigInteger BREAK_COOLDOWN = new ConfigInteger("customBreakCooldownTicks", 2, 0, 100,
                 "Custom preset: ticks to wait after breaking a block before the next one.",
@@ -148,9 +186,25 @@ public class Configs implements IConfigHandler {
         public static final ConfigInteger SHOP_CLICK_DELAY = new ConfigInteger("customShopClickDelayTicks", 6, 1, 100,
                 "Custom preset: ticks to wait between clicks in the shop menu.",
                 "Custom: shop click delay (ticks)");
+        public static final ConfigDouble WALK_SPEED = new ConfigDouble("customWalkSpeed", 0.21, 0.05, 0.4,
+                "Custom preset: walking speed in blocks per tick (vanilla walking is about 0.21).",
+                "Custom: walk speed");
+        public static final ConfigDouble FLY_SPEED = new ConfigDouble("customFlySpeed", 0.55, 0.1, 2.0,
+                "Custom preset: flying speed in blocks per tick (vanilla flying is about 0.55).",
+                "Custom: fly speed");
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                PRINTER_INTERVAL, BREAK_COOLDOWN, SHOP_CLICK_DELAY);
+                PRINTER_INTERVAL, BREAK_COOLDOWN, SHOP_CLICK_DELAY, WALK_SPEED, FLY_SPEED);
+
+        public static double walkSpeed() {
+            SpeedPreset preset = preset();
+            return preset == SpeedPreset.CUSTOM ? WALK_SPEED.getDoubleValue() : preset.walkSpeed;
+        }
+
+        public static double flySpeed() {
+            SpeedPreset preset = preset();
+            return preset == SpeedPreset.CUSTOM ? FLY_SPEED.getDoubleValue() : preset.flySpeed;
+        }
 
         public static SpeedPreset preset() {
             return (SpeedPreset) Generic.SPEED_PRESET.getOptionListValue();
@@ -183,6 +237,7 @@ public class Configs implements IConfigHandler {
                 ConfigUtils.readConfigBase(root, "Generic", Generic.OPTIONS);
                 ConfigUtils.readConfigBase(root, "Breaking", Breaking.OPTIONS);
                 ConfigUtils.readConfigBase(root, "Layers", Layers.OPTIONS);
+                ConfigUtils.readConfigBase(root, "Movement", Movement.OPTIONS);
                 ConfigUtils.readConfigBase(root, "Safety", Safety.OPTIONS);
                 ConfigUtils.readConfigBase(root, "Shop", Shop.OPTIONS);
                 ConfigUtils.readConfigBase(root, "Speed", Speed.OPTIONS);
@@ -205,6 +260,7 @@ public class Configs implements IConfigHandler {
         ConfigUtils.writeConfigBase(root, "Generic", Generic.OPTIONS);
         ConfigUtils.writeConfigBase(root, "Breaking", Breaking.OPTIONS);
         ConfigUtils.writeConfigBase(root, "Layers", Layers.OPTIONS);
+        ConfigUtils.writeConfigBase(root, "Movement", Movement.OPTIONS);
         ConfigUtils.writeConfigBase(root, "Safety", Safety.OPTIONS);
         ConfigUtils.writeConfigBase(root, "Shop", Shop.OPTIONS);
         ConfigUtils.writeConfigBase(root, "Speed", Speed.OPTIONS);

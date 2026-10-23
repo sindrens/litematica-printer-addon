@@ -4,8 +4,10 @@
   "package": "no.sindrens.printeraddon.mixin",
   "compatibilityLevel": "JAVA_25",
   "client": [
+    "GuideMixin",
     "MinecraftMixin",
     "PrepareActionMixin",
+    "PropertySpecificGuesserGuideMixin",
     "PrinterMixin"
   ],
   "injectors": {

@@ -20,6 +20,7 @@ import javax.annotation.Nullable;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Breaks blocks that don't match the schematic, one at a time, with the best tool in the hotbar.
@@ -51,6 +52,13 @@ public class BlockBreaker {
     private final Map<BlockPos, Integer> breakCounts = new HashMap<>();
 
     private record Seen(BlockState state, long since) {
+    }
+
+    /** Blocks to break no matter what the schematic says (blocks air place put in the wrong spot). */
+    private Set<BlockPos> forced = Set.of();
+
+    public void setForced(Set<BlockPos> forced) {
+        this.forced = forced;
     }
 
     public boolean isBusy() {
@@ -143,8 +151,12 @@ public class BlockBreaker {
     private void continueBreaking(Minecraft mc, LocalPlayer player, WorldSchematic schematic, Mode mode) {
         BlockPos pos = target;
         BlockCheck.Result result = BlockCheck.check(mc.level, schematic, pos);
+        boolean isForced = forced.contains(pos);
 
-        if (!shouldBreak(result, mode)) {
+        if (isForced ? mc.level.getBlockState(pos).isAir() : !shouldBreak(result, mode, pos)) {
+            if (isForced) {
+                forced.remove(pos);
+            }
             // Gone (or fixed): done
             PrinterAddon.debug("Done with {} after {} ticks ({})", pos.toShortString(), ticksOnTarget, result);
             target = null;
@@ -167,9 +179,11 @@ public class BlockBreaker {
         player.swing(InteractionHand.MAIN_HAND);
     }
 
-    private static boolean shouldBreak(BlockCheck.Result result, Mode mode) {
+    private static boolean shouldBreak(BlockCheck.Result result, Mode mode, BlockPos pos) {
         return switch (mode) {
-            case WRONG -> result.needsBreaking();
+            // A container the printer put in the wrong spot during this build may be broken too
+            case WRONG -> result.needsBreaking()
+                    || (result == BlockCheck.Result.PROTECTED && AutoBuild.INSTANCE.placedDuringBuild(pos));
             case EXTRA -> result == BlockCheck.Result.EXTRA;
         };
     }
@@ -200,6 +214,11 @@ public class BlockBreaker {
             if (distance > range * range || distance >= bestDistance) {
                 continue;
             }
+            if (forced.contains(pos) && !mc.level.getBlockState(pos).isAir()) {
+                best = pos.immutable();
+                bestDistance = distance;
+                continue;
+            }
             if (!DataManager.getRenderLayerRange().isPositionWithinRange(pos)) {
                 continue;
             }
@@ -215,7 +234,7 @@ public class BlockBreaker {
             }
 
             BlockCheck.Result result = BlockCheck.check(mc.level, schematic, pos);
-            if (!shouldBreak(result, mode)) {
+            if (!shouldBreak(result, mode, pos)) {
                 continue;
             }
 

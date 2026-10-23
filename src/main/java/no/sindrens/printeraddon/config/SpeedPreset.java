@@ -7,10 +7,11 @@ import fi.dy.masa.malilib.config.IConfigOptionListEntry;
  * CUSTOM uses the values in the "Speed" tab.
  */
 public enum SpeedPreset implements IConfigOptionListEntry {
-    SAFE("safe", "Safe", 12, 6, 10),
-    NORMAL("normal", "Normal", 6, 2, 6),
-    FAST("fast", "Fast", 2, 0, 3),
-    CUSTOM("custom", "Custom", -1, -1, -1);
+    // The printer stays at interval 12 in every preset: faster makes it place blocks wrong
+    SAFE("safe", "Safe", 12, 6, 10, 0.18, 0.4),
+    NORMAL("normal", "Normal", 12, 2, 6, 0.21, 0.55),
+    FAST("fast", "Fast", 12, 0, 3, 0.27, 0.9),
+    CUSTOM("custom", "Custom", -1, -1, -1, -1, -1);
 
     private final String id;
     private final String displayName;
@@ -20,13 +21,20 @@ public enum SpeedPreset implements IConfigOptionListEntry {
     public final int breakCooldownTicks;
     /** Ticks to wait between clicks in the shop menu. */
     public final int shopClickDelayTicks;
+    /** Blocks per tick when walking (vanilla walking is about 0.21). */
+    public final double walkSpeed;
+    /** Blocks per tick when flying (vanilla creative flight is about 0.55). */
+    public final double flySpeed;
 
-    SpeedPreset(String id, String displayName, int printerInterval, int breakCooldownTicks, int shopClickDelayTicks) {
+    SpeedPreset(String id, String displayName, int printerInterval, int breakCooldownTicks, int shopClickDelayTicks,
+                double walkSpeed, double flySpeed) {
         this.id = id;
         this.displayName = displayName;
         this.printerInterval = printerInterval;
         this.breakCooldownTicks = breakCooldownTicks;
         this.shopClickDelayTicks = shopClickDelayTicks;
+        this.walkSpeed = walkSpeed;
+        this.flySpeed = flySpeed;
     }
 
     @Override

@@ -5,11 +5,11 @@ import com.google.gson.GsonBuilder;
 import fi.dy.masa.malilib.util.FileUtils;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
-import net.minecraft.client.multiplayer.ServerData;
 import net.minecraft.world.inventory.ContainerInput;
 import no.sindrens.printeraddon.PrinterAddon;
 import no.sindrens.printeraddon.config.Configs;
 import no.sindrens.printeraddon.util.Chat;
+import no.sindrens.printeraddon.util.ServerName;
 
 import javax.annotation.Nullable;
 import java.io.IOException;
@@ -23,7 +23,6 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Set;
 import java.util.function.Consumer;
 
@@ -82,7 +81,7 @@ public class ShopScanner {
         current = null;
 
         result = new ShopScanResult();
-        result.server = serverName(mc);
+        result.server = ServerName.current(mc);
         result.scannedAt = LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME);
         result.shopCommand = Configs.Shop.SHOP_COMMAND.getStringValue();
 
@@ -345,12 +344,6 @@ public class ShopScanner {
             Chat.warn("Couldn't save the shop scan: " + e.getMessage());
             return null;
         }
-    }
-
-    private static String serverName(Minecraft mc) {
-        ServerData server = mc.getCurrentServer();
-        String name = server != null ? server.ip : "singleplayer";
-        return name.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9._-]", "_");
     }
 
     private static void closeMenu(Minecraft mc) {

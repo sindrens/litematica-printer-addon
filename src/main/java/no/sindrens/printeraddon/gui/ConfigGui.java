@@ -46,6 +46,7 @@ public class ConfigGui extends GuiConfigsBase {
             case GENERIC -> Configs.Generic.OPTIONS;
             case BREAKING -> Configs.Breaking.OPTIONS;
             case LAYERS -> Configs.Layers.OPTIONS;
+            case MOVEMENT -> Configs.Movement.OPTIONS;
             case SAFETY -> Configs.Safety.OPTIONS;
             case SHOP -> Configs.Shop.OPTIONS;
             case SPEED -> Configs.Speed.OPTIONS;
@@ -58,6 +59,7 @@ public class ConfigGui extends GuiConfigsBase {
         GENERIC("Generic"),
         BREAKING("Breaking"),
         LAYERS("Layers"),
+        MOVEMENT("Movement"),
         SAFETY("Safety"),
         SHOP("Shop"),
         SPEED("Speed"),

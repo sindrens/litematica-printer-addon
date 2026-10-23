@@ -10,6 +10,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import no.sindrens.printeraddon.config.Configs;
 import no.sindrens.printeraddon.util.Chat;
@@ -27,6 +28,8 @@ public class LayerManager {
 
     private boolean active;
     private int layer;
+    /** Top of the layers being built together: the same as {@link #layer}, or one more for farmland + crops. */
+    private int layerTop;
     private int minY;
     private int maxY;
     private int ticksUntilCheck;
@@ -34,6 +37,9 @@ public class LayerManager {
     private int lastRemaining = -1;
     private int ticksWithoutProgress;
     private boolean reportedStuck;
+    private int waitingChecks;
+    /** All layers are done; only the deferred blocks are left. */
+    private boolean finishingDeferred;
 
     /** Litematica's layer settings before auto build, put back afterwards. */
     @Nullable
@@ -73,6 +79,8 @@ public class LayerManager {
             return false;
         }
 
+        layerTop = topFor(mc.level, schematic, areas, layer);
+
         LayerRange layerRange = DataManager.getRenderLayerRange();
         previousMode = layerRange.getLayerMode();
         previousAxis = layerRange.getAxis();
@@ -86,6 +94,7 @@ public class LayerManager {
     }
 
     public void stop() {
+        finishingDeferred = false;
         if (active) {
             restoreLayerRange();
         }
@@ -123,7 +132,28 @@ public class LayerManager {
         }
 
         List<SchematicHelper.Area> areas = SchematicHelper.areas();
-        int remaining = scan(mc.level, schematic, areas, layer, null);
+
+        if (finishingDeferred) {
+            return finishDeferred(mc, schematic, areas, interval);
+        }
+
+        Findings findings = new Findings();
+        int remaining = scanLayers(mc.level, schematic, areas, null, findings);
+        updateShoppingList(mc, findings.needs);
+
+        // Everything left waits for something higher up (an ascending rail, an observer watching a block above):
+        // don't hold up the layer, place those later
+        if (remaining > 0 && remaining == findings.waiting.size()) {
+            if (++waitingChecks >= 3) {
+                AutoBuild.INSTANCE.deferred.addAll(findings.waiting);
+                Chat.info(remaining + " block" + (remaining == 1 ? "" : "s") + " in " + describeLayers()
+                        + " wait for blocks above; placed as soon as those are there.");
+                remaining = 0;
+                completeChecks = 2;
+            }
+        } else {
+            waitingChecks = 0;
+        }
 
         if (remaining == 0) {
             // Check twice in a row so a block the server hasn't confirmed yet doesn't count
@@ -131,17 +161,27 @@ public class LayerManager {
                 return true;
             }
 
-            Chat.info("Layer Y " + layer + " done.");
+            Chat.info(describeLayers() + " done.");
+            layer = layerTop;
             do {
                 layer++;
             } while (layer <= maxY && scan(mc.level, schematic, areas, layer, null) == 0);
 
             if (layer > maxY) {
-                Chat.info("§aBuild finished!");
+                if (!unfinishedDeferred(mc.level, schematic).isEmpty()) {
+                    // All layers done; place what waited, with the whole schematic visible
+                    finishingDeferred = true;
+                    DataManager.getRenderLayerRange().setLayerMode(LayerMode.ALL, false);
+                    resetProgress();
+                    return true;
+                }
+                Chat.info("\u00a7aBuild finished!");
+                reportManual(mc, schematic, areas);
                 stop();
                 return false;
             }
 
+            layerTop = topFor(mc.level, schematic, areas, layer);
             applyLayer();
             resetProgress();
             return true;
@@ -157,7 +197,7 @@ public class LayerManager {
             ticksWithoutProgress += interval;
         }
 
-        Chat.actionBar("Layer Y " + layer + ": " + remaining + " block" + (remaining == 1 ? "" : "s") + " left");
+        Chat.actionBar(describeLayers() + ": " + remaining + " block" + (remaining == 1 ? "" : "s") + " left");
 
         if (!reportedStuck && ticksWithoutProgress >= Configs.Layers.STUCK_REPORT_SECONDS.getIntegerValue() * 20) {
             reportedStuck = true;
@@ -165,6 +205,40 @@ public class LayerManager {
         }
 
         return true;
+    }
+
+    private boolean finishDeferred(Minecraft mc, WorldSchematic schematic, List<SchematicHelper.Area> areas, int interval) {
+        List<BlockPos> left = unfinishedDeferred(mc.level, schematic);
+        if (left.isEmpty()) {
+            Chat.info("\u00a7aBuild finished!");
+            reportManual(mc, schematic, areas);
+            stop();
+            return false;
+        }
+
+        if (left.size() != lastRemaining) {
+            lastRemaining = left.size();
+            ticksWithoutProgress = 0;
+            reportedStuck = false;
+        } else {
+            ticksWithoutProgress += interval;
+        }
+        Chat.actionBar("Last blocks: " + left.size() + " left");
+
+        if (!reportedStuck && ticksWithoutProgress >= Configs.Layers.STUCK_REPORT_SECONDS.getIntegerValue() * 20) {
+            reportedStuck = true;
+            Chat.warn("The last " + left.size() + " blocks haven't changed for a while, for example:");
+            for (BlockPos pos : left.subList(0, Math.min(MAX_REPORTED, left.size()))) {
+                BlockState target = schematic.getBlockState(pos);
+                Chat.warn(" - " + pos.getX() + " " + pos.getY() + " " + pos.getZ() + ": "
+                        + describe(mc, BlockCheck.check(mc.level, schematic, pos), target));
+            }
+        }
+        return true;
+    }
+
+    public boolean isFinishingDeferred() {
+        return finishingDeferred;
     }
 
     public void moveLayer(int amount) {
@@ -177,24 +251,158 @@ public class LayerManager {
             return;
         }
         layer = Math.max(minY, Math.min(maxY, layer + amount));
+        WorldSchematic schematic = SchematicHelper.world();
+        Minecraft mc = Minecraft.getInstance();
+        layerTop = schematic == null || mc.level == null ? layer : topFor(mc.level, schematic, SchematicHelper.areas(), layer);
         applyLayer();
         resetProgress();
-        Chat.actionBar("Layer Y " + layer);
+        Chat.actionBar(describeLayers());
+    }
+
+    private String describeLayers() {
+        return layerTop == layer ? "Layer Y " + layer : "Layers Y " + layer + "-" + layerTop;
     }
 
     private void applyLayer() {
         LayerRange range = DataManager.getRenderLayerRange();
-        if (range.getLayerMode() != LayerMode.SINGLE_LAYER) {
-            range.setLayerMode(LayerMode.SINGLE_LAYER, false);
-        }
         if (range.getAxis() != Direction.Axis.Y) {
             range.setAxis(Direction.Axis.Y);
         }
-        range.setLayerSingle(layer);
+
+        if (layerTop == layer) {
+            if (range.getLayerMode() != LayerMode.SINGLE_LAYER) {
+                range.setLayerMode(LayerMode.SINGLE_LAYER, false);
+            }
+            range.setLayerSingle(layer);
+            return;
+        }
+
+        if (range.getLayerMode() != LayerMode.LAYER_RANGE) {
+            range.setLayerMode(LayerMode.LAYER_RANGE, false);
+        }
+        // Each setter is limited by the other end, so move the end in the direction we're going first
+        if (layer > range.getLayerRangeMax()) {
+            range.setLayerRangeMax(layerTop);
+            range.setLayerRangeMin(layer);
+        } else {
+            range.setLayerRangeMin(layer);
+            range.setLayerRangeMax(layerTop);
+        }
+    }
+
+    /** The farmland layer is built together with the layer above it (seeds, stems), if enabled. */
+    private int topFor(Level level, WorldSchematic schematic, List<SchematicHelper.Area> areas, int y) {
+        if (!Configs.Layers.PLANT_WITH_TILLING.getBooleanValue() || y >= maxY) {
+            return y;
+        }
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        for (SchematicHelper.Area area : areas) {
+            if (y < area.minY() || y > area.maxY()) {
+                continue;
+            }
+            for (int x = area.minX(); x <= area.maxX(); x++) {
+                for (int z = area.minZ(); z <= area.maxZ(); z++) {
+                    pos.set(x, y, z);
+                    if (schematic.getBlockState(pos).getBlock() == Blocks.FARMLAND) {
+                        return y + 1;
+                    }
+                }
+            }
+        }
+        return y;
+    }
+
+    private int scanLayers(Level level, WorldSchematic schematic, List<SchematicHelper.Area> areas,
+                           @Nullable List<BlockPos> examples) {
+        return scanLayers(level, schematic, areas, examples, null);
+    }
+
+    private int scanLayers(Level level, WorldSchematic schematic, List<SchematicHelper.Area> areas,
+                           @Nullable List<BlockPos> examples, @Nullable Findings findings) {
+        int remaining = 0;
+        for (int y = layer; y <= layerTop; y++) {
+            remaining += scan(level, schematic, areas, y, examples, findings);
+        }
+        return remaining;
+    }
+
+    /** Deferred blocks that still aren't right. */
+    private static List<BlockPos> unfinishedDeferred(Level level, WorldSchematic schematic) {
+        List<BlockPos> left = new ArrayList<>();
+        for (BlockPos pos : AutoBuild.INSTANCE.deferred) {
+            BlockCheck.Result result = BlockCheck.check(level, schematic, pos);
+            if (result != BlockCheck.Result.OK && result != BlockCheck.Result.MANUAL && result != BlockCheck.Result.EXTRA) {
+                left.add(pos);
+            }
+        }
+        return left;
+    }
+
+    /**
+     * The shopping list: items the current layers still need that aren't in the inventory. Said in chat when it
+     * changes; later used to buy from the shop.
+     */
+    private void updateShoppingList(Minecraft mc, java.util.Map<net.minecraft.world.item.Item, Integer> needs) {
+        if (mc.player == null || mc.player.getAbilities().instabuild) {
+            return;
+        }
+        java.util.Map<net.minecraft.world.item.Item, Integer> missing = new java.util.LinkedHashMap<>();
+        for (var entry : needs.entrySet()) {
+            int have = mc.player.getInventory().countItem(entry.getKey());
+            if (have < entry.getValue()) {
+                missing.put(entry.getKey(), entry.getValue() - have);
+            }
+        }
+
+        if (!missing.equals(AutoBuild.INSTANCE.shoppingList)) {
+            AutoBuild.INSTANCE.shoppingList.clear();
+            AutoBuild.INSTANCE.shoppingList.putAll(missing);
+            if (!missing.isEmpty()) {
+                StringBuilder sb = new StringBuilder(describeLayers() + " still needs: ");
+                missing.forEach((item, count) -> sb.append(count).append(' ')
+                        .append(new ItemStack(item).getHoverName().getString()).append(", "));
+                Chat.warn(sb.substring(0, sb.length() - 2));
+            }
+        }
+    }
+
+    /** At the end: list what the printer couldn't place (water, lava, filled cauldrons). */
+    private void reportManual(Minecraft mc, WorldSchematic schematic, List<SchematicHelper.Area> areas) {
+        java.util.Map<String, Integer> counts = new java.util.TreeMap<>();
+        List<String> examples = new ArrayList<>();
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+
+        for (SchematicHelper.Area area : areas) {
+            for (int y = area.minY(); y <= area.maxY(); y++) {
+                for (int x = area.minX(); x <= area.maxX(); x++) {
+                    for (int z = area.minZ(); z <= area.maxZ(); z++) {
+                        pos.set(x, y, z);
+                        if (BlockCheck.check(mc.level, schematic, pos) == BlockCheck.Result.MANUAL) {
+                            String name = schematic.getBlockState(pos).getBlock().getName().getString();
+                            counts.merge(name, 1, Integer::sum);
+                            if (examples.size() < MAX_REPORTED) {
+                                examples.add(name + " at " + x + " " + y + " " + z);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (counts.isEmpty()) {
+            return;
+        }
+        StringBuilder sb = new StringBuilder("Do these by hand (the printer can't place them): ");
+        counts.forEach((name, count) -> sb.append(count).append(' ').append(name).append(", "));
+        Chat.warn(sb.substring(0, sb.length() - 2));
+        for (String example : examples) {
+            Chat.warn(" - " + example);
+        }
     }
 
     private void resetProgress() {
         completeChecks = 0;
+        waitingChecks = 0;
         lastRemaining = -1;
         ticksWithoutProgress = 0;
         reportedStuck = false;
@@ -203,9 +411,9 @@ public class LayerManager {
 
     private void reportStuck(Minecraft mc, WorldSchematic schematic, List<SchematicHelper.Area> areas) {
         List<BlockPos> positions = new ArrayList<>();
-        int remaining = scan(mc.level, schematic, areas, layer, positions);
+        int remaining = scanLayers(mc.level, schematic, areas, positions);
 
-        Chat.warn("Layer Y " + layer + " hasn't changed for a while. " + remaining + " left, for example:");
+        Chat.warn(describeLayers() + " hasn't changed for a while. " + remaining + " left, for example:");
 
         for (BlockPos pos : positions) {
             BlockState target = schematic.getBlockState(pos);
@@ -229,15 +437,30 @@ public class LayerManager {
             case PROTECTED -> "wrong, but it's a container or unbreakable, fix it by hand";
             case EXTRA -> "should be air (use 'Clear extra blocks')";
             case UNLOADED -> "chunk not loaded, move closer";
+            case MANUAL -> "the printer can't place this, do it by hand";
             case OK -> "ok";
         };
     }
 
+    /** What a scan found besides the count. */
+    private static final class Findings {
+        /** Missing blocks that can't be placed yet (they need something that isn't there). */
+        final List<BlockPos> waiting = new ArrayList<>();
+        /** Items the missing blocks need. */
+        final java.util.Map<net.minecraft.world.item.Item, Integer> needs = new java.util.LinkedHashMap<>();
+    }
+
     /**
-     * Counts unfinished positions in one layer. If {@code examples} is given, the first few are added to it.
+     * Counts unfinished positions in one layer. If {@code examples} is given, the first few are added to it;
+     * if {@code findings} is given, blocks that have to wait and the items needed are collected in it.
      */
     private static int scan(Level level, WorldSchematic schematic, List<SchematicHelper.Area> areas, int y,
                             @Nullable List<BlockPos> examples) {
+        return scan(level, schematic, areas, y, examples, null);
+    }
+
+    private static int scan(Level level, WorldSchematic schematic, List<SchematicHelper.Area> areas, int y,
+                            @Nullable List<BlockPos> examples, @Nullable Findings findings) {
         boolean extraCounts = Configs.Layers.EXTRA_BLOCKS_BLOCK_LAYER.getBooleanValue();
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
         int remaining = 0;
@@ -253,7 +476,7 @@ public class LayerManager {
                     BlockCheck.Result result = BlockCheck.check(level, schematic, pos);
 
                     boolean unfinished = switch (result) {
-                        case OK -> false;
+                        case OK, MANUAL -> false;
                         case EXTRA -> extraCounts;
                         default -> true;
                     };
@@ -262,6 +485,16 @@ public class LayerManager {
                         remaining++;
                         if (examples != null && examples.size() < MAX_REPORTED) {
                             examples.add(pos.immutable());
+                        }
+                        if (findings != null && result == BlockCheck.Result.MISSING) {
+                            BlockState target = schematic.getBlockState(pos);
+                            if (!PlacementOrder.isReady(level, schematic, pos, target)) {
+                                findings.waiting.add(pos.immutable());
+                            }
+                            ItemStack item = MaterialCache.getInstance().getRequiredBuildItemForState(target);
+                            if (!item.isEmpty()) {
+                                findings.needs.merge(item.getItem(), 1, Integer::sum);
+                            }
                         }
                     }
                 }
