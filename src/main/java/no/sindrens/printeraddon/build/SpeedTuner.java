@@ -19,14 +19,16 @@ import java.util.Map;
 public class SpeedTuner {
     private static final int CHECK_EVERY = 10;
     private static final int RADIUS = 6;
-    /** A block is judged this long after it appeared (the printer may still fix it, e.g. a slab or a comparator). */
-    private static final int JUDGE_AFTER = 20;
+    /** A block is judged at the next check after it appeared (before the add-on breaks a wrong one). */
+    private static final int JUDGE_AFTER = 0;
     /** No speeding up for this long after a mistake. */
     private static final int CALM_AFTER_MISTAKE = 20 * 60;
 
     private final Map<BlockPos, BlockState> seen = new HashMap<>();
     private final Map<BlockPos, Long> appeared = new HashMap<>();
     private int interval = -1;
+    /** The fastest interval that hasn't placed a wrong block in this build. */
+    private int fastestSafe = 1;
     private int goodInARow;
     private int good;
     private int bad;
@@ -37,6 +39,7 @@ public class SpeedTuner {
         seen.clear();
         appeared.clear();
         interval = -1;
+        fastestSafe = 1;
         goodInARow = 0;
         good = 0;
         bad = 0;
@@ -57,7 +60,8 @@ public class SpeedTuner {
 
     public String describe() {
         return Configs.Speed.AUTO_SPEED.getBooleanValue()
-                ? "interval " + interval() + " (auto: " + good + " right, " + bad + " wrong)"
+                ? "interval " + interval() + " (auto: " + good + " right, " + bad + " wrong, fastest safe " + Math.max(fastestSafe,
+                        Configs.Speed.AUTO_SPEED_MIN_INTERVAL.getIntegerValue()) + ")"
                 : "interval " + interval();
     }
 
@@ -101,7 +105,7 @@ public class SpeedTuner {
                 good++;
                 if (++goodInARow >= Configs.Speed.AUTO_SPEED_STEP_BLOCKS.getIntegerValue() && tick > calmUntil) {
                     goodInARow = 0;
-                    int min = Configs.Speed.AUTO_SPEED_MIN_INTERVAL.getIntegerValue();
+                    int min = Math.max(fastestSafe, Configs.Speed.AUTO_SPEED_MIN_INTERVAL.getIntegerValue());
                     if (interval() > min) {
                         interval--;
                         Chat.info("Speed: printer interval " + interval + " (the last "
@@ -113,12 +117,15 @@ public class SpeedTuner {
                 bad++;
                 goodInARow = 0;
                 calmUntil = tick + CALM_AFTER_MISTAKE;
+                // Never this fast again in this build
+                fastestSafe = Math.max(fastestSafe, interval() + 1);
                 int max = Configs.Speed.printerInterval();
                 int slower = Math.min(max, interval() + 2);
                 PrinterAddon.debug("Wrong block at {} at interval {}: {}", pos.toShortString(), interval(), mc.level.getBlockState(pos));
                 if (slower != interval) {
                     interval = slower;
-                    Chat.warn("Speed: printer interval " + interval + " (a block came out wrong at " + pos.toShortString() + ")");
+                    Chat.warn("Speed: printer interval " + interval + " (a block came out wrong at " + pos.toShortString()
+                            + "; it won't go below " + fastestSafe + " again)");
                 }
             }
             default -> {
