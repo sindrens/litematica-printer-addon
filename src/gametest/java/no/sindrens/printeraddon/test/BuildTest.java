@@ -32,6 +32,10 @@ public class BuildTest implements FabricClientGameTest {
 
     @Override
     public void runTest(ClientGameTestContext context) {
+        // A farm run (PRINTER_ADDON_SCHEMATIC set) goes straight to the farm
+        if (System.getenv("PRINTER_ADDON_SCHEMATIC") != null) {
+            return;
+        }
         try (TestSingleplayerContext singleplayer = context.worldBuilder().create()) {
             TestServerContext server = singleplayer.getServer();
             singleplayer.getClientLevel().waitForChunksRender();
