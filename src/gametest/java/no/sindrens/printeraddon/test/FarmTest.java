@@ -355,6 +355,45 @@ public class FarmTest implements FabricClientGameTest {
         unfinished.forEach((k, v) -> sb.append("  ").append(v).append(' ').append(k).append('\n'));
         sb.append("Examples:\n");
         examples.forEach(e -> sb.append("  ").append(e).append('\n'));
+        // Exactly as Litematica compares (its blue/orange markers): every spot that isn't the identical block state
+        Map<String, Integer> exact = new TreeMap<>();
+        List<String> exactExamples = new ArrayList<>();
+        for (SchematicHelper.Area area : SchematicHelper.areas()) {
+            for (int y = area.minY(); y <= area.maxY(); y++) {
+                for (int x = area.minX(); x <= area.maxX(); x++) {
+                    for (int z = area.minZ(); z <= area.maxZ(); z++) {
+                        pos.set(x, y, z);
+                        BlockState target = schematic.getBlockState(pos);
+                        BlockState current = mc.level.getBlockState(pos);
+                        if (target.equals(current) || (target.isAir() && current.isAir())) {
+                            continue;
+                        }
+                        String why;
+                        if (target.getBlock() == net.minecraft.world.level.block.Blocks.MOVING_PISTON) {
+                            why = "moving piston in the schematic (saved mid-push, not a placeable block)";
+                        } else if (target.getBlock() != current.getBlock()) {
+                            why = BuiltInRegistries.BLOCK.getKey(target.getBlock()).getPath() + " is "
+                                    + BuiltInRegistries.BLOCK.getKey(current.getBlock()).getPath();
+                        } else {
+                            List<String> props = new ArrayList<>();
+                            for (var property : target.getProperties()) {
+                                if (!target.getValue(property).equals(current.getValue(property))) {
+                                    props.add(property.getName());
+                                }
+                            }
+                            why = BuiltInRegistries.BLOCK.getKey(target.getBlock()).getPath() + " differs in " + props;
+                        }
+                        exact.merge(why, 1, Integer::sum);
+                        if (exactExamples.size() < 15) {
+                            exactExamples.add(pos.toShortString() + ": " + current + " vs " + target);
+                        }
+                    }
+                }
+            }
+        }
+        sb.append("Exact differences (what Litematica marks):\n");
+        exact.forEach((k, v) -> sb.append("  ").append(v).append(' ').append(k).append('\n'));
+        exactExamples.forEach(e -> sb.append("    ").append(e).append('\n'));
         sb.append("Per layer:\n");
         AutoBuild.INSTANCE.stats.layers().forEach(l -> sb.append("  ").append(l).append('\n'));
         sb.append(AutoBuild.INSTANCE.stats.total()).append('\n');
