@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "printer_addon",
+  "version": "${mod_version}",
+  "name": "Printer Addon",
+  "description": "Add-on for Litematica Printer: fixes wrong blocks, builds layer by layer, moves the player, safe build order for farms and buys missing items from /shop.",
+  "authors": ["sindrens"],
+  "contact": {
+    "sources": "https://github.com/sindrens/litematica-printer-addon"
+  },
+  "license": "AGPL-3.0-only",
+  "environment": "client",
+  "entrypoints": {
+    "client": ["no.sindrens.printeraddon.PrinterAddon"]
+  },
+  "mixins": ["printer_addon.mixins.json"],
+  "depends": {
+    "minecraft": ">=26.2 <26.3",
+    "malilib": ">=0.29.6- <0.30.0-",
+    "litematica": ">=0.28.8- <0.29.0-",
+    "litematica_printer": ">=3.2.2"
+  },
+  "custom": {
+    "modmenu": { "parent": "litematica" }
+  }
+}

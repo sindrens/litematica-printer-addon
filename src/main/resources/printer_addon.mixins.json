@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "no.sindrens.printeraddon.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "client": [
+    "MinecraftMixin",
+    "PrinterMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

@@ -1,0 +1,65 @@
+plugins {
+    id 'net.fabricmc.fabric-loom' version '1.15.+'
+}
+
+repositories {
+    maven {
+        url = 'https://masa.dy.fi/maven/sakura-ryoko'
+        content { includeGroupAndSubgroups('fi.dy.masa') }
+    }
+    maven {
+        url = 'https://maven.fallenbreath.me/releases'
+        content { includeGroupAndSubgroups('me.fallenbreath') }
+    }
+    maven {
+        url = 'https://api.modrinth.com/maven'
+        content { includeGroup('maven.modrinth') }
+    }
+    maven {
+        url = 'https://maven.terraformersmc.com/releases/'
+        content { includeGroupAndSubgroups('com.terraformersmc') }
+    }
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    implementation "net.fabricmc:fabric-loader:${project.fabric_loader_version}"
+    implementation "com.google.code.findbugs:jsr305:3.0.2"
+
+    implementation "fi.dy.masa.malilib:malilib-fabric-${project.minecraft_version}:${project.malilib_version}"
+    implementation "fi.dy.masa.litematica:litematica-fabric-${project.minecraft_version}:${project.litematica_version}"
+    implementation "maven.modrinth:litematica-printer:${project.printer_modrinth_version}"
+
+    implementation fabricApi.module('fabric-api-base', project.fabric_api_version)
+    compileOnly "com.terraformersmc:modmenu:${project.mod_menu_version}"
+}
+
+base {
+    archivesName = "${project.mod_id}-${project.minecraft_version}"
+    version = project.mod_version
+    group = project.maven_group
+}
+
+processResources {
+    inputs.property 'mod_version', project.mod_version
+    filesMatching('fabric.mod.json') {
+        expand 'mod_version': project.mod_version
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    it.options.encoding = 'UTF-8'
+    it.options.release = 25
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_25
+    targetCompatibility = JavaVersion.VERSION_25
+    withSourcesJar()
+}
+
+jar {
+    from('LICENSE.md') {
+        rename { "${it}_${project.mod_id}" }
+    }
+}
