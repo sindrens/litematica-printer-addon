@@ -347,11 +347,15 @@ public class RailHelper {
             return;
         }
         float yaw = eastWest ? 90 : 0;
+        float oldYaw = player.getYRot();
+        float oldPitch = player.getXRot();
         player.setYRot(yaw);
         player.yRotO = yaw;
+        player.connection.send(new net.minecraft.network.protocol.game.ServerboundMovePlayerPacket.Rot(yaw, oldPitch, player.onGround(), player.horizontalCollision));
         BlockPos below = at.below();
         mc.gameMode.useItemOn(player, InteractionHand.MAIN_HAND,
                 new BlockHitResult(Vec3.atCenterOf(below).add(0, 0.5, 0), Direction.UP, below, false));
+        QuickPlace.restoreView(player, oldYaw, oldPitch);
         AutoBuild.INSTANCE.stats.placed();
         PrinterAddon.debug("Placed {} at {} myself (facing {}), the printer wouldn't", target.getBlock().getName().getString(),
                 at.toShortString(), eastWest ? "east-west" : "north-south");

@@ -224,7 +224,10 @@ public class QuickPlace {
         }
 
         // Look the way that gives the right direction, then click the face of the empty spot
-        if (Math.abs(player.getYRot() - way.yaw()) > 0.5 || Math.abs(player.getXRot() - way.pitch()) > 0.5) {
+        float oldYaw = player.getYRot();
+        float oldPitch = player.getXRot();
+        boolean turned = Math.abs(oldYaw - way.yaw()) > 0.5 || Math.abs(oldPitch - way.pitch()) > 0.5;
+        if (turned) {
             player.setYRot(way.yaw());
             player.setXRot(way.pitch());
             player.yRotO = way.yaw();
@@ -233,6 +236,10 @@ public class QuickPlace {
         }
         Vec3 hit = Vec3.atCenterOf(next).add(way.face().getStepX() * 0.5, way.face().getStepY() * 0.5, way.face().getStepZ() * 0.5);
         mc.gameMode.useItemOn(player, InteractionHand.MAIN_HAND, new BlockHitResult(hit, way.face(), next, false));
+        if (turned) {
+            // Turn back: the printer doesn't always set both directions itself, and would use this one
+            restoreView(player, oldYaw, oldPitch);
+        }
         skipped.put(next.immutable(), tick + SKIP_TICKS);
         CACHE.remove(next);
         AutoBuild.INSTANCE.stats.placed();
@@ -240,6 +247,15 @@ public class QuickPlace {
                 next.toShortString(), way.face().getName(), (int) way.yaw(), (int) way.pitch());
         cooldown = Math.max(1, Configs.Speed.printerInterval() - 1);
         return true;
+    }
+
+    /** Turns the view back (and tells the server), after a placement that needed another direction. */
+    static void restoreView(LocalPlayer player, float yaw, float pitch) {
+        player.setYRot(yaw);
+        player.setXRot(pitch);
+        player.yRotO = yaw;
+        player.xRotO = pitch;
+        player.connection.send(new ServerboundMovePlayerPacket.Rot(yaw, pitch, player.onGround(), player.horizontalCollision));
     }
 
     /** The next block to place: in reach, ready, and the most northern row first (then west to east). */
