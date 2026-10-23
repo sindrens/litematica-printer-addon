@@ -12,6 +12,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import no.sindrens.printeraddon.PrinterAddon;
 import no.sindrens.printeraddon.config.Configs;
 import no.sindrens.printeraddon.util.Chat;
 
@@ -24,7 +25,7 @@ import java.util.List;
  */
 public class LayerManager {
     /** How many positions to list in chat when a layer is stuck. */
-    private static final int MAX_REPORTED = 5;
+    private static final int MAX_REPORTED = 12;
 
     private boolean active;
     private int layer;
@@ -36,6 +37,8 @@ public class LayerManager {
     private int completeChecks;
     private int lastRemaining = -1;
     private int ticksWithoutProgress;
+    private int lastPlaced = -1;
+    private int lastReportAt;
     private boolean reportedStuck;
     /** Layer and blocks left, for the status line. */
     private String status = "";
@@ -215,8 +218,10 @@ public class LayerManager {
 
         completeChecks = 0;
 
-        if (remaining != lastRemaining) {
+        int placed = AutoBuild.INSTANCE.stats.totalPlaced();
+        if (remaining != lastRemaining || placed != lastPlaced) {
             lastRemaining = remaining;
+            lastPlaced = placed;
             ticksWithoutProgress = 0;
             reportedStuck = false;
         } else {
@@ -225,58 +230,15 @@ public class LayerManager {
 
         status = describeLayers() + ": " + remaining + " left";
 
-        if (!reportedStuck && ticksWithoutProgress >= Configs.Layers.STUCK_REPORT_SECONDS.getIntegerValue() * 20) {
+        // Report when nothing has happened for a while, and again every minute after that
+        int reportAfter = Configs.Layers.STUCK_REPORT_SECONDS.getIntegerValue() * 20;
+        if (ticksWithoutProgress >= reportAfter && (!reportedStuck || ticksWithoutProgress - lastReportAt >= 20 * 60)) {
             reportedStuck = true;
+            lastReportAt = ticksWithoutProgress;
             reportStuck(mc, schematic, areas);
         }
 
-        if (ticksWithoutProgress >= Configs.Layers.SKIP_STUCK_SECONDS.getIntegerValue() * 20 && skipUnplaceable(mc, schematic, areas)) {
-            completeChecks = 2;
-            ticksUntilCheck = 0;
-            ticksWithoutProgress = 0;
-        }
-
-        return true;
-    }
-
-    /**
-     * Gives up on the blocks left in the current layers if every one of them has its item in the inventory (so the
-     * printer just can't place it). Returns true if the layer can be left; false if something is waiting for items.
-     */
-    private boolean skipUnplaceable(Minecraft mc, WorldSchematic schematic, List<SchematicHelper.Area> areas) {
-        List<BlockPos> left = new ArrayList<>();
-        scanLayers(mc.level, schematic, areas, null, null);
-        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
-        for (SchematicHelper.Area area : areas) {
-            for (int y = Math.max(layer, area.minY()); y <= Math.min(layerTop, area.maxY()); y++) {
-                for (int x = area.minX(); x <= area.maxX(); x++) {
-                    for (int z = area.minZ(); z <= area.maxZ(); z++) {
-                        pos.set(x, y, z);
-                        BlockCheck.Result result = BlockCheck.check(mc.level, schematic, pos);
-                        if (result == BlockCheck.Result.OK || result == BlockCheck.Result.EXTRA) {
-                            continue;
-                        }
-                        BlockState bucketTarget = schematic.getBlockState(pos);
-                        if (result == BlockCheck.Result.BUCKET && Fluids.bucketFor(bucketTarget) != null
-                                && !mc.player.getInventory().contains(s -> s.is(Fluids.bucketFor(bucketTarget)))) {
-                            // Waiting for a bucket (to buy), not stuck
-                            return false;
-                        }
-                        BlockState target = schematic.getBlockState(pos);
-                        ItemStack needed = MaterialCache.getInstance().getRequiredBuildItemForState(target);
-                        if (result == BlockCheck.Result.MISSING && !needed.isEmpty()
-                                && !mc.player.getInventory().contains(s -> s.is(needed.getItem()))) {
-                            return false;
-                        }
-                        left.add(pos.immutable());
-                    }
-                }
-            }
-        }
-
-        AutoBuild.INSTANCE.couldNotPlace.addAll(left);
-        Chat.warn("Skipping " + left.size() + " block" + (left.size() == 1 ? "" : "s") + " in " + describeLayers()
-                + " the printer can't place; they're listed at the end.");
+        // No skipping: a layer is finished before the next one starts. When nothing happens, say exactly why.
         return true;
     }
 
@@ -498,15 +460,19 @@ public class LayerManager {
         List<BlockPos> positions = new ArrayList<>();
         int remaining = scanLayers(mc.level, schematic, areas, positions);
 
-        Chat.warn(describeLayers() + " hasn't changed for a while. " + remaining + " left, for example:");
-
+        Chat.warn(describeLayers() + ": nothing placed for " + ticksWithoutProgress / 20 + " s. " + remaining
+                + " left. Player at " + mc.player.blockPosition().toShortString() + ", doing: " + AutoBuild.INSTANCE.doing());
+        PrinterAddon.LOGGER.warn("[stuck] {}: nothing placed for {} s, {} left, player at {}, doing: {}", describeLayers(),
+                ticksWithoutProgress / 20, remaining, mc.player.blockPosition().toShortString(), AutoBuild.INSTANCE.doing());
+        int shown = 0;
         for (BlockPos pos : positions) {
-            BlockState target = schematic.getBlockState(pos);
-            BlockCheck.Result result = BlockCheck.check(mc.level, schematic, pos);
-            Chat.warn(" - " + pos.getX() + " " + pos.getY() + " " + pos.getZ() + ": " + describe(mc, result, target));
+            String why = Diagnose.explain(mc, schematic, pos);
+            PrinterAddon.LOGGER.warn("[stuck]   {}", why);
+            if (shown++ < 4) {
+                Chat.warn(" - " + why);
+            }
         }
     }
-
 
     private static String describe(Minecraft mc, BlockCheck.Result result, BlockState target) {
         String name = target.getBlock().getName().getString();

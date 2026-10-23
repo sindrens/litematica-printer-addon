@@ -79,7 +79,7 @@ public class Mover {
     /** What the player is doing now, for the build stats. */
     public BuildStats.Activity activity() {
         return switch (state) {
-            case WORKING -> PrinterBridge.isIdle() ? BuildStats.Activity.WAITING : BuildStats.Activity.PLACING;
+            case WORKING -> BuildStats.Activity.PLACING;
             case FLYING -> BuildStats.Activity.FLYING;
             case WALKING -> BuildStats.Activity.WALKING;
             case IDLE -> work.isEmpty() ? BuildStats.Activity.IDLE : BuildStats.Activity.WAITING;
@@ -232,6 +232,10 @@ public class Mover {
                 if (guide.skipOtherGuides()) {
                     break;
                 }
+            }
+            // Blocks with nothing to place them against: the add-on clicks the right face itself
+            if (result == BlockCheck.Result.MISSING && FacePlace.isCandidate(mc.level, p, schematic.getBlockState(p))) {
+                return true;
             }
             // Air place does floating blocks and chains the printer can't do the normal way
             return Configs.Layers.USE_AIR_PLACE.getBooleanValue() && result == BlockCheck.Result.MISSING

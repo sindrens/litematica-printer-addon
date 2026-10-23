@@ -64,6 +64,10 @@ public class BuildStats {
         layerStartMillis = System.currentTimeMillis();
     }
 
+    public int totalPlaced() {
+        return totalPlaced;
+    }
+
     public String total() {
         return "Whole build: " + line(totalPlaced, totalTickCount, System.currentTimeMillis() - buildStartMillis, totalTicks);
     }

@@ -195,11 +195,11 @@ public class AirPlace {
      * from the face that's clicked, and air place would make them point down.
      */
     public static boolean isCandidate(Level level, BlockPos pos, BlockState target) {
-        if (target.getBlock() instanceof net.minecraft.world.level.block.HopperBlock
-                && target.getValue(net.minecraft.world.level.block.HopperBlock.FACING) != Direction.DOWN) {
+        // Hoppers, logs, chains: FacePlace clicks the right face for those, air place could turn them wrong
+        if (FacePlace.faceFor(target) != null) {
             return false;
         }
-        return !hasSupport(level, pos) || target.getBlock() instanceof net.minecraft.world.level.block.RotatedPillarBlock;
+        return !hasSupport(level, pos);
     }
 
     private static boolean hasSupport(Level level, BlockPos pos) {

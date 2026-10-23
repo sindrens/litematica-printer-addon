@@ -264,17 +264,16 @@ public class FarmTest implements FabricClientGameTest {
     private static String diagnose(Minecraft mc) {
         WorldSchematic schematic = SchematicWorldHandler.getSchematicWorld();
         StringBuilder sb = new StringBuilder("\nStuck. Player at ").append(mc.player.blockPosition().toShortString())
-                .append(", flying ").append(mc.player.getAbilities().flying).append('\n');
+                .append(", flying ").append(mc.player.getAbilities().flying)
+                .append(", doing: ").append(AutoBuild.INSTANCE.doing()).append('\n');
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
-        Guides guides = new Guides();
         int shown = 0;
-
         for (SchematicHelper.Area area : SchematicHelper.areas()) {
             for (int y = area.minY(); y <= area.maxY(); y++) {
                 for (int x = area.minX(); x <= area.maxX(); x++) {
                     for (int z = area.minZ(); z <= area.maxZ(); z++) {
                         pos.set(x, y, z);
-                        if (!DataManager.getRenderLayerRange().isPositionWithinRange(pos) || shown >= 25) {
+                        if (!DataManager.getRenderLayerRange().isPositionWithinRange(pos) || shown >= 40) {
                             continue;
                         }
                         BlockCheck.Result result = BlockCheck.check(mc.level, schematic, pos);
@@ -282,18 +281,7 @@ public class FarmTest implements FabricClientGameTest {
                             continue;
                         }
                         shown++;
-                        SchematicBlockState state = new SchematicBlockState(mc.level, schematic, pos.immutable());
-                        sb.append(pos.toShortString()).append(' ').append(result).append("\n    is ")
-                                .append(state.currentState).append("\n    should be ").append(state.targetState)
-                                .append("\n    distance ").append(String.format("%.1f",
-                                        Math.sqrt(mc.player.getEyePosition().distanceToSqr(net.minecraft.world.phys.Vec3.atCenterOf(pos)))))
-                                .append("\n    guides:");
-                        for (Guide guide : guides.getInteractionGuides(state)) {
-                            sb.append(' ').append(guide.getClass().getSimpleName()).append('=')
-                                    .append(guide.canExecute(mc.player) ? "can" : "no")
-                                    .append(guide.skipOtherGuides() ? "(stops)" : "");
-                        }
-                        sb.append('\n');
+                        sb.append("  ").append(no.sindrens.printeraddon.build.Diagnose.explain(mc, schematic, pos.immutable())).append('\n');
                     }
                 }
             }

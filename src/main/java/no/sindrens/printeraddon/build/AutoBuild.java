@@ -25,6 +25,7 @@ public class AutoBuild {
     /** Temporary rails are removed through the same list as misplaced air-placed blocks. */
     public final RailHelper rails = new RailHelper(airPlace.misplaced());
     public final EntityPlacer entities = new EntityPlacer();
+    public final FacePlace facePlace = new FacePlace();
     private final InventoryCleaner cleaner = new InventoryCleaner();
     public final BuildStats stats = new BuildStats();
     /** What the whole schematic still needs (item -> count), including what's in the inventory. */
@@ -66,7 +67,7 @@ public class AutoBuild {
 
     /** The printer is paused while a block is being broken, so the two don't swap the held item. */
     public boolean shouldPausePrinter() {
-        return breaker.isBusy() || fluids.isBusy() || rails.isBusy() || entities.isBusy()
+        return breaker.isBusy() || fluids.isBusy() || rails.isBusy() || entities.isBusy() || facePlace.isBusy()
                 || no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.isRunning();
     }
 
@@ -251,7 +252,8 @@ public class AutoBuild {
             if (have == 0) {
                 outOfSomething |= couldntBuy.contains(item) || !Configs.Shop.AUTO_BUY.getBooleanValue();
             }
-            if (!couldntBuy.contains(item) && have < Math.min(need, item.getDefaultMaxStackSize())) {
+            if (!couldntBuy.contains(item) && have < Math.min(need, item.getDefaultMaxStackSize())
+                    && no.sindrens.printeraddon.shop.ShopBuyer.room(mc, item) > 0) {
                 list.put(item, entry.getValue());
             }
         }
@@ -318,6 +320,7 @@ public class AutoBuild {
         fluids.reset();
         rails.reset();
         entities.reset();
+        facePlace.reset();
         breaker.setForced(airPlace.misplaced());
 
         if (Configs.Layers.AUTO_LAYER.getBooleanValue() && !layers.start(mc)) {
@@ -465,13 +468,18 @@ public class AutoBuild {
                 && (entities.isBusy() || PrinterBridge.isIdle())) {
             entities.tick(mc);
         }
+        if (!breaker.isBusy() && !airPlace.isActive() && !fluids.isBusy() && !rails.isBusy() && !entities.isBusy()
+                && (facePlace.isBusy() || PrinterBridge.isIdle())) {
+            facePlace.tick(mc);
+        }
 
         if (layers.isActive() && !layers.tick(mc)) {
             stop(mc, null);
             return;
         }
 
-        if (PrinterBridge.isIdle() && !breaker.isBusy() && !fluids.isBusy() && !rails.isBusy() && !entities.isBusy()) {
+        if (PrinterBridge.isIdle() && !breaker.isBusy() && !fluids.isBusy() && !rails.isBusy() && !entities.isBusy()
+                && !facePlace.isBusy()) {
             if (cleaner.tick(mc, neededWhole)) {
                 return;
             }

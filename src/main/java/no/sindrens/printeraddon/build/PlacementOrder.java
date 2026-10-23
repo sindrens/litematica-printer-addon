@@ -49,17 +49,27 @@ public final class PlacementOrder {
      * the block it climbs onto, and an observer has the block it watches (so it doesn't fire while building).
      */
     public static boolean isReady(Level level, WorldSchematic schematic, BlockPos pos, BlockState target) {
+        return whyNotReady(level, schematic, pos, target) == null;
+    }
+
+    /** Why the block can't be placed yet, in words, or null when it can. */
+    @javax.annotation.Nullable
+    public static String whyNotReady(Level level, WorldSchematic schematic, BlockPos pos, BlockState target) {
         if (needsSupport(target) && !target.canSurvive(level, pos)) {
-            return false;
+            return "needs the block it stands on or hangs from first";
         }
 
         // Rails wait until they'll get the right shape (see RailHelper)
-        if (!AutoBuild.INSTANCE.rails.isReady(level, schematic, pos, target)) {
-            return false;
+        RailHelper.Plan plan = AutoBuild.INSTANCE.rails.plan(level, schematic, pos, target);
+        if (plan.waitForRails()) {
+            return "rail curve waits for the rails it joins";
+        }
+        if (!plan.temps().isEmpty()) {
+            return "rail waits for temporary rails at " + plan.temps().stream().map(BlockPos::toShortString).toList();
         }
         // Nothing goes where a temporary rail stands
         if (AutoBuild.INSTANCE.rails.isTemp(pos)) {
-            return false;
+            return "a temporary rail stands here";
         }
 
         if (target.getBlock() instanceof BaseRailBlock rail) {
@@ -72,7 +82,7 @@ public final class PlacementOrder {
                 default -> null;
             };
             if (up != null && !isDone(level, schematic, pos.relative(up))) {
-                return false;
+                return "slope waits for the block it climbs onto at " + pos.relative(up).toShortString();
             }
             // A slope placed before the rail at its top lies flat and may join the rails beside it instead:
             // wait for that rail (often in the layer above; the slope is placed later then)
@@ -80,7 +90,7 @@ public final class PlacementOrder {
                 BlockPos top = pos.relative(up).above();
                 if (schematic.getBlockState(top).getBlock() instanceof BaseRailBlock
                         && !(level.getBlockState(top).getBlock() instanceof BaseRailBlock)) {
-                    return false;
+                    return "slope waits for the rail at its top, " + top.toShortString();
                 }
             }
         }
@@ -88,11 +98,11 @@ public final class PlacementOrder {
         if (target.getBlock() instanceof ObserverBlock) {
             BlockPos watched = pos.relative(target.getValue(ObserverBlock.FACING));
             if (!isDone(level, schematic, watched)) {
-                return false;
+                return "observer waits for the block it watches, " + watched.toShortString();
             }
         }
 
-        return true;
+        return null;
     }
 
     /** A position is done when the schematic has nothing there or the world already matches it. */
