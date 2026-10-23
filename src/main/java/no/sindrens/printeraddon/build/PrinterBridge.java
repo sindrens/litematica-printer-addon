@@ -65,7 +65,7 @@ public final class PrinterBridge {
         if (!Generic.APPLY_SPEED_TO_PRINTER.getBooleanValue()) {
             return;
         }
-        int interval = Speed.printerInterval();
+        int interval = AutoBuild.INSTANCE.speed.interval();
         if (Configs.PRINTING_INTERVAL.getIntegerValue() != interval) {
             Configs.PRINTING_INTERVAL.setIntegerValue(interval);
         }

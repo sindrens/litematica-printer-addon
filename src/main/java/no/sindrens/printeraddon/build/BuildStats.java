@@ -52,7 +52,7 @@ public class BuildStats {
 
     /** A layer (or the final pass) is done: report it and start counting the next one. */
     public void layerDone(String layer) {
-        String line = layer + ": " + line(layerPlaced, layerTickCount, System.currentTimeMillis() - layerStartMillis, layerTicks);
+        String line = layer + " [" + AutoBuild.INSTANCE.speed.describe() + "]: " + line(layerPlaced, layerTickCount, System.currentTimeMillis() - layerStartMillis, layerTicks);
         layerLines.add(line);
         PrinterAddon.LOGGER.info("[stats] {}", line);
         if (Configs.Generic.DETAILED_CHAT.getBooleanValue()) {

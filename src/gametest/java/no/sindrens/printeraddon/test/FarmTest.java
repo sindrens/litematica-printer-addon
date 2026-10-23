@@ -111,6 +111,13 @@ public class FarmTest implements FabricClientGameTest {
             String partEnv = System.getenv("PRINTER_ADDON_PART");
             int part = partEnv == null || partEnv.isBlank() ? 1 : Integer.parseInt(partEnv.trim());
             if (prebuilt > 0 || part > 1) {
+                // Load the whole farm area, or commands far from the player do nothing
+                String area = context.computeOnClient(mc -> {
+                    SchematicHelper.Area a = SchematicHelper.areas().getFirst();
+                    return a.minX() + " " + a.minZ() + " " + a.maxX() + " " + a.maxZ();
+                });
+                server.runCommand("forceload add " + area);
+                context.waitTicks(40);
                 List<String> commands = context.computeOnClient(mc -> prebuildCommands(prebuilt, part));
                 for (String command : commands) {
                     server.runCommand(command);

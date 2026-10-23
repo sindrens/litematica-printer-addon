@@ -28,6 +28,7 @@ public class AutoBuild {
     public final QuickPlace quickPlace = new QuickPlace();
     private final InventoryCleaner cleaner = new InventoryCleaner();
     public final BuildStats stats = new BuildStats();
+    public final SpeedTuner speed = new SpeedTuner();
     /** What the whole schematic still needs (item -> count), including what's in the inventory. */
     private final java.util.Map<net.minecraft.world.item.Item, Integer> neededWhole = new java.util.HashMap<>();
     /** Items the shop couldn't sell or deliver during this build: not tried again. */
@@ -319,6 +320,7 @@ public class AutoBuild {
         buyCooldown = 0;
         cleaner.reset();
         stats.start();
+        speed.reset();
         nextBlock = null;
         breaker.reset();
         mover.reset();
@@ -442,6 +444,7 @@ public class AutoBuild {
 
         PrinterBridge.applySettings(mc.player);
         stats.tick(activity());
+        speed.tick(mc);
 
         // Buying from the shop: nothing else happens meanwhile
         no.sindrens.printeraddon.shop.ShopBuyer buyer = no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE;

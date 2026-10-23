@@ -219,6 +219,16 @@ public class Configs implements IConfigHandler {
     }
 
     public static class Speed {
+        public static final ConfigBoolean AUTO_SPEED = new ConfigBoolean("autoSpeed", true,
+                "Find the fastest printer interval that still places right: start at the preset's interval, go one tick\n"
+                        + "faster after a run of correct blocks, two ticks slower as soon as a block comes out wrong.",
+                "Automatic speed");
+        public static final ConfigInteger AUTO_SPEED_MIN_INTERVAL = new ConfigInteger("autoSpeedMinInterval", 4, 1, 40,
+                "Automatic speed never goes below this printer interval.",
+                "Automatic speed: fastest interval");
+        public static final ConfigInteger AUTO_SPEED_STEP_BLOCKS = new ConfigInteger("autoSpeedStepBlocks", 40, 5, 1000,
+                "Automatic speed goes one tick faster after this many correct blocks in a row.",
+                "Automatic speed: blocks per step");
         public static final ConfigInteger PRINTER_INTERVAL = new ConfigInteger("customPrinterInterval", 12, 1, 40,
                 "Custom preset: the printer's printing interval (lower is faster). Below 12 the printer often places blocks wrong.",
                 "Custom: printer interval");
@@ -236,7 +246,7 @@ public class Configs implements IConfigHandler {
                 "Custom: fly speed");
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                PRINTER_INTERVAL, BREAK_COOLDOWN, SHOP_CLICK_DELAY, WALK_SPEED, FLY_SPEED);
+                AUTO_SPEED, AUTO_SPEED_MIN_INTERVAL, AUTO_SPEED_STEP_BLOCKS, PRINTER_INTERVAL, BREAK_COOLDOWN, SHOP_CLICK_DELAY, WALK_SPEED, FLY_SPEED);
 
         public static double walkSpeed() {
             SpeedPreset preset = preset();
