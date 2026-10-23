@@ -36,6 +36,7 @@ public class AutoBuild {
         Minecraft mc = Minecraft.getInstance();
         if (mc.level != null) {
             recentlyTried.put(pos.immutable(), mc.level.getGameTime());
+            speed.attempted();
         }
     }
     /** What the whole schematic still needs (item -> count), including what's in the inventory. */

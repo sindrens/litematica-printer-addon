@@ -35,6 +35,15 @@ public class SpeedTuner {
     private long tick;
     private long calmUntil;
     private long lastPenalty = -1;
+    /** Printer attempts and blocks that appeared since the last throughput check. */
+    private int attempts;
+    private int appearedCount;
+    private static final int THROUGHPUT_WINDOW = 200;
+
+    /** The printer is about to place a block. */
+    public void attempted() {
+        attempts++;
+    }
 
     /** A new layer (other blocks): find the fastest safe speed for it again. */
     public void newLayer() {
@@ -94,7 +103,17 @@ public class SpeedTuner {
             BlockState before = seen.put(pos.immutable(), now);
             if (before != null && (before.isAir() || before.canBeReplaced()) && !now.isAir() && !now.canBeReplaced()) {
                 appeared.put(pos.immutable(), tick);
+                appearedCount++;
             }
+        }
+
+        // Too fast can also mean the printer's clicks don't get through at all: blocks just don't appear
+        if (tick % THROUGHPUT_WINDOW == 0) {
+            if (attempts >= 8 && appearedCount * 2 < attempts) {
+                slowDown(mc, attempts - appearedCount + " of " + attempts + " printer attempts placed nothing");
+            }
+            attempts = 0;
+            appearedCount = 0;
         }
 
         appeared.entrySet().removeIf(entry -> {
@@ -106,6 +125,18 @@ public class SpeedTuner {
         });
         if (seen.size() > 20000) {
             seen.clear();
+        }
+    }
+
+    private void slowDown(Minecraft mc, String why) {
+        goodInARow = 0;
+        calmUntil = tick + CALM_AFTER_MISTAKE;
+        // Never this fast again on this layer
+        fastestSafe = Math.max(fastestSafe, interval() + 1);
+        int slower = Math.min(Configs.Speed.printerInterval(), interval() + 2);
+        if (slower != interval) {
+            interval = slower;
+            Chat.warn("Speed: printer interval " + interval + " (" + why + "; it won't go below " + fastestSafe + " again on this layer)");
         }
     }
 
@@ -132,17 +163,8 @@ public class SpeedTuner {
                     return;
                 }
                 lastPenalty = tick;
-                calmUntil = tick + CALM_AFTER_MISTAKE;
-                // Never this fast again in this build
-                fastestSafe = Math.max(fastestSafe, interval() + 1);
-                int max = Configs.Speed.printerInterval();
-                int slower = Math.min(max, interval() + 2);
                 PrinterAddon.debug("Wrong block at {} at interval {}: {}", pos.toShortString(), interval(), mc.level.getBlockState(pos));
-                if (slower != interval) {
-                    interval = slower;
-                    Chat.warn("Speed: printer interval " + interval + " (a block came out wrong at " + pos.toShortString()
-                            + "; it won't go below " + fastestSafe + " again)");
-                }
+                slowDown(mc, "a block came out wrong at " + pos.toShortString());
             }
             default -> {
             }
