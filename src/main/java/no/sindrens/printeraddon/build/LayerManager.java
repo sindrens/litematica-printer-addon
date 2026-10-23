@@ -54,6 +54,11 @@ public class LayerManager {
         return active;
     }
 
+    /** The highest Y of the layers being built now. */
+    public int getLayerTop() {
+        return layerTop;
+    }
+
     public int getLayer() {
         return layer;
     }
@@ -174,6 +179,7 @@ public class LayerManager {
             }
 
             Chat.info(describeLayers() + " done.");
+            AutoBuild.INSTANCE.stats.layerDone(describeLayers());
             layer = layerTop;
             do {
                 layer++;
@@ -195,6 +201,7 @@ public class LayerManager {
                     return true;
                 }
                 Chat.info("\u00a7aBuild finished!");
+                Chat.info(AutoBuild.INSTANCE.stats.total());
                 reportUnfinished(mc, schematic);
                 stop();
                 return false;
@@ -277,6 +284,8 @@ public class LayerManager {
         List<BlockPos> left = unfinishedDeferred(mc.level, schematic);
         if (left.isEmpty()) {
             Chat.info("\u00a7aBuild finished!");
+            AutoBuild.INSTANCE.stats.layerDone("Last blocks");
+            Chat.info(AutoBuild.INSTANCE.stats.total());
             reportUnfinished(mc, schematic);
             stop();
             return false;
@@ -305,6 +314,8 @@ public class LayerManager {
             // Nothing more happens: finish and list what's left
             AutoBuild.INSTANCE.deferred.removeAll(left);
             AutoBuild.INSTANCE.couldNotPlace.addAll(left);
+            AutoBuild.INSTANCE.stats.layerDone("Last blocks");
+            Chat.info(AutoBuild.INSTANCE.stats.total());
             Chat.warn("Build done, except " + left.size() + " block" + (left.size() == 1 ? "" : "s")
                     + " that couldn't be placed (listed below).");
             reportUnfinished(mc, schematic);

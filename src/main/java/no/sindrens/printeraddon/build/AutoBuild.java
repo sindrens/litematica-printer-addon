@@ -26,6 +26,7 @@ public class AutoBuild {
     public final RailHelper rails = new RailHelper(airPlace.misplaced());
     public final EntityPlacer entities = new EntityPlacer();
     private final InventoryCleaner cleaner = new InventoryCleaner();
+    public final BuildStats stats = new BuildStats();
     /** What the whole schematic still needs (item -> count), including what's in the inventory. */
     private final java.util.Map<net.minecraft.world.item.Item, Integer> neededWhole = new java.util.HashMap<>();
     /** Items the shop couldn't sell or deliver during this build: not tried again. */
@@ -210,6 +211,23 @@ public class AutoBuild {
         return manualTask != ManualTask.NONE;
     }
 
+    /** What this tick goes to, for the build stats. */
+    private BuildStats.Activity activity() {
+        if (no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.isRunning()) {
+            return BuildStats.Activity.BUYING;
+        }
+        if (breaker.isBusy()) {
+            return BuildStats.Activity.BREAKING;
+        }
+        if (fluids.isBusy()) {
+            return BuildStats.Activity.BUCKET;
+        }
+        if (rails.isBusy()) {
+            return BuildStats.Activity.RAILS;
+        }
+        return mover.activity();
+    }
+
     /**
      * Buys what the current layer still needs from /shop (as much as fits). When the layer can't go on because of
      * items the shop doesn't have (or couldn't deliver), auto build pauses and says what to bring.
@@ -222,15 +240,25 @@ public class AutoBuild {
             buyCooldown--;
             return false;
         }
+        // Buy when an item is (nearly) used up: less than a stack left, or less than the layer needs
+        net.minecraft.world.entity.player.Inventory inventory = mc.player.getInventory();
         java.util.Map<net.minecraft.world.item.Item, Integer> list = new java.util.LinkedHashMap<>();
-        shoppingList.forEach((item, count) -> {
-            if (!couldntBuy.contains(item)) {
-                list.put(item, count);
+        boolean outOfSomething = false;
+        for (var entry : shoppingList.entrySet()) {
+            net.minecraft.world.item.Item item = entry.getKey();
+            int have = inventory.countItem(item);
+            int need = have + entry.getValue();
+            if (have == 0) {
+                outOfSomething |= couldntBuy.contains(item) || !Configs.Shop.AUTO_BUY.getBooleanValue();
             }
-        });
+            if (!couldntBuy.contains(item) && have < Math.min(need, item.getDefaultMaxStackSize())) {
+                list.put(item, entry.getValue());
+            }
+        }
 
         if (list.isEmpty() || !Configs.Shop.AUTO_BUY.getBooleanValue()) {
-            if (layers.stalledFor(20 * 20)) {
+            // Pause only when something is used up that can't be bought, and the layer can't go on
+            if (outOfSomething && layers.stalledFor(20 * 20)) {
                 StringBuilder sb = new StringBuilder();
                 shoppingList.forEach((item, count) -> sb.append(count).append(' ')
                         .append(new net.minecraft.world.item.ItemStack(item).getHoverName().getString()).append(", "));
@@ -275,6 +303,7 @@ public class AutoBuild {
         buying = false;
         buyCooldown = 0;
         cleaner.reset();
+        stats.start();
         nextBlock = null;
         breaker.reset();
         mover.reset();
@@ -392,6 +421,7 @@ public class AutoBuild {
         }
 
         PrinterBridge.applySettings(mc.player);
+        stats.tick(activity());
 
         // Buying from the shop: nothing else happens meanwhile
         no.sindrens.printeraddon.shop.ShopBuyer buyer = no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE;

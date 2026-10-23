@@ -95,7 +95,7 @@ public class ShopBuyer {
         return notSold;
     }
 
-    /** Items from the last run that couldn't be bought (no room, no money, or the shop didn't work). */
+    /** Items from the last run that couldn't be bought (no money, or the shop didn't work). */
     public List<Item> notBought() {
         return notBought;
     }
@@ -195,7 +195,9 @@ public class ShopBuyer {
         switch (phase) {
             case OPEN -> {
                 if (room(mc, order.item) <= 0) {
-                    skip(order, "no room in the inventory");
+                    // Not a failure: buy the rest when there's room again
+                    PrinterAddon.debug("No room for more {}", order.location.name);
+                    orders.pollFirst();
                     return;
                 }
                 if (mc.gui.screen() instanceof AbstractContainerScreen<?>) {
@@ -313,9 +315,6 @@ public class ShopBuyer {
                     }
                     PrinterAddon.debug("Bought {} {}", got, order.location.name);
                     if (order.left <= 0 || room(mc, order.item) <= 0) {
-                        if (order.left > 0) {
-                            notBought.add(order.item);
-                        }
                         orders.pollFirst();
                         phase = Phase.OPEN;
                     } else {

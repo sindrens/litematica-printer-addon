@@ -103,7 +103,7 @@ public class Configs implements IConfigHandler {
         public static final ConfigInteger STUCK_REPORT_SECONDS = new ConfigInteger("stuckReportSeconds", 30, 5, 600,
                 "If the layer hasn't changed for this long, list in chat what is left and why.",
                 "Report stuck layer after (seconds)");
-        public static final ConfigInteger SKIP_STUCK_SECONDS = new ConfigInteger("skipStuckSeconds", 60, 10, 3600,
+        public static final ConfigInteger SKIP_STUCK_SECONDS = new ConfigInteger("skipStuckSeconds", 20, 5, 3600,
                 "If blocks you have the items for still can't be placed after this long (e.g. two rails side by side\n"
                         + "that the game always connects), go on to the next layer and list them at the end to do by hand.\n"
                         + "Blocks you don't have the items for are waited for.",
@@ -130,14 +130,15 @@ public class Configs implements IConfigHandler {
     }
 
     public static class Movement {
-        public static final ConfigOptionList MOVE_MODE = new ConfigOptionList("moveMode", MoveMode.WALK_AND_FLY,
-                "How auto build gets you to the next unfinished blocks: walk, fly, walk and fly when needed, or not at all.",
+        public static final ConfigOptionList MOVE_MODE = new ConfigOptionList("moveMode", MoveMode.FLY,
+                "How auto build gets you to the next unfinished blocks: fly (fastest: always above the blocks being built),\n"
+                        + "walk, walk and fly when needed, or not at all.",
                 "Movement");
         public static final ConfigString FLY_COMMAND = new ConfigString("flyCommand", "fly",
                 "Command (without the slash) sent once if flying is needed but not allowed yet. Empty: never send one.",
                 "Fly command");
-        public static final ConfigInteger HOVER_HEIGHT = new ConfigInteger("hoverHeight", 2, 1, 4,
-                "When flying, hover this many blocks above the layer being built.",
+        public static final ConfigInteger HOVER_HEIGHT = new ConfigInteger("hoverHeight", 1, 1, 4,
+                "When flying, hover this many blocks above the layer being built (1 = right above it, the most reach).",
                 "Hover height");
         public static final ConfigInteger WORK_WAIT_SECONDS = new ConfigInteger("workWaitSeconds", 4, 1, 60,
                 "If nothing within reach gets done for this long (missing item, printer can't place it...),\n"

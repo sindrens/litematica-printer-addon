@@ -67,9 +67,9 @@ public class InventoryCleaner {
             }
             // Throw the whole stack, through the player's own inventory menu (no screen needed)
             int menuSlot = slot < 9 ? 36 + slot : slot;
-            mc.gameMode.handleContainerInput(player.inventoryMenu.containerId, menuSlot, 1, ContainerInput.THROW, player);
-            PrinterAddon.debug("Dropped {} {} to make room (the build doesn't need them)", stack.getCount(),
+            PrinterAddon.debug("Dropping {} {} to make room (the build doesn't need them)", stack.getCount(),
                     stack.getHoverName().getString());
+            mc.gameMode.handleContainerInput(player.inventoryMenu.containerId, menuSlot, 1, ContainerInput.THROW, player);
             cooldown = COOLDOWN;
             return true;
         }

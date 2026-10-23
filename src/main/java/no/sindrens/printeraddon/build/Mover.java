@@ -76,6 +76,16 @@ public class Mover {
         };
     }
 
+    /** What the player is doing now, for the build stats. */
+    public BuildStats.Activity activity() {
+        return switch (state) {
+            case WORKING -> PrinterBridge.isIdle() ? BuildStats.Activity.WAITING : BuildStats.Activity.PLACING;
+            case FLYING -> BuildStats.Activity.FLYING;
+            case WALKING -> BuildStats.Activity.WALKING;
+            case IDLE -> work.isEmpty() ? BuildStats.Activity.IDLE : BuildStats.Activity.WAITING;
+        };
+    }
+
     public void reset() {
         state = State.IDLE;
         work.clear();
@@ -141,6 +151,12 @@ public class Mover {
             }
         }
 
+        // On the way to a chosen spot, keep going (the printer places what's in reach meanwhile)
+        if (state == State.FLYING && flyTarget != null && mode.canFly()) {
+            move(mc, player, mode);
+            return;
+        }
+
         if (!inReach.isEmpty()) {
             if (state == State.WALKING || state == State.FLYING) {
                 halt(player);
@@ -160,7 +176,9 @@ public class Mover {
             return;
         }
 
-        BlockPos nearest = nearestDoable(mc, player, schematic);
+        // Flying: go where the most blocks can be placed at once; walking: to the nearest one
+        BlockPos nearest = mode.canFly() && (!mode.canWalk() || flying(player))
+                ? bestSpot(mc, player, schematic, reach) : nearestDoable(mc, player, schematic);
         if (nearest == null) {
             // Nothing can be done right now (waiting for items, or for other blocks first)
             if (state == State.WALKING || state == State.FLYING) {
@@ -238,6 +256,47 @@ public class Mover {
         }
         // None of the nearest: fall back to the nearest one at all, so building moves on
         return sorted.isEmpty() ? null : sorted.getFirst();
+    }
+
+    /** How many unfinished blocks near the player are looked at when choosing where to fly. */
+    private static final int NEARBY_FOR_SPOT = 400;
+
+    /**
+     * The block to fly to: among the nearest blocks that can be done now, the one whose hover spot has the most
+     * unfinished blocks within reach, a little less for spots further away. Fewer, better placed stops.
+     */
+    @Nullable
+    private BlockPos bestSpot(Minecraft mc, LocalPlayer player, WorldSchematic schematic, double reach) {
+        Vec3 from = player.position();
+        List<BlockPos> sorted = new ArrayList<>(work);
+        sorted.sort(java.util.Comparator.comparingDouble(p -> from.distanceToSqr(Vec3.atCenterOf(p))));
+        List<BlockPos> near = sorted.subList(0, Math.min(NEARBY_FOR_SPOT, sorted.size()));
+        double r = reach - 0.25;
+        double eyeHeight = player.getEyeHeight();
+
+        BlockPos best = null;
+        double bestScore = -Double.MAX_VALUE;
+        int candidates = 0;
+        for (int i = 0; i < near.size() && i < CANDIDATES_TO_CHECK * 2 && candidates < CANDIDATES_TO_CHECK; i++) {
+            BlockPos candidate = near.get(i);
+            if (!canDoNow(mc, schematic, candidate)) {
+                continue;
+            }
+            candidates++;
+            Vec3 eye = hoverPoint(mc, candidate).add(0, eyeHeight, 0);
+            int inReach = 0;
+            for (BlockPos pos : near) {
+                if (eye.distanceToSqr(Vec3.atCenterOf(pos)) <= r * r) {
+                    inReach++;
+                }
+            }
+            double score = inReach - 0.25 * from.distanceTo(eye);
+            if (score > bestScore) {
+                bestScore = score;
+                best = candidate;
+            }
+        }
+        return best != null ? best : (sorted.isEmpty() ? null : sorted.getFirst());
     }
 
     /** Waits while the printer and breaker work; skips the blocks in reach if nothing happens for a while. */
@@ -367,8 +426,15 @@ public class Mover {
     }
 
     /** A free spot above the block, high enough to reach it and not in the way of the layer. */
+    /**
+     * Where to hover for a block: right above the layers being built (so nothing is ever over the player's head
+     * and the reach goes furthest sideways), or above the block itself if it's lower (a block placed later).
+     */
     private Vec3 hoverPoint(Minecraft mc, BlockPos goalBlock) {
-        BlockPos pos = goalBlock.above(Configs.Movement.HOVER_HEIGHT.getIntegerValue());
+        LayerManager layers = AutoBuild.INSTANCE.layers;
+        int baseY = layers.isActive() && goalBlock.getY() >= layers.getLayer() && goalBlock.getY() <= layers.getLayerTop()
+                ? layers.getLayerTop() : goalBlock.getY();
+        BlockPos pos = new BlockPos(goalBlock.getX(), baseY + Configs.Movement.HOVER_HEIGHT.getIntegerValue(), goalBlock.getZ());
         for (int i = 0; i < 4; i++) {
             if (PathFinder.isPassable(mc.level, pos) && PathFinder.isPassable(mc.level, pos.above())
                     && !reserved.contains(pos) && !reserved.contains(pos.above())) {

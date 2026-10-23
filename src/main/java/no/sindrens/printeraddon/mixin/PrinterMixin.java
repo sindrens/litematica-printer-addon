@@ -25,6 +25,9 @@ public class PrinterMixin {
     private void printer_addon$afterPlacing(CallbackInfoReturnable<Boolean> cir) {
         if (cir.getReturnValueZ()) {
             AutoBuild.INSTANCE.airPlace.onPrinterQueued();
+            if (AutoBuild.INSTANCE.isRunning()) {
+                AutoBuild.INSTANCE.stats.placed();
+            }
         }
     }
 

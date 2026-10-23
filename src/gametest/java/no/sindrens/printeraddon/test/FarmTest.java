@@ -87,11 +87,25 @@ public class FarmTest implements FabricClientGameTest {
                 DataManager.getSchematicPlacementManager().addSchematicPlacement(placement, false);
             });
             context.waitTicks(60);
+
+            // The bottom layers are only the base: put them in place at once, so the test builds the farm itself
+            String prebuiltEnv = System.getenv("PRINTER_ADDON_PREBUILT_LAYERS");
+            int prebuilt = prebuiltEnv == null || prebuiltEnv.isBlank() ? 6 : Integer.parseInt(prebuiltEnv.trim());
+            if (prebuilt > 0) {
+                List<String> commands = context.computeOnClient(mc -> prebuildCommands(prebuilt));
+                for (String command : commands) {
+                    server.runCommand(command);
+                }
+                System.out.println("FARM TEST: placed the bottom " + prebuilt + " layers with " + commands.size() + " commands");
+                context.waitTicks(40);
+            }
+
             restock(context, server);
             context.waitTicks(20);
 
             context.runOnClient(mc -> {
-                Configs.Generic.SPEED_PRESET.setOptionListValue(SpeedPreset.NORMAL);
+                Configs.Generic.SPEED_PRESET.setOptionListValue(SpeedPreset.FAST);
+                Configs.Movement.MOVE_MODE.setOptionListValue(no.sindrens.printeraddon.config.MoveMode.FLY);
                 Configs.Generic.DEBUG_LOG.setBooleanValue(true);
                 Configs.Generic.DETAILED_CHAT.setBooleanValue(true);
                 Configs.Generic.STATUS_FILE.setBooleanValue(true);
@@ -326,6 +340,29 @@ public class FarmTest implements FabricClientGameTest {
         unfinished.forEach((k, v) -> sb.append("  ").append(v).append(' ').append(k).append('\n'));
         sb.append("Examples:\n");
         examples.forEach(e -> sb.append("  ").append(e).append('\n'));
+        sb.append("Per layer:\n");
+        AutoBuild.INSTANCE.stats.layers().forEach(l -> sb.append("  ").append(l).append('\n'));
+        sb.append(AutoBuild.INSTANCE.stats.total()).append('\n');
         return sb.toString();
+    }
+
+    /** setblock commands (without block updates) for every block of the bottom layers of the schematic. */
+    private static List<String> prebuildCommands(int layers) {
+        WorldSchematic schematic = SchematicWorldHandler.getSchematicWorld();
+        List<String> commands = new ArrayList<>();
+        for (SchematicHelper.Area area : SchematicHelper.areas()) {
+            for (int y = area.minY(); y < area.minY() + layers && y <= area.maxY(); y++) {
+                for (int x = area.minX(); x <= area.maxX(); x++) {
+                    for (int z = area.minZ(); z <= area.maxZ(); z++) {
+                        BlockState target = schematic.getBlockState(new BlockPos(x, y, z));
+                        if (!target.isAir() && target.getBlock() != net.minecraft.world.level.block.Blocks.MOVING_PISTON) {
+                            commands.add("setblock " + x + " " + y + " " + z + " "
+                                    + net.minecraft.commands.arguments.blocks.BlockStateParser.serialize(target) + " strict");
+                        }
+                    }
+                }
+            }
+        }
+        return commands;
     }
 }
