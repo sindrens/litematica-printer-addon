@@ -59,6 +59,10 @@ public class InventoryCleaner {
                 continue;
             }
             Item item = stack.getItem();
+            // Never anything the layers being built still need
+            if (AutoBuild.INSTANCE.layers.layerNeeds().containsKey(item)) {
+                continue;
+            }
             // Spare rails only while the schematic still has rails to place (for temporary rails)
             boolean railsLeft = neededWhole.keySet().stream().anyMatch(i -> new ItemStack(i).is(net.minecraft.tags.ItemTags.RAILS));
             int keep = neededWhole.getOrDefault(item, 0) + (item == Items.RAIL && railsLeft ? SPARE_RAILS : 0);

@@ -57,6 +57,13 @@ public class LayerManager {
         return active;
     }
 
+    /** Items the current layers still need (item -> count). */
+    private java.util.Map<net.minecraft.world.item.Item, Integer> layerNeeds = java.util.Map.of();
+
+    public java.util.Map<net.minecraft.world.item.Item, Integer> layerNeeds() {
+        return layerNeeds;
+    }
+
     /** The highest Y of the layers being built now. */
     public int getLayerTop() {
         return layerTop;
@@ -160,6 +167,7 @@ public class LayerManager {
             findings.needs.put(net.minecraft.world.item.Items.IRON_HOE, 1);
         }
         updateShoppingList(mc, findings.needs);
+        layerNeeds = findings.needs;
 
         // Everything left waits for something higher up (an ascending rail, an observer watching a block above):
         // don't hold up the layer, place those later

@@ -47,6 +47,10 @@ public final class StateRules {
         if (target.getBlock() == Blocks.ATTACHED_MELON_STEM) {
             return new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.MELON_SEEDS);
         }
+        // Farmland is dirt tilled with a hoe
+        if (target.getBlock() == Blocks.FARMLAND) {
+            return new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.DIRT);
+        }
         return fi.dy.masa.litematica.materials.MaterialCache.getInstance().getRequiredBuildItemForState(target);
     }
 
