@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "printer_addon_test",
+  "version": "1.0.0",
+  "name": "Printer Addon tests",
+  "environment": "client",
+  "entrypoints": {
+    "fabric-client-gametest": ["no.sindrens.printeraddon.test.BuildTest"]
+  }
+}

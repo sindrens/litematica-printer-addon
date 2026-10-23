@@ -35,8 +35,17 @@ public class Configs implements IConfigHandler {
                 "Show status messages in chat (layer done, stuck, scan results...).",
                 "Chat messages");
 
+        public static final ConfigBoolean TURN_VIEW_FOR_PRINTER = new ConfigBoolean("turnViewForPrinter", true,
+                "Turn your view the way the printer places, so observers, pistons, stairs etc. always face the right way.\n"
+                        + "Without it the server sometimes uses the direction you're looking instead (Minecraft 26.2).",
+                "Turn view for printer");
+        public static final ConfigBoolean DEBUG_LOG = new ConfigBoolean("debugLog", false,
+                "Write every step (which block is broken, why it stopped...) to the game log (logs/latest.log).\n"
+                        + "Useful when something doesn't work.",
+                "Debug log");
+
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                AUTO_BUILD, SPEED_PRESET, APPLY_SPEED_TO_PRINTER, CHAT_MESSAGES);
+                AUTO_BUILD, SPEED_PRESET, APPLY_SPEED_TO_PRINTER, TURN_VIEW_FOR_PRINTER, CHAT_MESSAGES, DEBUG_LOG);
     }
 
     public static class Breaking {
@@ -56,6 +65,14 @@ public class Configs implements IConfigHandler {
         public static final ConfigInteger BREAK_TIMEOUT_SECONDS = new ConfigInteger("breakTimeoutSeconds", 15, 1, 300,
                 "Give up on a block if it isn't broken after this many seconds (e.g. the server cancels it).",
                 "Break timeout (seconds)");
+        public static final ConfigInteger WRONG_FOR_TICKS = new ConfigInteger("wrongForTicks", 10, 0, 200,
+                "A block must stay wrong this long (20 ticks = 1 second) before it's broken.\n"
+                        + "Right after placing, the game briefly shows its own guess of the block until the server confirms it;\n"
+                        + "raise this on servers with high ping.",
+                "Wait before breaking (ticks)");
+        public static final ConfigInteger MAX_BREAKS_PER_BLOCK = new ConfigInteger("maxBreaksPerBlock", 3, 1, 50,
+                "Stop breaking a spot after this many tries if it keeps coming back wrong, and say so in chat.",
+                "Max breaks per spot");
         public static final ConfigBoolean LOOK_AT_BLOCKS = new ConfigBoolean("lookAtBlocks", false,
                 "Turn the camera towards the block being broken. Needed on servers with strict anticheat.",
                 "Look at blocks when breaking");
@@ -65,7 +82,7 @@ public class Configs implements IConfigHandler {
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
                 BREAK_WRONG_BLOCKS, BREAK_WRONG_STATE, BREAK_RANGE, MIN_TOOL_DURABILITY, BREAK_TIMEOUT_SECONDS,
-                LOOK_AT_BLOCKS, SKIP_CONTAINERS);
+                WRONG_FOR_TICKS, MAX_BREAKS_PER_BLOCK, LOOK_AT_BLOCKS, SKIP_CONTAINERS);
     }
 
     public static class Layers {
