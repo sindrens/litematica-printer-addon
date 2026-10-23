@@ -31,6 +31,17 @@ public class PrinterMixin {
         }
     }
 
+    /** Remembers which spot the printer is about to place, so auto build doesn't hand it the same spot again too soon. */
+    @org.spongepowered.asm.mixin.injection.Redirect(method = "onGameTick", at = @At(value = "INVOKE",
+            target = "Lme/aleksilassila/litematica/printer/guides/Guide;execute(Lnet/minecraft/client/player/LocalPlayer;)Ljava/util/List;"))
+    private List<?> printer_addon$rememberSpot(me.aleksilassila.litematica.printer.guides.Guide guide,
+                                               net.minecraft.client.player.LocalPlayer player) {
+        if (AutoBuild.INSTANCE.isRunning()) {
+            AutoBuild.INSTANCE.printerTried(((GuideExecuteMixin) guide).printer_addon$state().blockPos);
+        }
+        return guide.execute(player);
+    }
+
     /**
      * Build order: during auto build the printer only sees blocks that are ready to be placed, full blocks
      * first; while air place is on, only the one block it's meant for.

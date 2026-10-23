@@ -226,7 +226,7 @@ public class Configs implements IConfigHandler {
         public static final ConfigInteger AUTO_SPEED_MIN_INTERVAL = new ConfigInteger("autoSpeedMinInterval", 4, 1, 40,
                 "Automatic speed never goes below this printer interval.",
                 "Automatic speed: fastest interval");
-        public static final ConfigInteger AUTO_SPEED_STEP_BLOCKS = new ConfigInteger("autoSpeedStepBlocks", 40, 5, 1000,
+        public static final ConfigInteger AUTO_SPEED_STEP_BLOCKS = new ConfigInteger("autoSpeedStepBlocks", 25, 5, 1000,
                 "Automatic speed goes one tick faster after this many correct blocks in a row.",
                 "Automatic speed: blocks per step");
         public static final ConfigInteger PRINTER_INTERVAL = new ConfigInteger("customPrinterInterval", 12, 1, 40,

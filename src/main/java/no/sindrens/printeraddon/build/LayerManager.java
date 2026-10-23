@@ -183,6 +183,7 @@ public class LayerManager {
 
             Chat.info(describeLayers() + " done.");
             AutoBuild.INSTANCE.stats.layerDone(describeLayers());
+            AutoBuild.INSTANCE.speed.newLayer();
             layer = layerTop;
             do {
                 layer++;

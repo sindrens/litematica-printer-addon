@@ -29,6 +29,15 @@ public class AutoBuild {
     private final InventoryCleaner cleaner = new InventoryCleaner();
     public final BuildStats stats = new BuildStats();
     public final SpeedTuner speed = new SpeedTuner();
+    /** Spots the printer just placed (game tick of the attempt): not given to it again until the server has answered. */
+    private final java.util.Map<net.minecraft.core.BlockPos, Long> recentlyTried = new java.util.HashMap<>();
+
+    public void printerTried(net.minecraft.core.BlockPos pos) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level != null) {
+            recentlyTried.put(pos.immutable(), mc.level.getGameTime());
+        }
+    }
     /** What the whole schematic still needs (item -> count), including what's in the inventory. */
     private final java.util.Map<net.minecraft.world.item.Item, Integer> neededWhole = new java.util.HashMap<>();
     /** Items the shop couldn't sell or deliver during this build: not tried again. */
@@ -103,7 +112,14 @@ public class AutoBuild {
         }
         // Blocks QuickPlace does with one click aren't the printer's: it spends its turns on the rest
         java.util.List<net.minecraft.core.BlockPos> forPrinter = new java.util.ArrayList<>(all.size());
+        // A spot tried a moment ago may just not have the server's answer yet: trying it again places a second
+        // block next to it (the wrong blocks seen at fast intervals)
+        long now = mc.level.getGameTime();
+        recentlyTried.values().removeIf(at -> now - at > 20);
         for (net.minecraft.core.BlockPos pos : all) {
+            if (recentlyTried.containsKey(pos)) {
+                continue;
+            }
             if (Configs.quickPlace() != no.sindrens.printeraddon.config.QuickPlaceMode.ALL
                     || !QuickPlace.isCandidate(mc, pos, schematic.getBlockState(pos))) {
                 forPrinter.add(pos);
@@ -321,6 +337,7 @@ public class AutoBuild {
         cleaner.reset();
         stats.start();
         speed.reset();
+        recentlyTried.clear();
         nextBlock = null;
         breaker.reset();
         mover.reset();

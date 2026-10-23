@@ -36,6 +36,16 @@ public class SpeedTuner {
     private long calmUntil;
     private long lastPenalty = -1;
 
+    /** A new layer (other blocks): find the fastest safe speed for it again. */
+    public void newLayer() {
+        if (Configs.Speed.AUTO_SPEED.getBooleanValue() && fastestSafe > 1) {
+            Chat.info("Speed: new layer, trying faster again (was " + interval() + ")");
+        }
+        fastestSafe = 1;
+        goodInARow = 0;
+        calmUntil = 0;
+    }
+
     public void reset() {
         seen.clear();
         appeared.clear();
