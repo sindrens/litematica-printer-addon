@@ -78,6 +78,11 @@ public class Mover {
         };
     }
 
+    /** True for a block the printer was given time for in reach, but nothing happened. */
+    public boolean wasSkipped(BlockPos pos) {
+        return skipped.containsKey(pos);
+    }
+
     /** What the player is doing now, for the build stats. */
     public BuildStats.Activity activity() {
         return switch (state) {
@@ -471,7 +476,27 @@ public class Mover {
         LayerManager layers = AutoBuild.INSTANCE.layers;
         int baseY = layers.isActive() && goalBlock.getY() >= layers.getLayer() && goalBlock.getY() <= layers.getLayerTop()
                 ? layers.getLayerTop() : goalBlock.getY();
-        BlockPos pos = new BlockPos(goalBlock.getX(), baseY + Configs.Movement.HOVER_HEIGHT.getIntegerValue(), goalBlock.getZ());
+        // Not right above a block that still has to go in: the printer won't place under the player's feet.
+        // Take the nearest column 2 blocks to the side whose top layer block is already done (or empty).
+        int column = 0;
+        int[][] offsets = {{0, 0}, {0, -2}, {-2, 0}, {2, 0}, {0, 2}, {-2, -2}, {2, -2}, {-2, 2}, {2, 2}};
+        if (reserved.contains(new BlockPos(goalBlock.getX(), baseY, goalBlock.getZ()))
+                || reserved.contains(new BlockPos(goalBlock.getX(), goalBlock.getY(), goalBlock.getZ()))) {
+            double best = Double.MAX_VALUE;
+            for (int i = 1; i < offsets.length; i++) {
+                BlockPos below = new BlockPos(goalBlock.getX() + offsets[i][0], baseY, goalBlock.getZ() + offsets[i][1]);
+                if (reserved.contains(below) || reserved.contains(below.below(baseY - goalBlock.getY()))) {
+                    continue;
+                }
+                double d = mc.player.position().distanceToSqr(Vec3.atCenterOf(below));
+                if (d < best) {
+                    best = d;
+                    column = i;
+                }
+            }
+        }
+        BlockPos pos = new BlockPos(goalBlock.getX() + offsets[column][0], baseY + Configs.Movement.HOVER_HEIGHT.getIntegerValue(),
+                goalBlock.getZ() + offsets[column][1]);
         for (int i = 0; i < 4; i++) {
             if (PathFinder.isPassable(mc.level, pos) && PathFinder.isPassable(mc.level, pos.above())
                     && !reserved.contains(pos) && !reserved.contains(pos.above())) {

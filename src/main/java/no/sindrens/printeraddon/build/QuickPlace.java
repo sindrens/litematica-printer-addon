@@ -105,7 +105,9 @@ public class QuickPlace {
         }
 
         // Normally only what the printer can't place (e.g. a hopper with nothing in front of it to click)
-        if (mode == no.sindrens.printeraddon.config.QuickPlaceMode.WHEN_PRINTER_CANT && printerCan(mc, pos)) {
+        // ... or what the printer says it can do but didn't when it had the chance
+        if (mode == no.sindrens.printeraddon.config.QuickPlaceMode.WHEN_PRINTER_CANT && printerCan(mc, pos)
+                && !AutoBuild.INSTANCE.mover.wasSkipped(pos)) {
             return null;
         }
 
