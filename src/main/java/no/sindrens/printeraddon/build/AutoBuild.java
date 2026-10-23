@@ -169,6 +169,11 @@ public class AutoBuild {
             }
         }
         EntityPlacer.missing(mc, schematic).forEach((item, count) -> needs.merge(item, count, Integer::sum));
+        // Farmland is dirt tilled with a hoe
+        if (needs.containsKey(net.minecraft.world.item.Items.DIRT)
+                && !mc.player.getInventory().contains(net.minecraft.tags.ItemTags.HOES)) {
+            needs.put(net.minecraft.world.item.Items.IRON_HOE, 1);
+        }
         missingWhole.clear();
         needs.forEach((item, count) -> {
             int have = mc.player.getInventory().countItem(item);

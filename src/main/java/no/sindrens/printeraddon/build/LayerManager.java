@@ -141,6 +141,9 @@ public class LayerManager {
 
         Findings findings = new Findings();
         int remaining = scanLayers(mc.level, schematic, areas, null, findings);
+        if (findings.needsHoe && mc.player != null && !mc.player.getInventory().contains(net.minecraft.tags.ItemTags.HOES)) {
+            findings.needs.put(net.minecraft.world.item.Items.IRON_HOE, 1);
+        }
         updateShoppingList(mc, findings.needs);
 
         // Everything left waits for something higher up (an ascending rail, an observer watching a block above):
@@ -499,6 +502,8 @@ public class LayerManager {
         final List<BlockPos> waiting = new ArrayList<>();
         /** Items the missing blocks need. */
         final java.util.Map<net.minecraft.world.item.Item, Integer> needs = new java.util.LinkedHashMap<>();
+        /** Farmland is placed as dirt and tilled: that needs a hoe. */
+        boolean needsHoe;
     }
 
     /**
@@ -548,6 +553,9 @@ public class LayerManager {
                             ItemStack item = MaterialCache.getInstance().getRequiredBuildItemForState(target);
                             if (!item.isEmpty()) {
                                 findings.needs.merge(item.getItem(), 1, Integer::sum);
+                            }
+                            if (target.getBlock() == Blocks.FARMLAND) {
+                                findings.needsHoe = true;
                             }
                         }
                     }

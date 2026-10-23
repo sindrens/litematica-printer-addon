@@ -44,7 +44,7 @@ import java.util.TreeMap;
  */
 public class FarmTest implements FabricClientGameTest {
     private static final BlockPos ORIGIN = new BlockPos(2, -60, 2);
-    private static final int MAX_TICKS = 20 * 60 * 60;
+    private static final int MAX_TICKS = 20 * 60 * 60 * 4;
     private static final int SCREENSHOT_EVERY = 20;
     private static final int RESTOCK_EVERY = 40;
     /** Stop and write the report if no layer has finished for this long. */

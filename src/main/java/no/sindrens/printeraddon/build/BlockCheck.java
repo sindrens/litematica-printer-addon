@@ -111,7 +111,7 @@ public final class BlockCheck {
         }
 
         if (current.getBlock() == target.getBlock()) {
-            return compareSameBlock(level, pos, target, current);
+            return compareSameBlock(level, schematic, pos, target, current);
         }
 
         if (StateRules.isGrowthVariant(target.getBlock(), current.getBlock())) {
@@ -129,7 +129,32 @@ public final class BlockCheck {
         return isProtected(level, pos, current) ? Result.PROTECTED : Result.WRONG_BLOCK;
     }
 
-    private static Result compareSameBlock(Level level, BlockPos pos, BlockState target, BlockState current) {
+    /**
+     * True for a rail that should slope up but lies flat along the same line, while the rail on the higher end
+     * isn't placed yet. A flat rail with a free end tilts up as soon as a rail goes in one block higher there.
+     */
+    private static boolean waitsForUphillRail(Level level, WorldSchematic schematic, BlockPos pos, BlockState target, BlockState current) {
+        net.minecraft.world.level.block.BaseRailBlock rail = (net.minecraft.world.level.block.BaseRailBlock) target.getBlock();
+        net.minecraft.world.level.block.state.properties.RailShape want = target.getValue(rail.getShapeProperty());
+        net.minecraft.world.level.block.state.properties.RailShape have = current.getValue(rail.getShapeProperty());
+        if (!want.isSlope() || have.isSlope()) {
+            return false;
+        }
+        net.minecraft.core.Direction up = switch (want) {
+            case ASCENDING_NORTH -> net.minecraft.core.Direction.NORTH;
+            case ASCENDING_SOUTH -> net.minecraft.core.Direction.SOUTH;
+            case ASCENDING_EAST -> net.minecraft.core.Direction.EAST;
+            default -> net.minecraft.core.Direction.WEST;
+        };
+        boolean sameLine = up.getAxis() == net.minecraft.core.Direction.Axis.Z
+                ? have == net.minecraft.world.level.block.state.properties.RailShape.NORTH_SOUTH
+                : have == net.minecraft.world.level.block.state.properties.RailShape.EAST_WEST;
+        BlockPos uphill = pos.relative(up).above();
+        return sameLine && schematic.getBlockState(uphill).getBlock() instanceof net.minecraft.world.level.block.BaseRailBlock
+                && !(level.getBlockState(uphill).getBlock() instanceof net.minecraft.world.level.block.BaseRailBlock);
+    }
+
+    private static Result compareSameBlock(Level level, WorldSchematic schematic, BlockPos pos, BlockState target, BlockState current) {
         Block block = target.getBlock();
         boolean orientationDiff = false;
         boolean countDiff = false;
@@ -150,6 +175,11 @@ public final class BlockCheck {
                 // the printer adds the second slab
                 countDiff = true;
             } else if (name.equals("shape") && block instanceof net.minecraft.world.level.block.BaseRailBlock) {
+                // A slope that is still flat because the rail it climbs to (often in the next layer) isn't there
+                // yet: it tilts by itself when that rail goes in
+                if (waitsForUphillRail(level, schematic, pos, target, current)) {
+                    continue;
+                }
                 // A rail with the wrong shape sends carts the wrong way: break it and place it again
                 orientationDiff = true;
             } else if (ORIENTATION_PROPERTIES.contains(name)) {
