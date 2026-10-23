@@ -66,6 +66,9 @@ public class FarmTest implements FabricClientGameTest {
 
             server.runCommand("difficulty peaceful");
             server.runCommand("gamerule random_tick_speed 0");
+            // Thousands of hoppers checking for items every tick slow the test server down a lot; nothing has to run
+            // while building, so the world's ticking is frozen (placing blocks still works)
+            server.runCommand("tick freeze");
             server.runCommand("gamerule advance_time false");
             server.runCommand("gamerule advance_weather false");
             server.runCommand("time set noon");
@@ -77,7 +80,20 @@ public class FarmTest implements FabricClientGameTest {
 
             context.runOnClient(mc -> {
                 mc.options.setCameraType(CameraType.THIRD_PERSON_BACK);
-                mc.options.renderDistance().set(10);
+                // Software rendering on the test machine takes the CPU from the game server: keep drawing cheap
+                mc.options.renderDistance().set(3);
+                // The see-through schematic blocks cost the most to draw; the coloured outlines stay
+                fi.dy.masa.litematica.config.Configs.Visuals.ENABLE_SCHEMATIC_BLOCKS.setBooleanValue(false);
+                fi.dy.masa.litematica.config.Configs.Visuals.OVERLAY_REDUCED_INNER_SIDES.setBooleanValue(true);
+                mc.options.applyGraphicsPreset(net.minecraft.client.GraphicsPreset.FAST);
+                mc.options.framerateLimit().set(10);
+                mc.options.cloudStatus().set(net.minecraft.client.CloudStatus.OFF);
+                mc.options.ambientOcclusion().set(false);
+                mc.options.entityShadows().set(false);
+                mc.options.particles().set(net.minecraft.server.level.ParticleStatus.MINIMAL);
+                mc.options.biomeBlendRadius().set(0);
+                mc.options.mipmapLevels().set(0);
+                mc.options.chunkSectionFadeInTime().set(0.0);
                 LitematicaSchematic schematic = LitematicaSchematic.createFromFile(schematicFile.getParent(),
                         schematicFile.getFileName().toString());
                 if (schematic == null) {

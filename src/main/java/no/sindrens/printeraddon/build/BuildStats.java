@@ -81,7 +81,8 @@ public class BuildStats {
         int turns = Math.max(1, ticks / interval);
         StringBuilder sb = new StringBuilder();
         sb.append(placed).append(" placed in ").append(time(millis))
-                .append(String.format(" (%.0f/min, printer used %d%% of its turns)", placed * 60_000.0 / Math.max(1, millis),
+                .append(String.format(" (%.0f per game minute, %.0f per real minute, %d%% of the interval turns used)",
+                        placed * 1200.0 / Math.max(1, ticks), placed * 60_000.0 / Math.max(1, millis),
                         Math.min(100, placed * 100 / turns)));
         if (ticks > 0) {
             sb.append(" | time:");

@@ -106,8 +106,14 @@ public class FacePlace {
             return false;
         }
 
-        // Item in hand now, place next tick (switching items takes a moment to reach the server)
+        // Already holding it: place right away
         ItemStack item = MaterialCache.getInstance().getRequiredBuildItemForState(schematic.getBlockState(next));
+        if (player.getMainHandItem().is(item.getItem())) {
+            place(mc, player, schematic, next);
+            cooldown = Math.max(2, Configs.Speed.printerInterval()) - 1;
+            return true;
+        }
+        // Item in hand now, place next tick (switching items takes a moment to reach the server)
         Inventory inventory = player.getInventory();
         int slot = inventory.findSlotMatchingItem(item);
         if (slot == -1) {
