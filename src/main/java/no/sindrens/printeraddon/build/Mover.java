@@ -44,6 +44,8 @@ public class Mover {
 
     /** Unfinished positions the player can do something about (items available, not skipped). */
     private final List<BlockPos> work = new ArrayList<>();
+    /** Parts of the layer too far away to be loaded yet: flown to when nothing else is left. */
+    private final List<BlockPos> unloaded = new ArrayList<>();
     /** Unfinished positions the player must not stand in. */
     private final Set<BlockPos> reserved = new HashSet<>();
     private final Map<BlockPos, Long> skipped = new HashMap<>();
@@ -168,6 +170,17 @@ public class Mover {
             return;
         }
 
+        if (work.isEmpty() && !unloaded.isEmpty()) {
+            // The rest of the layer is too far away to be loaded: go there so it loads
+            BlockPos far = nearest(player, unloaded);
+            if (target == null || !target.equals(far) || (state != State.WALKING && state != State.FLYING)) {
+                target = far;
+                PrinterAddon.debug("Going to {}, that part isn't loaded yet", far.toShortString());
+                plan(mc, player, far, mode, reach);
+            }
+            move(mc, player, mode);
+            return;
+        }
         if (work.isEmpty()) {
             if (state == State.WALKING || state == State.FLYING) {
                 halt(player);
@@ -645,6 +658,7 @@ public class Mover {
     private void scan(Minecraft mc, WorldSchematic schematic) {
         work.clear();
         reserved.clear();
+        unloaded.clear();
 
         LocalPlayer player = mc.player;
         boolean creative = player.getAbilities().instabuild;
@@ -659,6 +673,12 @@ public class Mover {
                             continue;
                         }
                         BlockCheck.Result result = BlockCheck.check(mc.level, schematic, pos);
+                        if (result == BlockCheck.Result.UNLOADED) {
+                            if (unloaded.size() < 512) {
+                                unloaded.add(pos.immutable());
+                            }
+                            continue;
+                        }
                         if (result == BlockCheck.Result.MISSING && mc.level.getBlockState(pos).isAir()) {
                             AutoBuild.INSTANCE.markEmpty(pos);
                         }
