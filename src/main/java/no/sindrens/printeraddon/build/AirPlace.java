@@ -195,8 +195,8 @@ public class AirPlace {
      * from the face that's clicked, and air place would make them point down.
      */
     public static boolean isCandidate(Level level, BlockPos pos, BlockState target) {
-        // Hoppers, logs, chains: FacePlace clicks the right face for those, air place could turn them wrong
-        if (FacePlace.faceFor(target) != null) {
+        // What QuickPlace can place with one click doesn't need air place (which can turn blocks the wrong way)
+        if (QuickPlace.isCandidate(net.minecraft.client.Minecraft.getInstance(), pos, target)) {
             return false;
         }
         return !hasSupport(level, pos);

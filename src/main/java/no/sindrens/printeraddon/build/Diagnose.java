@@ -54,10 +54,14 @@ public final class Diagnose {
         if (build.rails.isTemp(pos)) {
             sb.append(" | temporary rail spot");
         }
-        if (FacePlace.isCandidate(mc.level, pos, target)) {
-            sb.append(" | nothing to place it against: the add-on places it against its ")
-                    .append(FacePlace.faceFor(target).getName()).append(" side");
-        } else if (AirPlace.isCandidate(mc.level, pos, target)) {
+        QuickPlace.Way way = QuickPlace.way(mc, pos, target);
+        if (way != null) {
+            sb.append(" | quick place: click ").append(way.face().getName()).append(" side looking ")
+                    .append((int) way.yaw()).append('/').append((int) way.pitch());
+        } else if (result == BlockCheck.Result.MISSING) {
+            sb.append(" | quick place can't (left to the printer)");
+        }
+        if (way == null && AirPlace.isCandidate(mc.level, pos, target)) {
             sb.append(" | floating: air place");
         }
 

@@ -103,6 +103,11 @@ public class Configs implements IConfigHandler {
         public static final ConfigInteger STUCK_REPORT_SECONDS = new ConfigInteger("stuckReportSeconds", 30, 5, 600,
                 "If the layer hasn't changed for this long, list in chat what is left and why.",
                 "Report stuck layer after (seconds)");
+        public static final ConfigBoolean QUICK_PLACE = new ConfigBoolean("quickPlace", true,
+                "Place blocks with one click each (one per printer interval), working out which way to look and which side\n"
+                        + "to click so they come out exactly as in the schematic. The printer needs 2-4 intervals per block.\n"
+                        + "Blocks this can't predict stay with the printer.",
+                "Quick place (one click per block)");
         public static final ConfigInteger SKIP_STUCK_SECONDS = new ConfigInteger("skipStuckSeconds", 20, 5, 3600,
                 "If blocks you have the items for still can't be placed after this long (e.g. two rails side by side\n"
                         + "that the game always connects), go on to the next layer and list them at the end to do by hand.\n"
@@ -124,7 +129,7 @@ public class Configs implements IConfigHandler {
                 "Use printer's air place");
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                AUTO_LAYER, LAYER_CHECK_INTERVAL, STUCK_REPORT_SECONDS, SKIP_STUCK_SECONDS, EXTRA_BLOCKS_BLOCK_LAYER,
+                AUTO_LAYER, QUICK_PLACE, LAYER_CHECK_INTERVAL, STUCK_REPORT_SECONDS, SKIP_STUCK_SECONDS, EXTRA_BLOCKS_BLOCK_LAYER,
                 PLANT_WITH_TILLING,
                 USE_AIR_PLACE);
     }

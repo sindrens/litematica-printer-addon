@@ -238,7 +238,7 @@ public class Mover {
                 return true;
             }
             // Blocks with nothing to place them against: the add-on clicks the right face itself
-            if (result == BlockCheck.Result.MISSING && FacePlace.isCandidate(mc.level, p, schematic.getBlockState(p))) {
+            if (result == BlockCheck.Result.MISSING && QuickPlace.isCandidate(mc, p, schematic.getBlockState(p))) {
                 return true;
             }
             // Air place does floating blocks and chains the printer can't do the normal way

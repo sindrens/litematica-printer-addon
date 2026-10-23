@@ -25,7 +25,7 @@ public class AutoBuild {
     /** Temporary rails are removed through the same list as misplaced air-placed blocks. */
     public final RailHelper rails = new RailHelper(airPlace.misplaced());
     public final EntityPlacer entities = new EntityPlacer();
-    public final FacePlace facePlace = new FacePlace();
+    public final QuickPlace quickPlace = new QuickPlace();
     private final InventoryCleaner cleaner = new InventoryCleaner();
     public final BuildStats stats = new BuildStats();
     /** What the whole schematic still needs (item -> count), including what's in the inventory. */
@@ -67,7 +67,7 @@ public class AutoBuild {
 
     /** The printer is paused while a block is being broken, so the two don't swap the held item. */
     public boolean shouldPausePrinter() {
-        return breaker.isBusy() || fluids.isBusy() || rails.isBusy() || entities.isBusy() || facePlace.isBusy()
+        return breaker.isBusy() || fluids.isBusy() || rails.isBusy() || entities.isBusy() || false
                 || no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.isRunning();
     }
 
@@ -100,10 +100,10 @@ public class AutoBuild {
                 }
             }
         }
-        // Blocks FacePlace does with one click (hoppers, logs, chains) aren't the printer's: it spends its turns on the rest
+        // Blocks QuickPlace does with one click aren't the printer's: it spends its turns on the rest
         java.util.List<net.minecraft.core.BlockPos> forPrinter = new java.util.ArrayList<>(all.size());
         for (net.minecraft.core.BlockPos pos : all) {
-            if (!FacePlace.isCandidate(mc.level, pos, schematic.getBlockState(pos))) {
+            if (!QuickPlace.isCandidate(mc, pos, schematic.getBlockState(pos))) {
                 forPrinter.add(pos);
             }
         }
@@ -327,7 +327,7 @@ public class AutoBuild {
         fluids.reset();
         rails.reset();
         entities.reset();
-        facePlace.reset();
+        quickPlace.reset();
         breaker.setForced(airPlace.misplaced());
 
         if (Configs.Layers.AUTO_LAYER.getBooleanValue() && !layers.start(mc)) {
@@ -476,8 +476,8 @@ public class AutoBuild {
             entities.tick(mc);
         }
         if (!breaker.isBusy() && !airPlace.isActive() && !fluids.isBusy() && !rails.isBusy() && !entities.isBusy()
-                && (facePlace.isBusy() || PrinterBridge.isIdle())) {
-            facePlace.tick(mc);
+                && PrinterBridge.isIdle()) {
+            quickPlace.tick(mc);
         }
 
         if (layers.isActive() && !layers.tick(mc)) {
@@ -486,7 +486,7 @@ public class AutoBuild {
         }
 
         if (PrinterBridge.isIdle() && !breaker.isBusy() && !fluids.isBusy() && !rails.isBusy() && !entities.isBusy()
-                && !facePlace.isBusy()) {
+                && !false) {
             if (cleaner.tick(mc, neededWhole)) {
                 return;
             }
