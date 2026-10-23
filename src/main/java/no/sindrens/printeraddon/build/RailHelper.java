@@ -98,12 +98,12 @@ public class RailHelper {
     }
 
     /** A rail at the spot, or one block above/below it (slopes connect up and down). */
-    private static boolean railAround(Level level, BlockPos pos) {
+    static boolean railAround(Level level, BlockPos pos) {
         return isRail(level.getBlockState(pos)) || isRail(level.getBlockState(pos.above()))
                 || isRail(level.getBlockState(pos.below()));
     }
 
-    private static boolean railAroundInSchematic(WorldSchematic schematic, BlockPos pos) {
+    static boolean railAroundInSchematic(WorldSchematic schematic, BlockPos pos) {
         return isRail(schematic.getBlockState(pos)) || isRail(schematic.getBlockState(pos.above()))
                 || isRail(schematic.getBlockState(pos.below()));
     }
@@ -130,7 +130,7 @@ public class RailHelper {
                 if (endPos.equals(pos) || railAround(level, endPos)) {
                     continue;
                 }
-                if (canHoldTemp(level, endPos)) {
+                if (canHoldTemp(level, schematic, endPos)) {
                     needed.add(endPos.immutable());
                 }
             }
@@ -143,10 +143,14 @@ public class RailHelper {
                 if (railAround(level, next)) {
                     continue;
                 }
+                if (isSlopeUpTo(schematic.getBlockState(next.below()), d.getOpposite())) {
+                    // A slope climbs to this curve from below: the slope waits for the curve, not the other way
+                    continue;
+                }
                 if (railAroundInSchematic(schematic, next)) {
                     return new Plan(true, List.of());
                 }
-                if (canHoldTemp(level, next)) {
+                if (canHoldTemp(level, schematic, next)) {
                     needed.add(next.immutable());
                 }
             }
@@ -241,14 +245,31 @@ public class RailHelper {
         return rail.immutable();
     }
 
-    private static boolean canHoldTemp(Level level, BlockPos at) {
+    /** A slope rail that rises towards {@code up}. */
+    private static boolean isSlopeUpTo(BlockState state, Direction up) {
+        if (!isRail(state)) {
+            return false;
+        }
+        RailShape shape = state.getValue(((BaseRailBlock) state.getBlock()).getShapeProperty());
+        return switch (shape) {
+            case ASCENDING_NORTH -> up == Direction.NORTH;
+            case ASCENDING_SOUTH -> up == Direction.SOUTH;
+            case ASCENDING_EAST -> up == Direction.EAST;
+            case ASCENDING_WEST -> up == Direction.WEST;
+            default -> false;
+        };
+    }
+
+    /** A temporary rail only goes where the schematic has nothing (else it would stand where a block belongs). */
+    private static boolean canHoldTemp(Level level, WorldSchematic schematic, BlockPos at) {
         BlockState here = level.getBlockState(at);
-        return (here.isAir() || here.canBeReplaced()) && here.getFluidState().isEmpty()
+        return schematic.getBlockState(at).isAir() && (here.isAir() || here.canBeReplaced()) && here.getFluidState().isEmpty()
                 && level.getBlockState(at.below()).isFaceSturdy(level, at.below(), Direction.UP);
     }
 
     private void placeTemp(Minecraft mc, LocalPlayer player, BlockPos at, @Nullable Direction facing) {
-        if (!player.getMainHandItem().is(Items.RAIL) || !canHoldTemp(mc.level, at)) {
+        WorldSchematic schematic = SchematicHelper.world();
+        if (!player.getMainHandItem().is(Items.RAIL) || schematic == null || !canHoldTemp(mc.level, schematic, at)) {
             temps.remove(at);
             return;
         }

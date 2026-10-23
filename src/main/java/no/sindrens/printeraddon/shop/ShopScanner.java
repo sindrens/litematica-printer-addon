@@ -27,9 +27,9 @@ import java.util.Set;
 import java.util.function.Consumer;
 
 /**
- * Reads the whole /shop: opens every category, goes through every page, and saves where each item is and
- * what it costs. It never clicks an item that shows a price or a button that says buy/sell/confirm, except
- * once at the end (if enabled) to read the buy screen, which it then closes without confirming.
+ * Reads the money shop in /shop: opens only the money shop button (the paper), its categories and every page,
+ * and saves where each item is and what it costs. Items for sale are read from their text, never clicked,
+ * except once at the end (if enabled) to read the buy screen, which it then closes without confirming.
  */
 public class ShopScanner {
     public static final ShopScanner INSTANCE = new ShopScanner();
@@ -189,7 +189,28 @@ public class ShopScanner {
         ShopScanResult.Category main = new ShopScanResult.Category();
         main.name = "Main menu";
 
-        if (snapshot.hasPricedItems()) {
+        String section = Configs.Shop.SHOP_SECTION.getStringValue().trim();
+        if (!section.isEmpty()) {
+            // Only the money shop button: the rest of the main menu is other shops
+            ScreenSnapshot.Item button = findSection(snapshot, section);
+            if (button == null) {
+                failReason = "No '" + section + "' button in the /shop menu.";
+                Chat.warn("Couldn't find the money shop button (" + section + ") in /" + result.shopCommand
+                        + ". Set 'Money shop button' in the Shop settings.");
+                cancel("no money shop button");
+                return;
+            }
+            ShopScanResult.Category money = new ShopScanResult.Category();
+            money.name = button.name();
+            money.path.add(button.slot());
+            money.itemId = button.itemId();
+            money.count = button.count();
+            pendingCategories.add(money);
+            Chat.info("Main menu '" + snapshot.title() + "': opening only '" + button.name() + "'.");
+            return;
+        }
+
+        if (snapshot.hasShopItems()) {
             // The main menu itself sells items
             result.categories.add(main);
             readPage(main, 0, snapshot, List.of());
@@ -200,13 +221,48 @@ public class ShopScanner {
         Chat.info("Main menu '" + snapshot.title() + "': " + pendingCategories.size() + " categories to check.");
     }
 
+    /** The main menu button that matches the setting: an item id, or part of its name. */
+    @Nullable
+    private static ScreenSnapshot.Item findSection(ScreenSnapshot snapshot, String section) {
+        String wanted = ShopText.lower(section);
+        String id = wanted.contains(":") ? wanted : "minecraft:" + wanted;
+        for (ScreenSnapshot.Item item : snapshot.realItems()) {
+            if (item.itemId().equals(id)) {
+                return item;
+            }
+        }
+        for (ScreenSnapshot.Item item : snapshot.realItems()) {
+            if (ShopText.lower(item.name()).contains(wanted)) {
+                return item;
+            }
+        }
+        return null;
+    }
+
     private void enterCategory(ShopScanResult.Category category, ScreenSnapshot snapshot) {
         if (snapshot.looksLikeBuyScreen()) {
-            result.notes.add("'" + category.name + "' opened a buy screen ('" + snapshot.title() + "'), not a category.");
+            // It was an item for sale without price text: so are the other buttons next to it. Don't click them.
             if (result.buyScreen == null) {
                 result.buyScreen = ShopScanResult.menuOf(snapshot);
                 result.buyScreenProbedWith = category.name;
             }
+            List<Integer> parent = category.path.subList(0, category.path.size() - 1);
+            List<ShopScanResult.Category> siblings = new ArrayList<>(List.of(category));
+            pendingCategories.removeIf(c -> {
+                boolean sibling = c.path.size() == category.path.size() && c.path.subList(0, parent.size()).equals(parent);
+                if (sibling) {
+                    siblings.add(c);
+                }
+                return sibling;
+            });
+            int cut = category.name.lastIndexOf(" > ");
+            String parentName = cut < 0 ? "Main menu" : category.name.substring(0, cut);
+            for (ShopScanResult.Category item : siblings) {
+                String itemName = item.name.substring(item.name.lastIndexOf(" > ") + (item.name.contains(" > ") ? 3 : 0));
+                addLocation(parentName, item.itemId, itemName, new ArrayList<>(parent), 0, item.path.get(item.path.size() - 1), item.count, null);
+            }
+            result.notes.add("'" + category.name + "' opened a buy screen ('" + snapshot.title() + "'): its menu holds "
+                    + siblings.size() + " items without a price in their text.");
             steps.addFirst(new CloseMenu());
             return;
         }
@@ -237,27 +293,24 @@ public class ShopScanner {
             }
             page.items.add(ShopScanResult.Button.of(item));
 
-            Double price = item.buyPrice();
-            if (price == null) {
+            if (!item.isShopItem()) {
                 continue;
             }
+            Double price = item.buyPrice();
+            if (price == null && item.sellPrice() != null) {
+                // Sell only
+                continue;
+            }
+            addLocation(category.name, item.itemId(), item.name(), category.path, index, item.slot(), item.count(), price);
 
-            ShopScanResult.Location location = new ShopScanResult.Location();
-            location.category = category.name;
-            location.path = category.path;
-            location.page = index;
-            location.slot = item.slot();
-            location.name = item.name();
-            location.amountShown = item.count();
-            location.buyPrice = price;
-            result.items.computeIfAbsent(item.itemId(), k -> new ArrayList<>()).add(location);
-
-            if (price > 0 && (cheapest == null || price < cheapest.price())) {
-                cheapest = new Probe(category.path, List.copyOf(nextSlots), item.slot(), item.name(), price);
+            // Probe the cheapest item; one without a known price only if nothing has a price
+            double probePrice = price == null ? Double.MAX_VALUE : price;
+            if ((price == null || price > 0) && (cheapest == null || probePrice < cheapest.price())) {
+                cheapest = new Probe(category.path, List.copyOf(nextSlots), item.slot(), item.name(), probePrice);
             }
         }
 
-        if (!snapshot.hasPricedItems() && index == 0) {
+        if (!snapshot.hasShopItems() && index == 0) {
             queueSubMenus(category, snapshot);
         }
 
@@ -277,15 +330,30 @@ public class ShopScanner {
         }
     }
 
-    /** Every clickable, price-less button in this menu might open a (sub-)category. */
+    private void addLocation(String categoryName, String itemId, String name, List<Integer> path, int page, int slot, int count,
+                             @Nullable Double price) {
+        if (itemId == null) {
+            return;
+        }
+        ShopScanResult.Location location = new ShopScanResult.Location();
+        location.category = categoryName;
+        location.path = path;
+        location.page = page;
+        location.slot = slot;
+        location.name = name;
+        location.amountShown = count;
+        location.buyPrice = price;
+        result.items.computeIfAbsent(itemId, k -> new ArrayList<>()).add(location);
+    }
+
+    /** Every clickable button in this menu that isn't an item for sale might open a (sub-)category. */
     private void queueSubMenus(ShopScanResult.Category parent, ScreenSnapshot snapshot) {
         if (parent.path.size() >= MAX_DEPTH) {
             return;
         }
 
         for (ScreenSnapshot.Item item : snapshot.realItems()) {
-            if (item.nav() != ShopText.Nav.NONE || item.buyPrice() != null || item.sellPrice() != null
-                    || isUnsafe(item)) {
+            if (item.nav() != ShopText.Nav.NONE || item.isShopItem() || isUnsafe(item)) {
                 continue;
             }
 
@@ -293,6 +361,8 @@ public class ShopScanner {
             category.name = parent.path.isEmpty() ? item.name() : parent.name + " > " + item.name();
             category.path = new ArrayList<>(parent.path);
             category.path.add(item.slot());
+            category.itemId = item.itemId();
+            category.count = item.count();
             pendingCategories.add(category);
         }
     }

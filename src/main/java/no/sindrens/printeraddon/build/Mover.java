@@ -265,11 +265,31 @@ public class Mover {
         }
     }
 
+    @Nullable
+    private BlockPos lastGoal;
+    private int samePlans;
+
     private void plan(Minecraft mc, LocalPlayer player, BlockPos goalBlock, MoveMode mode, double reach) {
         path = null;
         flyTarget = null;
         stuckTicks = 0;
         lastDistance = Double.MAX_VALUE;
+
+        // Got there over and over and still can't do it from there: leave it for later instead of looping
+        if (goalBlock.equals(lastGoal)) {
+            if (++samePlans > 4) {
+                PrinterAddon.debug("Can't do {} from where it can stand, skipping it for now", goalBlock.toShortString());
+                skipped.put(goalBlock, tick + SKIP_TICKS);
+                work.remove(goalBlock);
+                state = State.IDLE;
+                samePlans = 0;
+                lastGoal = null;
+                return;
+            }
+        } else {
+            lastGoal = goalBlock.immutable();
+            samePlans = 0;
+        }
 
         if (mode.canWalk() && (player.onGround() || player.isInWater()) && !flying(player)) {
             List<BlockPos> route = findWalk(mc, player.blockPosition(), goalBlock, reach);

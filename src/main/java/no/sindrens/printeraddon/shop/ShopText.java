@@ -14,7 +14,7 @@ public final class ShopText {
     public enum Nav { NONE, NEXT, PREVIOUS, BACK, CLOSE }
 
     /** A number like 5, 1,250, 2.5, 118k, $3.2m */
-    private static final Pattern NUMBER = Pattern.compile("([0-9][0-9,]*(?:\\.[0-9]+)?)\\s*([kmb])?\\b",
+    private static final Pattern NUMBER = Pattern.compile("([0-9][0-9,]*(?:\\.[0-9]+)?)\\s*([kmb])?\\b(?!\\s*x\\b)",
             Pattern.CASE_INSENSITIVE);
 
     public static String lower(String text) {
@@ -54,25 +54,58 @@ public final class ShopText {
 
     @Nullable
     public static Double buyPrice(List<String> lore) {
-        return priceAfter(lore, "buy");
+        Double price = priceAfter(lore, "buy", null);
+        if (price == null) {
+            price = priceAfter(lore, "cost", "sell");
+        }
+        if (price == null) {
+            price = priceAfter(lore, "price", "sell");
+        }
+        if (price == null) {
+            price = priceAfter(lore, "$", "sell");
+        }
+        return price;
     }
 
     @Nullable
     public static Double sellPrice(List<String> lore) {
-        return priceAfter(lore, "sell");
+        return priceAfter(lore, "sell", null);
     }
 
-    /** First number on the first lore line that mentions {@code keyword} (e.g. "Buy price: $5"). */
+    /**
+     * True for an item in a shop page: its lore talks about buying, selling or a price. Such an item is never
+     * clicked while scanning (clicking it opens the buy screen, or buys it).
+     */
+    public static boolean isShopItem(List<String> lore) {
+        if (buyPrice(lore) != null || sellPrice(lore) != null) {
+            return true;
+        }
+        for (String line : lore) {
+            String l = lower(line);
+            if (l.contains("buy") || l.contains("sell") || l.contains("price") || l.contains("cost")
+                    || l.contains("purchase") || l.contains("$")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * First number on the first lore line that mentions {@code keyword} (e.g. "Buy price: $5"), skipping lines
+     * with {@code skipWord}. A number after a $ wins over others ("Buy 1x for $5" is 5).
+     */
     @Nullable
-    private static Double priceAfter(List<String> lore, String keyword) {
+    private static Double priceAfter(List<String> lore, String keyword, @Nullable String skipWord) {
         for (String line : lore) {
             String l = lower(line);
             int at = l.indexOf(keyword);
             // "Left click to buy" has no number: keep looking
-            if (at < 0) {
+            if (at < 0 || (skipWord != null && l.contains(skipWord))) {
                 continue;
             }
-            Double value = parseNumber(l.substring(at + keyword.length()));
+            String rest = l.substring(at + keyword.length());
+            int dollar = rest.indexOf('$');
+            Double value = parseNumber(dollar >= 0 ? rest.substring(dollar + 1) : rest);
             if (value != null) {
                 return value;
             }

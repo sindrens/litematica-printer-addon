@@ -42,6 +42,7 @@ public class LayerManager {
     private int waitingChecks;
     /** All layers are done; only the deferred blocks are left. */
     private boolean finishingDeferred;
+    private boolean retriedSkipped;
 
     /** Litematica's layer settings before auto build, put back afterwards. */
     @Nullable
@@ -97,6 +98,7 @@ public class LayerManager {
 
     public void stop() {
         finishingDeferred = false;
+        retriedSkipped = false;
         if (active) {
             restoreLayerRange();
         }
@@ -173,6 +175,13 @@ public class LayerManager {
             } while (layer <= maxY && scan(mc.level, schematic, areas, layer, null) == 0);
 
             if (layer > maxY) {
+                if (!retriedSkipped && !AutoBuild.INSTANCE.couldNotPlace.isEmpty()) {
+                    // One more go at what was skipped: with everything around it built, it often fits now
+                    retriedSkipped = true;
+                    Chat.info("Trying the " + AutoBuild.INSTANCE.couldNotPlace.size() + " skipped blocks again.");
+                    AutoBuild.INSTANCE.deferred.addAll(AutoBuild.INSTANCE.couldNotPlace);
+                    AutoBuild.INSTANCE.couldNotPlace.clear();
+                }
                 if (!unfinishedDeferred(mc.level, schematic).isEmpty()) {
                     // All layers done; place what waited, with the whole schematic visible
                     finishingDeferred = true;
@@ -212,6 +221,7 @@ public class LayerManager {
         if (ticksWithoutProgress >= Configs.Layers.SKIP_STUCK_SECONDS.getIntegerValue() * 20 && skipUnplaceable(mc, schematic, areas)) {
             completeChecks = 2;
             ticksUntilCheck = 0;
+            ticksWithoutProgress = 0;
         }
 
         return true;
@@ -239,9 +249,6 @@ public class LayerManager {
                                 && !mc.player.getInventory().contains(s -> s.is(Fluids.bucketFor(bucketTarget)))) {
                             // Waiting for a bucket (to buy), not stuck
                             return false;
-                        }
-                        if (AutoBuild.INSTANCE.rails.isTemp(pos)) {
-                            continue;
                         }
                         BlockState target = schematic.getBlockState(pos);
                         ItemStack needed = MaterialCache.getInstance().getRequiredBuildItemForState(target);
@@ -287,6 +294,17 @@ public class LayerManager {
                 Chat.warn(" - " + pos.getX() + " " + pos.getY() + " " + pos.getZ() + ": "
                         + describe(mc, BlockCheck.check(mc.level, schematic, pos), target));
             }
+        }
+
+        if (ticksWithoutProgress >= Configs.Layers.SKIP_STUCK_SECONDS.getIntegerValue() * 20 * 2) {
+            // Nothing more happens: finish and list what's left
+            AutoBuild.INSTANCE.deferred.removeAll(left);
+            AutoBuild.INSTANCE.couldNotPlace.addAll(left);
+            Chat.warn("Build done, except " + left.size() + " block" + (left.size() == 1 ? "" : "s")
+                    + " that couldn't be placed (listed below).");
+            reportUnfinished(mc, schematic);
+            stop();
+            return false;
         }
         return true;
     }

@@ -174,6 +174,10 @@ public class Configs implements IConfigHandler {
         public static final ConfigString SHOP_COMMAND = new ConfigString("shopCommand", "shop",
                 "Command that opens the shop, without the slash.",
                 "Shop command");
+        public static final ConfigString SHOP_SECTION = new ConfigString("shopSection", "minecraft:paper",
+                "Which button in the /shop main menu leads to the money shop. Only that one is opened.\n"
+                        + "An item id (minecraft:paper) or part of the button's name. Empty = open every button.",
+                "Money shop button");
         public static final ConfigBoolean PROBE_BUY_SCREEN = new ConfigBoolean("probeBuyScreen", true,
                 "During a scan, left-click the cheapest item once to read the buy screen (amount buttons, confirm button),\n"
                         + "then close it without confirming. If the shop buys instantly on click, this buys 1 of that item.",
@@ -186,7 +190,7 @@ public class Configs implements IConfigHandler {
                 "Shop menu timeout (ticks)");
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                SHOP_COMMAND, PROBE_BUY_SCREEN, MAX_PAGES, WAIT_TIMEOUT_TICKS);
+                SHOP_COMMAND, SHOP_SECTION, PROBE_BUY_SCREEN, MAX_PAGES, WAIT_TIMEOUT_TICKS);
     }
 
     public static class Speed {

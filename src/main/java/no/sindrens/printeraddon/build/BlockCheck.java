@@ -2,6 +2,7 @@ package no.sindrens.printeraddon.build;
 
 import fi.dy.masa.litematica.world.WorldSchematic;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.Container;
 import net.minecraft.world.level.Level;
@@ -25,6 +26,7 @@ import net.minecraft.world.level.block.state.properties.Property;
 import net.minecraft.world.level.block.state.properties.SlabType;
 import no.sindrens.printeraddon.config.Configs;
 
+import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
@@ -130,28 +132,27 @@ public final class BlockCheck {
     }
 
     /**
-     * True for a rail that should slope up but lies flat along the same line, while the rail on the higher end
-     * isn't placed yet. A flat rail with a free end tilts up as soon as a rail goes in one block higher there.
+     * True for a rail whose shape isn't final yet because a rail it should join isn't placed: it isn't joined to
+     * any rail it shouldn't be, and it turns by itself (or tilts, for a slope) when that rail goes in.
      */
-    private static boolean waitsForUphillRail(Level level, WorldSchematic schematic, BlockPos pos, BlockState target, BlockState current) {
-        net.minecraft.world.level.block.BaseRailBlock rail = (net.minecraft.world.level.block.BaseRailBlock) target.getBlock();
-        net.minecraft.world.level.block.state.properties.RailShape want = target.getValue(rail.getShapeProperty());
-        net.minecraft.world.level.block.state.properties.RailShape have = current.getValue(rail.getShapeProperty());
-        if (!want.isSlope() || have.isSlope()) {
+    private static boolean railPending(Level level, WorldSchematic schematic, BlockPos pos, BlockState target, BlockState current) {
+        List<Direction> want = RailHelper.connections(target);
+        boolean waiting = false;
+        for (Direction d : want) {
+            BlockPos next = pos.relative(d);
+            if (RailHelper.railAroundInSchematic(schematic, next) && !RailHelper.railAround(level, next)) {
+                waiting = true;
+            }
+        }
+        if (!waiting) {
             return false;
         }
-        net.minecraft.core.Direction up = switch (want) {
-            case ASCENDING_NORTH -> net.minecraft.core.Direction.NORTH;
-            case ASCENDING_SOUTH -> net.minecraft.core.Direction.SOUTH;
-            case ASCENDING_EAST -> net.minecraft.core.Direction.EAST;
-            default -> net.minecraft.core.Direction.WEST;
-        };
-        boolean sameLine = up.getAxis() == net.minecraft.core.Direction.Axis.Z
-                ? have == net.minecraft.world.level.block.state.properties.RailShape.NORTH_SOUTH
-                : have == net.minecraft.world.level.block.state.properties.RailShape.EAST_WEST;
-        BlockPos uphill = pos.relative(up).above();
-        return sameLine && schematic.getBlockState(uphill).getBlock() instanceof net.minecraft.world.level.block.BaseRailBlock
-                && !(level.getBlockState(uphill).getBlock() instanceof net.minecraft.world.level.block.BaseRailBlock);
+        for (Direction d : RailHelper.connections(current)) {
+            if (!want.contains(d) && RailHelper.railAround(level, pos.relative(d))) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static Result compareSameBlock(Level level, WorldSchematic schematic, BlockPos pos, BlockState target, BlockState current) {
@@ -175,9 +176,8 @@ public final class BlockCheck {
                 // the printer adds the second slab
                 countDiff = true;
             } else if (name.equals("shape") && block instanceof net.minecraft.world.level.block.BaseRailBlock) {
-                // A slope that is still flat because the rail it climbs to (often in the next layer) isn't there
-                // yet: it tilts by itself when that rail goes in
-                if (waitsForUphillRail(level, schematic, pos, target, current)) {
+                // Not final yet: a rail it joins (often a slope's top, in the next layer) isn't there yet
+                if (railPending(level, schematic, pos, target, current)) {
                     continue;
                 }
                 // A rail with the wrong shape sends carts the wrong way: break it and place it again

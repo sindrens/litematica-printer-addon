@@ -74,6 +74,15 @@ public final class PlacementOrder {
             if (up != null && !isDone(level, schematic, pos.relative(up))) {
                 return false;
             }
+            // A slope placed before the rail at its top lies flat and may join the rails beside it instead:
+            // wait for that rail (often in the layer above; the slope is placed later then)
+            if (up != null) {
+                BlockPos top = pos.relative(up).above();
+                if (schematic.getBlockState(top).getBlock() instanceof BaseRailBlock
+                        && !(level.getBlockState(top).getBlock() instanceof BaseRailBlock)) {
+                    return false;
+                }
+            }
         }
 
         if (target.getBlock() instanceof ObserverBlock) {

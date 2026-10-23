@@ -39,6 +39,11 @@ public record ScreenSnapshot(int containerId, String title, int size, List<Item>
         public Double sellPrice() {
             return ShopText.sellPrice(lore);
         }
+
+        /** An item for sale (never clicked while scanning), not a button to another menu. */
+        public boolean isShopItem() {
+            return ShopText.isShopItem(lore);
+        }
     }
 
     /** Snapshot of the open server menu, or null if no such menu is open. */
@@ -115,6 +120,10 @@ public record ScreenSnapshot(int containerId, String title, int size, List<Item>
 
     public boolean hasPricedItems() {
         return items.stream().anyMatch(i -> !i.isFiller() && i.buyPrice() != null);
+    }
+
+    public boolean hasShopItems() {
+        return items.stream().anyMatch(i -> !i.isFiller() && i.nav() == ShopText.Nav.NONE && i.isShopItem());
     }
 
     public boolean looksLikeBuyScreen() {

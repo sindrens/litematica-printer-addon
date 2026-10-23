@@ -61,6 +61,9 @@ public class ShopScanResult {
         /** Slots to click, starting from the main menu, to open this category. */
         public List<Integer> path = new ArrayList<>();
         public List<Page> pages = new ArrayList<>();
+        /** The button that opens it (not saved). */
+        transient String itemId;
+        transient int count;
     }
 
     public static class Page {

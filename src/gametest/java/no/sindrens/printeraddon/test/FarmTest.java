@@ -17,6 +17,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.state.BlockState;
 import me.aleksilassila.litematica.printer.SchematicBlockState;
 import me.aleksilassila.litematica.printer.guides.Guide;
@@ -187,6 +188,11 @@ public class FarmTest implements FabricClientGameTest {
                     }
                 }
             }
+        }
+
+        // Spare rails for the temporary rails the rail planner puts down
+        if (needed.containsKey(Items.RAIL) || needed.containsKey(Items.POWERED_RAIL)) {
+            needed.merge(Items.RAIL, 8, Integer::sum);
         }
 
         Inventory inventory = mc.player.getInventory();

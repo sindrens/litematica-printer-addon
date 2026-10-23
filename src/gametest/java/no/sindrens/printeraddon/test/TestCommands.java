@@ -6,7 +6,7 @@ import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 
-/** A /fly command like EssentialsX's, so the test server works like a real one. */
+/** A /fly command like EssentialsX's and a /shop like ShopGUI+, so the test server works like the real one. */
 public class TestCommands implements ModInitializer {
     @Override
     public void onInitialize() {
@@ -20,6 +20,12 @@ public class TestCommands implements ModInitializer {
                     }
                     player.onUpdateAbilities();
                     player.sendSystemMessage(Component.literal("Flying " + (allow ? "enabled" : "disabled")));
+                    return 1;
+                })));
+        // A ShopGUI+-like /shop (see FakeShop)
+        CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
+                dispatcher.register(Commands.literal("shop").executes(context -> {
+                    FakeShop.openMain(context.getSource().getPlayerOrException());
                     return 1;
                 })));
     }

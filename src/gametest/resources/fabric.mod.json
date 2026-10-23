@@ -7,6 +7,7 @@
     "main": ["no.sindrens.printeraddon.test.TestCommands"],
     "fabric-client-gametest": [
       "no.sindrens.printeraddon.test.BuildTest",
+      "no.sindrens.printeraddon.test.ShopTest",
       "no.sindrens.printeraddon.test.FarmTest"
     ]
   }
