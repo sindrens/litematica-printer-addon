@@ -15,7 +15,7 @@ public class PrinterMixin {
     /** Pauses the printer while the add-on is breaking a block, so both don't fight over the held item. */
     @Inject(method = "onGameTick", at = @At("HEAD"), cancellable = true)
     private void printer_addon$pauseWhileBreaking(CallbackInfoReturnable<Boolean> cir) {
-        if (AutoBuild.INSTANCE.shouldPausePrinter()) {
+        if (no.sindrens.printeraddon.config.Configs.enabled() && AutoBuild.INSTANCE.shouldPausePrinter()) {
             cir.setReturnValue(false);
         }
     }

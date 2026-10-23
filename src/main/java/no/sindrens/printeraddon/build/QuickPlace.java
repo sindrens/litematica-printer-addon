@@ -89,7 +89,8 @@ public class QuickPlace {
 
     @Nullable
     private static Way findWay(Minecraft mc, BlockPos pos, BlockState target) {
-        if (!Configs.Layers.QUICK_PLACE.getBooleanValue() || target.isAir() || target.getBlock() instanceof BaseRailBlock
+        no.sindrens.printeraddon.config.QuickPlaceMode mode = Configs.quickPlace();
+        if (mode == no.sindrens.printeraddon.config.QuickPlaceMode.OFF || target.isAir() || target.getBlock() instanceof BaseRailBlock
                 || !target.getFluidState().isEmpty() && target.getFluidState().isSource() && target.getBlock() instanceof net.minecraft.world.level.block.LiquidBlock) {
             return null;
         }
@@ -100,6 +101,11 @@ public class QuickPlace {
         Level level = mc.level;
         BlockState here = level.getBlockState(pos);
         if (!here.isAir() && !here.canBeReplaced()) {
+            return null;
+        }
+
+        // Normally only what the printer can't place (e.g. a hopper with nothing in front of it to click)
+        if (mode == no.sindrens.printeraddon.config.QuickPlaceMode.WHEN_PRINTER_CANT && printerCan(mc, pos)) {
             return null;
         }
 
@@ -129,6 +135,27 @@ public class QuickPlace {
             player.setXRot(pitch);
         }
         return null;
+    }
+
+    private static final me.aleksilassila.litematica.printer.guides.Guides PRINTER_GUIDES = new me.aleksilassila.litematica.printer.guides.Guides();
+
+    /** True if one of the printer's own placement guides can place the block now. */
+    private static boolean printerCan(Minecraft mc, BlockPos pos) {
+        WorldSchematic schematic = SchematicHelper.world();
+        if (schematic == null) {
+            return false;
+        }
+        me.aleksilassila.litematica.printer.SchematicBlockState state =
+                new me.aleksilassila.litematica.printer.SchematicBlockState(mc.level, schematic, pos.immutable());
+        for (me.aleksilassila.litematica.printer.guides.Guide guide : PRINTER_GUIDES.getInteractionGuides(state)) {
+            if (guide.canExecute(mc.player)) {
+                return true;
+            }
+            if (guide.skipOtherGuides()) {
+                break;
+            }
+        }
+        return false;
     }
 
     /** The same block with the same properties, apart from ones that change by themselves or follow neighbours. */

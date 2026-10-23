@@ -25,6 +25,9 @@ public class GuideMixin {
     private void printer_addon$ignoreWhatChangesByItself(BlockState state1, BlockState state2,
                                                           Property<?>[] propertiesToIgnore,
                                                           CallbackInfoReturnable<Boolean> cir) {
+        if (!no.sindrens.printeraddon.config.Configs.enabled()) {
+            return;
+        }
         if (state1.getBlock() != state2.getBlock()) {
             cir.setReturnValue(StateRules.isGrowthVariant(state1.getBlock(), state2.getBlock())
                     || StateRules.isPlaceableBase(state1.getBlock(), state2.getBlock())

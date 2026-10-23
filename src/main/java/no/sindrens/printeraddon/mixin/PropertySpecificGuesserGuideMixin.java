@@ -29,6 +29,9 @@ public class PropertySpecificGuesserGuideMixin {
 
     @Inject(method = "statesEqual", at = @At("HEAD"), cancellable = true)
     private void printer_addon$ignoreSettings(BlockState result, BlockState target, CallbackInfoReturnable<Boolean> cir) {
+        if (!no.sindrens.printeraddon.config.Configs.enabled()) {
+            return;
+        }
         if (result.getBlock() != target.getBlock()) {
             cir.setReturnValue(false);
             return;

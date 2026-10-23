@@ -9,6 +9,8 @@ import fi.dy.masa.malilib.hotkeys.KeybindSettings;
 public class Hotkeys {
     public static final ConfigHotkey OPEN_SETTINGS = new ConfigHotkey("openSettings", "J,C",
             "Open the Printer Addon settings.", "Open settings");
+    public static final ConfigHotkey TOGGLE_ADDON = new ConfigHotkey("toggleAddon", "J,A",
+            "Turn the whole add-on on or off (off: the printer works as without the add-on).", "Add-on on / off");
     public static final ConfigHotkey TOGGLE_AUTO_BUILD = new ConfigHotkey("toggleAutoBuild", "J,B",
             "Start / stop auto build.", "Start / stop auto build");
     public static final ConfigHotkey FIX_WRONG_NOW = new ConfigHotkey("fixWrongNow", "J,F",
@@ -30,6 +32,6 @@ public class Hotkeys {
             "Stop everything (auto build, breaking, shop scan). Also works while a menu is open.", "Stop everything");
 
     public static final ImmutableList<ConfigHotkey> HOTKEY_LIST = ImmutableList.of(
-            OPEN_SETTINGS, TOGGLE_AUTO_BUILD, FIX_WRONG_NOW, CLEAR_EXTRA_BLOCKS, NEXT_LAYER, PREVIOUS_LAYER,
+            OPEN_SETTINGS, TOGGLE_ADDON, TOGGLE_AUTO_BUILD, FIX_WRONG_NOW, CLEAR_EXTRA_BLOCKS, NEXT_LAYER, PREVIOUS_LAYER,
             SCAN_SHOP, STOP_ALL);
 }

@@ -22,6 +22,10 @@ public class Configs implements IConfigHandler {
     private static final String CONFIG_FILE_NAME = PrinterAddon.MOD_ID + ".json";
 
     public static class Generic {
+        public static final ConfigBoolean ADDON_ENABLED = new ConfigBoolean("addonEnabled", true,
+                "Turns the whole add-on on or off. Off: Litematica Printer works exactly as without the add-on\n"
+                        + "(no view turning, no build order, no breaking). Hotkey J+A.",
+                "Add-on enabled");
         public static final ConfigBoolean AUTO_BUILD = new ConfigBoolean("autoBuild", false,
                 "Main switch. Turns on the printer and lets the add-on break wrong blocks and step through layers.",
                 "Auto build");
@@ -53,7 +57,7 @@ public class Configs implements IConfigHandler {
                 "Debug log");
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                AUTO_BUILD, SPEED_PRESET, APPLY_SPEED_TO_PRINTER, TURN_VIEW_FOR_PRINTER, CHAT_MESSAGES, DETAILED_CHAT, STATUS_FILE, DEBUG_LOG);
+                ADDON_ENABLED, AUTO_BUILD, SPEED_PRESET, APPLY_SPEED_TO_PRINTER, TURN_VIEW_FOR_PRINTER, CHAT_MESSAGES, DETAILED_CHAT, STATUS_FILE, DEBUG_LOG);
     }
 
     public static class Breaking {
@@ -103,11 +107,13 @@ public class Configs implements IConfigHandler {
         public static final ConfigInteger STUCK_REPORT_SECONDS = new ConfigInteger("stuckReportSeconds", 30, 5, 600,
                 "If the layer hasn't changed for this long, list in chat what is left and why.",
                 "Report stuck layer after (seconds)");
-        public static final ConfigBoolean QUICK_PLACE = new ConfigBoolean("quickPlace", true,
-                "Place blocks with one click each (one per printer interval), working out which way to look and which side\n"
-                        + "to click so they come out exactly as in the schematic. The printer needs 2-4 intervals per block.\n"
-                        + "Blocks this can't predict stay with the printer.",
-                "Quick place (one click per block)");
+        public static final ConfigOptionList QUICK_PLACE = new ConfigOptionList("quickPlace", QuickPlaceMode.WHEN_PRINTER_CANT,
+                "Blocks the add-on places itself with one click (one per printer interval), working out which way to look and\n"
+                        + "which side to click so they come out exactly as in the schematic.\n"
+                        + "Only what the printer can't place (default): e.g. the first row of hoppers with nothing in front of them.\n"
+                        + "All: everything it can predict, much faster (the printer needs 2-4 intervals per block).\n"
+                        + "Never: printer only.",
+                "Quick place");
         public static final ConfigInteger SKIP_STUCK_SECONDS = new ConfigInteger("skipStuckSeconds", 20, 5, 3600,
                 "If blocks you have the items for still can't be placed after this long (e.g. two rails side by side\n"
                         + "that the game always connects), go on to the next layer and list them at the end to do by hand.\n"
@@ -132,6 +138,15 @@ public class Configs implements IConfigHandler {
                 AUTO_LAYER, QUICK_PLACE, LAYER_CHECK_INTERVAL, STUCK_REPORT_SECONDS, SKIP_STUCK_SECONDS, EXTRA_BLOCKS_BLOCK_LAYER,
                 PLANT_WITH_TILLING,
                 USE_AIR_PLACE);
+    }
+
+    public static QuickPlaceMode quickPlace() {
+        return (QuickPlaceMode) Layers.QUICK_PLACE.getOptionListValue();
+    }
+
+    /** True when the add-on is switched on. */
+    public static boolean enabled() {
+        return Generic.ADDON_ENABLED.getBooleanValue();
     }
 
     public static class Movement {

@@ -107,12 +107,16 @@ public class FarmTest implements FabricClientGameTest {
             // The bottom layers are only the base: put them in place at once, so the test builds the farm itself
             String prebuiltEnv = System.getenv("PRINTER_ADDON_PREBUILT_LAYERS");
             int prebuilt = prebuiltEnv == null || prebuiltEnv.isBlank() ? 6 : Integer.parseInt(prebuiltEnv.trim());
-            if (prebuilt > 0) {
-                List<String> commands = context.computeOnClient(mc -> prebuildCommands(prebuilt));
+            // Only build part of the farm (PRINTER_ADDON_PART=5: the most northern fifth), the rest is put in place
+            String partEnv = System.getenv("PRINTER_ADDON_PART");
+            int part = partEnv == null || partEnv.isBlank() ? 1 : Integer.parseInt(partEnv.trim());
+            if (prebuilt > 0 || part > 1) {
+                List<String> commands = context.computeOnClient(mc -> prebuildCommands(prebuilt, part));
                 for (String command : commands) {
                     server.runCommand(command);
                 }
-                System.out.println("FARM TEST: placed the bottom " + prebuilt + " layers with " + commands.size() + " commands");
+                System.out.println("FARM TEST: placed the bottom " + prebuilt + " layers" + (part > 1 ? " and all but the northern 1/" + part : "")
+                        + " with " + commands.size() + " commands");
                 context.waitTicks(40);
             }
 
@@ -350,14 +354,21 @@ public class FarmTest implements FabricClientGameTest {
         return sb.toString();
     }
 
-    /** setblock commands (without block updates) for every block of the bottom layers of the schematic. */
-    private static List<String> prebuildCommands(int layers) {
+    /**
+     * setblock commands (without block updates) for every block of the bottom layers of the schematic, and (with
+     * part > 1) of everything south of the northern 1/part of it.
+     */
+    private static List<String> prebuildCommands(int layers, int part) {
         WorldSchematic schematic = SchematicWorldHandler.getSchematicWorld();
         List<String> commands = new ArrayList<>();
         for (SchematicHelper.Area area : SchematicHelper.areas()) {
-            for (int y = area.minY(); y < area.minY() + layers && y <= area.maxY(); y++) {
+            int keepUntilZ = area.minZ() + (area.maxZ() - area.minZ() + 1) / part;
+            for (int y = area.minY(); y <= area.maxY(); y++) {
                 for (int x = area.minX(); x <= area.maxX(); x++) {
                     for (int z = area.minZ(); z <= area.maxZ(); z++) {
+                        if (y >= area.minY() + layers && z < keepUntilZ) {
+                            continue;
+                        }
                         BlockState target = schematic.getBlockState(new BlockPos(x, y, z));
                         if (!target.isAir() && target.getBlock() != net.minecraft.world.level.block.Blocks.MOVING_PISTON) {
                             commands.add("setblock " + x + " " + y + " " + z + " "

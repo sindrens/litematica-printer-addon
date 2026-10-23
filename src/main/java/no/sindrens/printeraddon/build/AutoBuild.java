@@ -103,7 +103,8 @@ public class AutoBuild {
         // Blocks QuickPlace does with one click aren't the printer's: it spends its turns on the rest
         java.util.List<net.minecraft.core.BlockPos> forPrinter = new java.util.ArrayList<>(all.size());
         for (net.minecraft.core.BlockPos pos : all) {
-            if (!QuickPlace.isCandidate(mc, pos, schematic.getBlockState(pos))) {
+            if (Configs.quickPlace() != no.sindrens.printeraddon.config.QuickPlaceMode.ALL
+                    || !QuickPlace.isCandidate(mc, pos, schematic.getBlockState(pos))) {
                 forPrinter.add(pos);
             }
         }
@@ -293,6 +294,11 @@ public class AutoBuild {
         if (running) {
             return;
         }
+        if (!Configs.enabled()) {
+            Chat.warn("The add-on is switched off (J+A to switch it on).");
+            Configs.Generic.AUTO_BUILD.setBooleanValue(false);
+            return;
+        }
         if (SchematicHelper.world() == null || SchematicHelper.areas().isEmpty()) {
             Chat.warn("No schematic placement found. Load and place a schematic in Litematica first.");
             Configs.Generic.AUTO_BUILD.setBooleanValue(false);
@@ -408,6 +414,10 @@ public class AutoBuild {
             }
         }
 
+        if (running && !Configs.enabled()) {
+            stop(mc, "the add-on was switched off");
+            return;
+        }
         if (running) {
             String reason = safety.check(mc);
             if (reason != null) {

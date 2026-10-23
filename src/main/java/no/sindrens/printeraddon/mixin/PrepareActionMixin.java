@@ -18,7 +18,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public class PrepareActionMixin {
     @Inject(method = "send", at = @At("TAIL"))
     private void printer_addon$turnView(Minecraft client, LocalPlayer player, CallbackInfo ci) {
-        if (!Configs.Generic.TURN_VIEW_FOR_PRINTER.getBooleanValue()
+        // Only during auto build: otherwise the player looks where they want
+        if (!Configs.enabled() || !no.sindrens.printeraddon.build.AutoBuild.INSTANCE.isRunning()
+                || !Configs.Generic.TURN_VIEW_FOR_PRINTER.getBooleanValue()
                 || !me.aleksilassila.litematica.printer.config.Configs.ROTATE.getBooleanValue()) {
             return;
         }

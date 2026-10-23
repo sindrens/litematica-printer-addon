@@ -34,7 +34,14 @@ public class KeyCallbacks {
 
             AutoBuild build = AutoBuild.INSTANCE;
 
-            if (key == Hotkeys.TOGGLE_AUTO_BUILD.getKeybind()) {
+            if (key == Hotkeys.TOGGLE_ADDON.getKeybind()) {
+                boolean on = !no.sindrens.printeraddon.config.Configs.Generic.ADDON_ENABLED.getBooleanValue();
+                no.sindrens.printeraddon.config.Configs.Generic.ADDON_ENABLED.setBooleanValue(on);
+                if (!on) {
+                    build.stopEverything(mc);
+                }
+                no.sindrens.printeraddon.util.Chat.info("Printer Addon " + (on ? "\u00a7aon" : "\u00a7coff\u00a7r (the printer works on its own)") + ".");
+            } else if (key == Hotkeys.TOGGLE_AUTO_BUILD.getKeybind()) {
                 build.toggle(mc);
             } else if (key == Hotkeys.FIX_WRONG_NOW.getKeybind()) {
                 build.fixWrongNow();
