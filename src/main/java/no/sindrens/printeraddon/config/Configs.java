@@ -40,13 +40,20 @@ public class Configs implements IConfigHandler {
                 "Turn your view the way the printer places, so observers, pistons, stairs etc. always face the right way.\n"
                         + "Without it the server sometimes uses the direction you're looking instead (Minecraft 26.2).",
                 "Turn view for printer");
+        public static final ConfigBoolean DETAILED_CHAT = new ConfigBoolean("detailedChat", false,
+                "Say in chat every step auto build takes: walking, flying, breaking, air placing...",
+                "Detailed chat");
+        public static final ConfigBoolean STATUS_FILE = new ConfigBoolean("statusFile", false,
+                "Write what auto build is doing to config/printer_addon/status.json every 2 seconds\n"
+                        + "(next block, blocks left, what is missing), for a live view outside the game.",
+                "Write status file");
         public static final ConfigBoolean DEBUG_LOG = new ConfigBoolean("debugLog", false,
                 "Write every step (which block is broken, why it stopped...) to the game log (logs/latest.log).\n"
                         + "Useful when something doesn't work.",
                 "Debug log");
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                AUTO_BUILD, SPEED_PRESET, APPLY_SPEED_TO_PRINTER, TURN_VIEW_FOR_PRINTER, CHAT_MESSAGES, DEBUG_LOG);
+                AUTO_BUILD, SPEED_PRESET, APPLY_SPEED_TO_PRINTER, TURN_VIEW_FOR_PRINTER, CHAT_MESSAGES, DETAILED_CHAT, STATUS_FILE, DEBUG_LOG);
     }
 
     public static class Breaking {
@@ -96,6 +103,11 @@ public class Configs implements IConfigHandler {
         public static final ConfigInteger STUCK_REPORT_SECONDS = new ConfigInteger("stuckReportSeconds", 30, 5, 600,
                 "If the layer hasn't changed for this long, list in chat what is left and why.",
                 "Report stuck layer after (seconds)");
+        public static final ConfigInteger SKIP_STUCK_SECONDS = new ConfigInteger("skipStuckSeconds", 60, 10, 3600,
+                "If blocks you have the items for still can't be placed after this long (e.g. two rails side by side\n"
+                        + "that the game always connects), go on to the next layer and list them at the end to do by hand.\n"
+                        + "Blocks you don't have the items for are waited for.",
+                "Skip unplaceable blocks after (seconds)");
         public static final ConfigBoolean EXTRA_BLOCKS_BLOCK_LAYER = new ConfigBoolean("extraBlocksBlockLayer", false,
                 "Count blocks where the schematic has air (terrain, stray blocks) as unfinished.\n"
                         + "Off: only blocks the schematic needs count. Use the 'Clear extra blocks' key to remove them.",
@@ -112,7 +124,8 @@ public class Configs implements IConfigHandler {
                 "Use printer's air place");
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                AUTO_LAYER, LAYER_CHECK_INTERVAL, STUCK_REPORT_SECONDS, EXTRA_BLOCKS_BLOCK_LAYER, PLANT_WITH_TILLING,
+                AUTO_LAYER, LAYER_CHECK_INTERVAL, STUCK_REPORT_SECONDS, SKIP_STUCK_SECONDS, EXTRA_BLOCKS_BLOCK_LAYER,
+                PLANT_WITH_TILLING,
                 USE_AIR_PLACE);
     }
 

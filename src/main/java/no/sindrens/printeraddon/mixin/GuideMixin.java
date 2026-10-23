@@ -26,7 +26,9 @@ public class GuideMixin {
                                                           Property<?>[] propertiesToIgnore,
                                                           CallbackInfoReturnable<Boolean> cir) {
         if (state1.getBlock() != state2.getBlock()) {
-            cir.setReturnValue(StateRules.isGrowthVariant(state1.getBlock(), state2.getBlock()));
+            cir.setReturnValue(StateRules.isGrowthVariant(state1.getBlock(), state2.getBlock())
+                    || StateRules.isPlaceableBase(state1.getBlock(), state2.getBlock())
+                    || StateRules.isPlaceableBase(state2.getBlock(), state1.getBlock()));
             return;
         }
 

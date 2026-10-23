@@ -66,6 +66,16 @@ public class Mover {
     private int flyCommandWait;
     private boolean flyUnavailable;
 
+    /** What the mover is doing, in words, for the status line. */
+    public String describe() {
+        return switch (state) {
+            case WALKING -> target != null ? "walking to " + target.toShortString() : "walking";
+            case FLYING -> target != null ? "flying to " + target.toShortString() : "flying";
+            case WORKING -> "placing within reach";
+            case IDLE -> work.isEmpty() ? "waiting" : "looking for the next block";
+        };
+    }
+
     public void reset() {
         state = State.IDLE;
         work.clear();
@@ -122,10 +132,11 @@ public class Mover {
             return;
         }
 
+        // Only count blocks that can be done right now (the printer can place it, or it's for the breaker/bucket)
         List<BlockPos> inReach = new ArrayList<>();
         Vec3 eye = player.getEyePosition();
         for (BlockPos pos : work) {
-            if (eye.distanceToSqr(Vec3.atCenterOf(pos)) <= (reach - 0.25) * (reach - 0.25)) {
+            if (eye.distanceToSqr(Vec3.atCenterOf(pos)) <= (reach - 0.25) * (reach - 0.25) && canDoNow(mc, schematic, pos)) {
                 inReach.add(pos);
             }
         }
@@ -149,7 +160,15 @@ public class Mover {
             return;
         }
 
-        BlockPos nearest = nearest(player, work);
+        BlockPos nearest = nearestDoable(mc, player, schematic);
+        if (nearest == null) {
+            // Nothing can be done right now (waiting for items, or for other blocks first)
+            if (state == State.WALKING || state == State.FLYING) {
+                halt(player);
+            }
+            state = State.IDLE;
+            return;
+        }
         if (target == null || !target.equals(nearest) || (state != State.WALKING && state != State.FLYING)) {
             target = nearest;
             replans = 0;
@@ -157,6 +176,68 @@ public class Mover {
         }
 
         move(mc, player, mode);
+    }
+
+    /** How many of the nearest unfinished blocks are asked "can this be done now?" when choosing where to go. */
+    private static final int CANDIDATES_TO_CHECK = 40;
+    private final me.aleksilassila.litematica.printer.guides.Guides printerGuides = new me.aleksilassila.litematica.printer.guides.Guides();
+    private final Map<BlockPos, Boolean> doableCache = new HashMap<>();
+    private long doableCacheTick;
+
+    /**
+     * True if something can be done at this spot right now: the printer can place it (asked through its own
+     * placement guides), or it's for the breaker or a bucket. A hopper facing north, for example, can only be
+     * placed once the block north of it is there.
+     */
+    private boolean canDoNow(Minecraft mc, WorldSchematic schematic, BlockPos pos) {
+        if (tick - doableCacheTick > 5) {
+            doableCache.clear();
+            doableCacheTick = tick;
+        }
+        return doableCache.computeIfAbsent(pos.immutable(), p -> {
+            BlockCheck.Result result = BlockCheck.check(mc.level, schematic, p);
+            if (result.needsBreaking() || result == BlockCheck.Result.PROTECTED) {
+                return true;
+            }
+            if (result == BlockCheck.Result.BUCKET) {
+                return Fluids.canDo(mc, schematic, p, schematic.getBlockState(p));
+            }
+            if (result != BlockCheck.Result.MISSING && result != BlockCheck.Result.PRINTER_FIXES) {
+                return false;
+            }
+            me.aleksilassila.litematica.printer.SchematicBlockState state =
+                    new me.aleksilassila.litematica.printer.SchematicBlockState(mc.level, schematic, p);
+            for (me.aleksilassila.litematica.printer.guides.Guide guide : printerGuides.getInteractionGuides(state)) {
+                if (guide.canExecute(mc.player)) {
+                    return true;
+                }
+                if (guide.skipOtherGuides()) {
+                    break;
+                }
+            }
+            // Air place does floating blocks and chains the printer can't do the normal way
+            return Configs.Layers.USE_AIR_PLACE.getBooleanValue() && result == BlockCheck.Result.MISSING
+                    && AirPlace.isCandidate(mc.level, p, schematic.getBlockState(p));
+        });
+    }
+
+    /** The nearest unfinished block that can be done right now, checking the closest ones first. */
+    @Nullable
+    private BlockPos nearestDoable(Minecraft mc, LocalPlayer player, WorldSchematic schematic) {
+        Vec3 from = player.position();
+        List<BlockPos> sorted = new ArrayList<>(work);
+        sorted.sort(java.util.Comparator.comparingDouble(p -> from.distanceToSqr(Vec3.atCenterOf(p))));
+        int checked = 0;
+        for (BlockPos pos : sorted) {
+            if (checked++ >= CANDIDATES_TO_CHECK) {
+                break;
+            }
+            if (canDoNow(mc, schematic, pos)) {
+                return pos;
+            }
+        }
+        // None of the nearest: fall back to the nearest one at all, so building moves on
+        return sorted.isEmpty() ? null : sorted.getFirst();
     }
 
     /** Waits while the printer and breaker work; skips the blocks in reach if nothing happens for a while. */
@@ -472,7 +553,7 @@ public class Mover {
                             AutoBuild.INSTANCE.markEmpty(pos);
                         }
                         if (result == BlockCheck.Result.OK || result == BlockCheck.Result.EXTRA
-                                || result == BlockCheck.Result.UNLOADED || result == BlockCheck.Result.MANUAL) {
+                                || result == BlockCheck.Result.UNLOADED) {
                             continue;
                         }
 
@@ -482,12 +563,18 @@ public class Mover {
                             reserved.add(immutable);
                         }
 
+                        if (AutoBuild.INSTANCE.rails.isTemp(immutable)) {
+                            continue;
+                        }
                         boolean protectedHere = result == BlockCheck.Result.PROTECTED
                                 && !AutoBuild.INSTANCE.placedDuringBuild(immutable);
                         if (protectedHere || skipped.containsKey(immutable)) {
                             continue;
                         }
                         if (result == BlockCheck.Result.MISSING && !creative && !hasItemFor(player, target)) {
+                            continue;
+                        }
+                        if (result == BlockCheck.Result.BUCKET && !Fluids.canDo(mc, schematic, immutable, target)) {
                             continue;
                         }
                         if (result == BlockCheck.Result.MISSING && !PlacementOrder.isReady(mc.level, schematic, immutable, target)) {

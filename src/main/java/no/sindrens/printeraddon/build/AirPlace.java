@@ -141,8 +141,8 @@ public class AirPlace {
     }
 
     /**
-     * The nearest missing block within reach that floats, or null if any missing block within reach can be placed
-     * normally (then the printer just does it). Simple full blocks are preferred over blocks that face a direction.
+     * The nearest missing block within reach the printer isn't placing. Simple full blocks are preferred over blocks
+     * that face a direction.
      */
     @Nullable
     private BlockPos findFloating(Minecraft mc, LocalPlayer player, WorldSchematic schematic) {
@@ -174,9 +174,8 @@ public class AirPlace {
             if (!PlacementOrder.isReady(mc.level, schematic, pos, target)) {
                 continue;
             }
-            if (hasSupport(mc.level, pos)) {
-                // Something can be placed the normal way: let the printer do that
-                return null;
+            if (!isCandidate(mc.level, pos, target)) {
+                continue;
             }
 
             // Prefer blocks without a direction: they can't end up facing the wrong way
@@ -188,6 +187,19 @@ public class AirPlace {
         }
 
         return best;
+    }
+
+    /**
+     * Blocks air place can do right: blocks that float (nothing next to them to place them against), and pillar
+     * blocks like chains, whose direction air place sets from the schematic. Never hoppers: their direction comes
+     * from the face that's clicked, and air place would make them point down.
+     */
+    public static boolean isCandidate(Level level, BlockPos pos, BlockState target) {
+        if (target.getBlock() instanceof net.minecraft.world.level.block.HopperBlock
+                && target.getValue(net.minecraft.world.level.block.HopperBlock.FACING) != Direction.DOWN) {
+            return false;
+        }
+        return !hasSupport(level, pos) || target.getBlock() instanceof net.minecraft.world.level.block.RotatedPillarBlock;
     }
 
     private static boolean hasSupport(Level level, BlockPos pos) {

@@ -55,7 +55,7 @@ public class BlockBreaker {
     }
 
     /** Blocks to break no matter what the schematic says (blocks air place put in the wrong spot). */
-    private Set<BlockPos> forced = Set.of();
+    private Set<BlockPos> forced = new java.util.HashSet<>();
 
     public void setForced(Set<BlockPos> forced) {
         this.forced = forced;
@@ -220,6 +220,10 @@ public class BlockBreaker {
                 continue;
             }
             if (!DataManager.getRenderLayerRange().isPositionWithinRange(pos)) {
+                continue;
+            }
+            // A temporary rail stays until the rail helper releases it
+            if (AutoBuild.INSTANCE.rails.isTemp(pos)) {
                 continue;
             }
             if (!SchematicHelper.isInAnyArea(areas, pos)) {

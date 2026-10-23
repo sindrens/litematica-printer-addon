@@ -33,7 +33,8 @@ public class PropertySpecificGuesserGuideMixin {
             cir.setReturnValue(false);
             return;
         }
-        Set<Property<?>> ignored = Set.of(ignoredProperties);
+        // The printer's list has the same property twice (sapling and bamboo "stage"), so no Set.of here
+        java.util.List<Property<?>> ignored = java.util.Arrays.asList(ignoredProperties);
         for (Property<?> property : target.getProperties()) {
             if (ignored.contains(property) || printer_addon$setAfterPlacing.contains(property)
                     || no.sindrens.printeraddon.build.StateRules.changesByItself(property)) {

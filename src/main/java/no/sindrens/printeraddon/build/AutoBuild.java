@@ -5,6 +5,7 @@ import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.gui.screens.inventory.InventoryScreen;
 import no.sindrens.printeraddon.PrinterAddon;
 import no.sindrens.printeraddon.config.Configs;
+import no.sindrens.printeraddon.util.StatusFile;
 import no.sindrens.printeraddon.util.Chat;
 
 /**
@@ -20,6 +21,10 @@ public class AutoBuild {
     public final LayerManager layers = new LayerManager();
     public final Mover mover = new Mover();
     public final AirPlace airPlace = new AirPlace();
+    public final Fluids fluids = new Fluids();
+    /** Temporary rails are removed through the same list as misplaced air-placed blocks. */
+    public final RailHelper rails = new RailHelper(airPlace.misplaced());
+    public final EntityPlacer entities = new EntityPlacer();
     private final Safety safety = new Safety();
 
     private boolean running;
@@ -36,6 +41,14 @@ public class AutoBuild {
      * rail, an observer watching a block above). They are placed as soon as what they need is there.
      */
     public final java.util.Set<net.minecraft.core.BlockPos> deferred = new java.util.LinkedHashSet<>();
+    /** Blocks the printer couldn't place although the items were there: listed at the end to do by hand. */
+    public final java.util.Set<net.minecraft.core.BlockPos> couldNotPlace = new java.util.LinkedHashSet<>();
+    /** The block the printer will place next, for the status line. */
+    @javax.annotation.Nullable
+    private net.minecraft.core.BlockPos nextBlock;
+    /** Items the whole schematic still needs that aren't in the inventory. */
+    public final java.util.Map<net.minecraft.world.item.Item, Integer> missingWhole = new java.util.LinkedHashMap<>();
+    private int statusTicks;
     /** Items the current layers need that aren't in the inventory (what to buy). */
     public final java.util.Map<net.minecraft.world.item.Item, Integer> shoppingList = new java.util.LinkedHashMap<>();
     private int debugTicks;
@@ -45,7 +58,7 @@ public class AutoBuild {
 
     /** The printer is paused while a block is being broken, so the two don't swap the held item. */
     public boolean shouldPausePrinter() {
-        return breaker.isBusy();
+        return breaker.isBusy() || fluids.isBusy() || rails.isBusy() || entities.isBusy();
     }
 
     public boolean isRunning() {
@@ -77,7 +90,92 @@ public class AutoBuild {
                 }
             }
         }
-        return PlacementOrder.order(mc.level, schematic, all, mc.player.position());
+        java.util.List<net.minecraft.core.BlockPos> ordered = PlacementOrder.order(mc.level, schematic, all, mc.player.position());
+        if (!ordered.isEmpty()) {
+            nextBlock = ordered.getFirst();
+        }
+        return ordered;
+    }
+
+    /** What auto build is doing right now, in words. */
+    public String doing() {
+        if (breaker.isBusy()) {
+            return "breaking a wrong block";
+        }
+        if (fluids.isBusy()) {
+            return "using a bucket";
+        }
+        if (rails.isBusy()) {
+            return "placing a temporary rail";
+        }
+        if (airPlace.hasAnchor()) {
+            return "air placing a floating block";
+        }
+        return mover.describe();
+    }
+
+    /** Status line above the hotbar, the whole-build shopping list and the status file. */
+    private void updateStatus(Minecraft mc) {
+        statusTicks++;
+        fi.dy.masa.litematica.world.WorldSchematic schematic = SchematicHelper.world();
+        if (schematic == null) {
+            return;
+        }
+
+        String next = "-";
+        if (nextBlock != null) {
+            BlockCheck.Result result = BlockCheck.check(mc.level, schematic, nextBlock);
+            if (result == BlockCheck.Result.OK) {
+                nextBlock = null;
+            } else {
+                next = schematic.getBlockState(nextBlock).getBlock().getName().getString() + " (" + nextBlock.toShortString() + ")";
+            }
+        }
+
+        if (statusTicks % 10 == 0) {
+            Chat.actionBar(layers.status() + "  |  Next: " + next + "  |  " + doing());
+        }
+        if (statusTicks % 100 == 1) {
+            updateMissingWhole(mc, schematic);
+        }
+        if (statusTicks % 40 == 0 && Configs.Generic.STATUS_FILE.getBooleanValue()) {
+            StatusFile.write(mc, layers.status(), next, nextBlock, doing(), shoppingList, missingWhole);
+        }
+    }
+
+    private void updateMissingWhole(Minecraft mc, fi.dy.masa.litematica.world.WorldSchematic schematic) {
+        java.util.Map<net.minecraft.world.item.Item, Integer> needs = new java.util.LinkedHashMap<>();
+        net.minecraft.core.BlockPos.MutableBlockPos pos = new net.minecraft.core.BlockPos.MutableBlockPos();
+        for (SchematicHelper.Area area : SchematicHelper.areas()) {
+            for (int y = area.minY(); y <= area.maxY(); y++) {
+                for (int x = area.minX(); x <= area.maxX(); x++) {
+                    for (int z = area.minZ(); z <= area.maxZ(); z++) {
+                        pos.set(x, y, z);
+                        BlockCheck.Result result = BlockCheck.check(mc.level, schematic, pos);
+                        net.minecraft.world.level.block.state.BlockState target = schematic.getBlockState(pos);
+                        net.minecraft.world.item.Item item = null;
+                        if (result == BlockCheck.Result.MISSING || result.needsBreaking()) {
+                            net.minecraft.world.item.ItemStack stack =
+                                    fi.dy.masa.litematica.materials.MaterialCache.getInstance().getRequiredBuildItemForState(target);
+                            item = stack.isEmpty() ? null : stack.getItem();
+                        } else if (result == BlockCheck.Result.BUCKET) {
+                            item = Fluids.bucketFor(target);
+                        }
+                        if (item != null) {
+                            needs.merge(item, 1, Integer::sum);
+                        }
+                    }
+                }
+            }
+        }
+        EntityPlacer.missing(mc, schematic).forEach((item, count) -> needs.merge(item, count, Integer::sum));
+        missingWhole.clear();
+        needs.forEach((item, count) -> {
+            int have = mc.player.getInventory().countItem(item);
+            if (count > have) {
+                missingWhole.put(item, count - have);
+            }
+        });
     }
 
     public void markEmpty(net.minecraft.core.BlockPos pos) {
@@ -111,7 +209,10 @@ public class AutoBuild {
         safety.reset();
         emptyDuringBuild.clear();
         deferred.clear();
+        couldNotPlace.clear();
         shoppingList.clear();
+        missingWhole.clear();
+        nextBlock = null;
         breaker.reset();
         mover.reset();
         PrinterBridge.saveSettings();
@@ -122,6 +223,9 @@ public class AutoBuild {
         airPlaceWasOn = PrinterBridge.isAirPlace();
         PrinterBridge.setAirPlace(false);
         airPlace.reset();
+        fluids.reset();
+        rails.reset();
+        entities.reset();
         breaker.setForced(airPlace.misplaced());
 
         if (Configs.Layers.AUTO_LAYER.getBooleanValue() && !layers.start(mc)) {
@@ -226,8 +330,10 @@ public class AutoBuild {
         closeUnwantedMenu(mc);
 
         if (++debugTicks % 40 == 0) {
-            PrinterAddon.debug("Tick: printer idle {}, breaker busy {}, layer {}", PrinterBridge.isIdle(),
-                    breaker.isBusy(), layers.getLayer());
+            if (Configs.Generic.DEBUG_LOG.getBooleanValue()) {
+                PrinterAddon.LOGGER.info("[debug] Tick: printer idle {}, breaker busy {}, layer {}", PrinterBridge.isIdle(),
+                        breaker.isBusy(), layers.getLayer());
+            }
         }
 
         boolean breakSomething = Configs.Breaking.BREAK_WRONG_BLOCKS.getBooleanValue() || !airPlace.misplaced().isEmpty();
@@ -239,11 +345,23 @@ public class AutoBuild {
 
         airPlace.tick(mc, breaker.isBusy());
 
+        if (!breaker.isBusy() && !airPlace.isActive() && !rails.isBusy() && (fluids.isBusy() || PrinterBridge.isIdle())) {
+            fluids.tick(mc);
+        }
+        if (!breaker.isBusy() && !airPlace.isActive() && !fluids.isBusy() && (rails.isBusy() || PrinterBridge.isIdle())) {
+            rails.tick(mc);
+        }
+        if (!breaker.isBusy() && !airPlace.isActive() && !fluids.isBusy() && !rails.isBusy()
+                && (entities.isBusy() || PrinterBridge.isIdle())) {
+            entities.tick(mc);
+        }
+
         if (layers.isActive() && !layers.tick(mc)) {
             stop(mc, null);
             return;
         }
 
         mover.tick(mc);
+        updateStatus(mc);
     }
 }

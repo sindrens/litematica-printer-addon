@@ -92,6 +92,8 @@ public class FarmTest implements FabricClientGameTest {
             context.runOnClient(mc -> {
                 Configs.Generic.SPEED_PRESET.setOptionListValue(SpeedPreset.NORMAL);
                 Configs.Generic.DEBUG_LOG.setBooleanValue(true);
+                Configs.Generic.DETAILED_CHAT.setBooleanValue(true);
+                Configs.Generic.STATUS_FILE.setBooleanValue(true);
                 AutoBuild.INSTANCE.start(mc);
             });
 
@@ -107,7 +109,8 @@ public class FarmTest implements FabricClientGameTest {
                 if (ticks % RESTOCK_EVERY == 0) {
                     restock(context, server);
                 }
-                int layer = context.computeOnClient(mc -> AutoBuild.INSTANCE.layers.getLayer());
+                // Stuck = no block placed at all for a while (a big layer like the hopper floor takes long)
+                int layer = context.computeOnClient(FarmTest::countDone);
                 if (layer != lastLayer) {
                     lastLayer = layer;
                     ticksOnLayer = 0;
@@ -133,7 +136,7 @@ public class FarmTest implements FabricClientGameTest {
 
             int gameTicks = ticks;
             String report = context.computeOnClient(mc -> report(mc, gameTicks, seconds));
-            report = (stuck ? "STOPPED: no layer finished for 3 minutes\n" : "") + report;
+            report = (stuck ? "STOPPED: nothing placed for 3 minutes\n" : "") + report;
             report = report + diagnosis;
             Files.writeString(reportFile, report);
             System.out.println(report);
@@ -168,11 +171,15 @@ public class FarmTest implements FabricClientGameTest {
                             continue;
                         }
                         BlockCheck.Result result = BlockCheck.check(mc.level, schematic, pos);
+                        BlockState target = schematic.getBlockState(pos);
+                        if (result == BlockCheck.Result.BUCKET && no.sindrens.printeraddon.build.Fluids.bucketFor(target) != null) {
+                            needed.merge(no.sindrens.printeraddon.build.Fluids.bucketFor(target), 1, Integer::sum);
+                            continue;
+                        }
                         if (result != BlockCheck.Result.MISSING && result != BlockCheck.Result.PRINTER_FIXES
                                 && !result.needsBreaking()) {
                             continue;
                         }
-                        BlockState target = schematic.getBlockState(pos);
                         ItemStack item = MaterialCache.getInstance().getRequiredBuildItemForState(target);
                         if (!item.isEmpty()) {
                             needed.merge(item.getItem(), 1, Integer::sum);
@@ -204,6 +211,26 @@ public class FarmTest implements FabricClientGameTest {
             commands.add("give @p " + BuiltInRegistries.ITEM.getKey(entry.getKey()) + " " + Math.min(missing, stacks * max));
         }
         return commands;
+    }
+
+    /** Number of positions that match the schematic. */
+    private static int countDone(Minecraft mc) {
+        WorldSchematic schematic = SchematicWorldHandler.getSchematicWorld();
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        int done = 0;
+        for (SchematicHelper.Area area : SchematicHelper.areas()) {
+            for (int y = area.minY(); y <= area.maxY(); y++) {
+                for (int x = area.minX(); x <= area.maxX(); x++) {
+                    for (int z = area.minZ(); z <= area.maxZ(); z++) {
+                        pos.set(x, y, z);
+                        if (BlockCheck.check(mc.level, schematic, pos) == BlockCheck.Result.OK) {
+                            done++;
+                        }
+                    }
+                }
+            }
+        }
+        return done;
     }
 
     /**

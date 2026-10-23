@@ -53,6 +53,15 @@ public final class PlacementOrder {
             return false;
         }
 
+        // Rails wait until they'll get the right shape (see RailHelper)
+        if (!AutoBuild.INSTANCE.rails.isReady(level, schematic, pos, target)) {
+            return false;
+        }
+        // Nothing goes where a temporary rail stands
+        if (AutoBuild.INSTANCE.rails.isTemp(pos)) {
+            return false;
+        }
+
         if (target.getBlock() instanceof BaseRailBlock rail) {
             RailShape shape = target.getValue(rail.getShapeProperty());
             Direction up = switch (shape) {
@@ -83,7 +92,7 @@ public final class PlacementOrder {
             return true;
         }
         BlockCheck.Result result = BlockCheck.check(level, schematic, pos);
-        return result == BlockCheck.Result.OK || result == BlockCheck.Result.MANUAL;
+        return result == BlockCheck.Result.OK || result == BlockCheck.Result.BUCKET;
     }
 
     /**

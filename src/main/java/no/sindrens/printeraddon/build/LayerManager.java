@@ -37,6 +37,8 @@ public class LayerManager {
     private int lastRemaining = -1;
     private int ticksWithoutProgress;
     private boolean reportedStuck;
+    /** Layer and blocks left, for the status line. */
+    private String status = "";
     private int waitingChecks;
     /** All layers are done; only the deferred blocks are left. */
     private boolean finishingDeferred;
@@ -176,7 +178,7 @@ public class LayerManager {
                     return true;
                 }
                 Chat.info("\u00a7aBuild finished!");
-                reportManual(mc, schematic, areas);
+                reportUnfinished(mc, schematic);
                 stop();
                 return false;
             }
@@ -197,13 +199,62 @@ public class LayerManager {
             ticksWithoutProgress += interval;
         }
 
-        Chat.actionBar(describeLayers() + ": " + remaining + " block" + (remaining == 1 ? "" : "s") + " left");
+        status = describeLayers() + ": " + remaining + " left";
 
         if (!reportedStuck && ticksWithoutProgress >= Configs.Layers.STUCK_REPORT_SECONDS.getIntegerValue() * 20) {
             reportedStuck = true;
             reportStuck(mc, schematic, areas);
         }
 
+        if (ticksWithoutProgress >= Configs.Layers.SKIP_STUCK_SECONDS.getIntegerValue() * 20 && skipUnplaceable(mc, schematic, areas)) {
+            completeChecks = 2;
+            ticksUntilCheck = 0;
+        }
+
+        return true;
+    }
+
+    /**
+     * Gives up on the blocks left in the current layers if every one of them has its item in the inventory (so the
+     * printer just can't place it). Returns true if the layer can be left; false if something is waiting for items.
+     */
+    private boolean skipUnplaceable(Minecraft mc, WorldSchematic schematic, List<SchematicHelper.Area> areas) {
+        List<BlockPos> left = new ArrayList<>();
+        scanLayers(mc.level, schematic, areas, null, null);
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        for (SchematicHelper.Area area : areas) {
+            for (int y = Math.max(layer, area.minY()); y <= Math.min(layerTop, area.maxY()); y++) {
+                for (int x = area.minX(); x <= area.maxX(); x++) {
+                    for (int z = area.minZ(); z <= area.maxZ(); z++) {
+                        pos.set(x, y, z);
+                        BlockCheck.Result result = BlockCheck.check(mc.level, schematic, pos);
+                        if (result == BlockCheck.Result.OK || result == BlockCheck.Result.EXTRA) {
+                            continue;
+                        }
+                        BlockState bucketTarget = schematic.getBlockState(pos);
+                        if (result == BlockCheck.Result.BUCKET && Fluids.bucketFor(bucketTarget) != null
+                                && !mc.player.getInventory().contains(s -> s.is(Fluids.bucketFor(bucketTarget)))) {
+                            // Waiting for a bucket (to buy), not stuck
+                            return false;
+                        }
+                        if (AutoBuild.INSTANCE.rails.isTemp(pos)) {
+                            continue;
+                        }
+                        BlockState target = schematic.getBlockState(pos);
+                        ItemStack needed = MaterialCache.getInstance().getRequiredBuildItemForState(target);
+                        if (result == BlockCheck.Result.MISSING && !needed.isEmpty()
+                                && !mc.player.getInventory().contains(s -> s.is(needed.getItem()))) {
+                            return false;
+                        }
+                        left.add(pos.immutable());
+                    }
+                }
+            }
+        }
+
+        AutoBuild.INSTANCE.couldNotPlace.addAll(left);
+        Chat.warn("Skipping " + left.size() + " block" + (left.size() == 1 ? "" : "s") + " in " + describeLayers()
+                + " the printer can't place; they're listed at the end.");
         return true;
     }
 
@@ -211,7 +262,7 @@ public class LayerManager {
         List<BlockPos> left = unfinishedDeferred(mc.level, schematic);
         if (left.isEmpty()) {
             Chat.info("\u00a7aBuild finished!");
-            reportManual(mc, schematic, areas);
+            reportUnfinished(mc, schematic);
             stop();
             return false;
         }
@@ -223,7 +274,7 @@ public class LayerManager {
         } else {
             ticksWithoutProgress += interval;
         }
-        Chat.actionBar("Last blocks: " + left.size() + " left");
+        status = "Last blocks: " + left.size() + " left";
 
         if (!reportedStuck && ticksWithoutProgress >= Configs.Layers.STUCK_REPORT_SECONDS.getIntegerValue() * 20) {
             reportedStuck = true;
@@ -235,6 +286,10 @@ public class LayerManager {
             }
         }
         return true;
+    }
+
+    public String status() {
+        return status;
     }
 
     public boolean isFinishingDeferred() {
@@ -331,7 +386,7 @@ public class LayerManager {
         List<BlockPos> left = new ArrayList<>();
         for (BlockPos pos : AutoBuild.INSTANCE.deferred) {
             BlockCheck.Result result = BlockCheck.check(level, schematic, pos);
-            if (result != BlockCheck.Result.OK && result != BlockCheck.Result.MANUAL && result != BlockCheck.Result.EXTRA) {
+            if (result != BlockCheck.Result.OK && result != BlockCheck.Result.EXTRA) {
                 left.add(pos);
             }
         }
@@ -366,25 +421,18 @@ public class LayerManager {
         }
     }
 
-    /** At the end: list what the printer couldn't place (water, lava, filled cauldrons). */
-    private void reportManual(Minecraft mc, WorldSchematic schematic, List<SchematicHelper.Area> areas) {
+    /** At the end: say if anything couldn't be finished (with where), so nothing is silently left out. */
+    private void reportUnfinished(Minecraft mc, WorldSchematic schematic) {
         java.util.Map<String, Integer> counts = new java.util.TreeMap<>();
         List<String> examples = new ArrayList<>();
-        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
 
-        for (SchematicHelper.Area area : areas) {
-            for (int y = area.minY(); y <= area.maxY(); y++) {
-                for (int x = area.minX(); x <= area.maxX(); x++) {
-                    for (int z = area.minZ(); z <= area.maxZ(); z++) {
-                        pos.set(x, y, z);
-                        if (BlockCheck.check(mc.level, schematic, pos) == BlockCheck.Result.MANUAL) {
-                            String name = schematic.getBlockState(pos).getBlock().getName().getString();
-                            counts.merge(name, 1, Integer::sum);
-                            if (examples.size() < MAX_REPORTED) {
-                                examples.add(name + " at " + x + " " + y + " " + z);
-                            }
-                        }
-                    }
+        for (BlockPos skipped : AutoBuild.INSTANCE.couldNotPlace) {
+            BlockCheck.Result result = BlockCheck.check(mc.level, schematic, skipped);
+            if (result != BlockCheck.Result.OK) {
+                String name = schematic.getBlockState(skipped).getBlock().getName().getString();
+                counts.merge(name, 1, Integer::sum);
+                if (examples.size() < MAX_REPORTED * 2) {
+                    examples.add(name + " at " + skipped.getX() + " " + skipped.getY() + " " + skipped.getZ());
                 }
             }
         }
@@ -392,7 +440,7 @@ public class LayerManager {
         if (counts.isEmpty()) {
             return;
         }
-        StringBuilder sb = new StringBuilder("Do these by hand (the printer can't place them): ");
+        StringBuilder sb = new StringBuilder("Couldn't finish: ");
         counts.forEach((name, count) -> sb.append(count).append(' ').append(name).append(", "));
         Chat.warn(sb.substring(0, sb.length() - 2));
         for (String example : examples) {
@@ -422,6 +470,7 @@ public class LayerManager {
         }
     }
 
+
     private static String describe(Minecraft mc, BlockCheck.Result result, BlockState target) {
         String name = target.getBlock().getName().getString();
 
@@ -437,7 +486,9 @@ public class LayerManager {
             case PROTECTED -> "wrong, but it's a container or unbreakable, fix it by hand";
             case EXTRA -> "should be air (use 'Clear extra blocks')";
             case UNLOADED -> "chunk not loaded, move closer";
-            case MANUAL -> "the printer can't place this, do it by hand";
+            case BUCKET -> "needs a bucket of lava or water" + (Fluids.bucketFor(target) != null
+                    && mc.player != null && mc.player.getInventory().contains(s -> s.is(Fluids.bucketFor(target)))
+                    ? " (in inventory, move closer?)" : " (\u00a7cnot in inventory\u00a7e)");
             case OK -> "ok";
         };
     }
@@ -476,15 +527,18 @@ public class LayerManager {
                     BlockCheck.Result result = BlockCheck.check(level, schematic, pos);
 
                     boolean unfinished = switch (result) {
-                        case OK, MANUAL -> false;
+                        case OK -> false;
                         case EXTRA -> extraCounts;
-                        default -> true;
+                        default -> !AutoBuild.INSTANCE.couldNotPlace.contains(pos);
                     };
 
                     if (unfinished) {
                         remaining++;
                         if (examples != null && examples.size() < MAX_REPORTED) {
                             examples.add(pos.immutable());
+                        }
+                        if (findings != null && result == BlockCheck.Result.BUCKET && Fluids.bucketFor(schematic.getBlockState(pos)) != null) {
+                            findings.needs.merge(Fluids.bucketFor(schematic.getBlockState(pos)), 1, Integer::sum);
                         }
                         if (findings != null && result == BlockCheck.Result.MISSING) {
                             BlockState target = schematic.getBlockState(pos);

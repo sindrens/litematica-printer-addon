@@ -20,6 +20,7 @@ import net.minecraft.world.level.block.RepeaterBlock;
 import net.minecraft.world.level.block.SlabBlock;
 import net.minecraft.world.level.block.TrapDoorBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.Property;
 import net.minecraft.world.level.block.state.properties.SlabType;
 import no.sindrens.printeraddon.config.Configs;
@@ -51,8 +52,8 @@ public final class BlockCheck {
         PROTECTED,
         /** Chunk not loaded on the client: unknown. */
         UNLOADED,
-        /** Something the printer can't place (water/lava source, filled cauldron): listed for the player. */
-        MANUAL;
+        /** Needs a bucket: a water/lava source, filling a cauldron, or waterlogging a block. The add-on does it. */
+        BUCKET;
 
         public boolean needsBreaking() {
             return this == WRONG_BLOCK || this == WRONG_STATE;
@@ -89,13 +90,13 @@ public final class BlockCheck {
             if (!target.getFluidState().isSource()) {
                 return Result.OK;
             }
-            return current.isAir() || current.canBeReplaced() ? Result.MANUAL : Result.WRONG_BLOCK;
+            return current.isAir() || current.canBeReplaced() ? Result.BUCKET : Result.WRONG_BLOCK;
         }
 
-        // Lava/water/powder snow in a cauldron needs a bucket
+        // Lava/water/powder snow in a cauldron: the printer places the empty cauldron, then a bucket fills it
         if (target.getBlock() instanceof AbstractCauldronBlock && target.getBlock() != Blocks.CAULDRON
                 && current.getBlock() == Blocks.CAULDRON) {
-            return Result.MANUAL;
+            return Result.BUCKET;
         }
 
         if (target.isAir()) {
@@ -148,6 +149,9 @@ public final class BlockCheck {
                     && target.getValue(SlabBlock.TYPE) == SlabType.DOUBLE) {
                 // the printer adds the second slab
                 countDiff = true;
+            } else if (name.equals("shape") && block instanceof net.minecraft.world.level.block.BaseRailBlock) {
+                // A rail with the wrong shape sends carts the wrong way: break it and place it again
+                orientationDiff = true;
             } else if (ORIENTATION_PROPERTIES.contains(name)) {
                 orientationDiff = true;
             } else if (COUNT_PROPERTIES.contains(name)) {
@@ -155,6 +159,12 @@ public final class BlockCheck {
             } else {
                 otherDiff = true;
             }
+        }
+
+        if (!orientationDiff && target.hasProperty(BlockStateProperties.WATERLOGGED)
+                && target.getValue(BlockStateProperties.WATERLOGGED) && !current.getValue(BlockStateProperties.WATERLOGGED)) {
+            // Right block, but it should stand in water: a water bucket does that
+            return Result.BUCKET;
         }
 
         if (orientationDiff) {

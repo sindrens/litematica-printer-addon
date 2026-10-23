@@ -26,6 +26,15 @@ public final class StateRules {
         return CHANGE_BY_THEMSELVES.contains(property.getName());
     }
 
+    /**
+     * A filled cauldron (lava, water, powder snow) is placed as an empty cauldron and filled by hand: placing the
+     * empty one is right.
+     */
+    public static boolean isPlaceableBase(Block target, Block placed) {
+        return placed == Blocks.CAULDRON
+                && (target == Blocks.LAVA_CAULDRON || target == Blocks.WATER_CAULDRON || target == Blocks.POWDER_SNOW_CAULDRON);
+    }
+
     /** A stem that has grown a fruit is the same plant as a fresh stem: planting the seed is right. */
     public static boolean isGrowthVariant(Block a, Block b) {
         return (a == Blocks.ATTACHED_PUMPKIN_STEM && b == Blocks.PUMPKIN_STEM)
