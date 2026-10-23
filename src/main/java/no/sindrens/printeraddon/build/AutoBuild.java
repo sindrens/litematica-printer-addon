@@ -175,7 +175,7 @@ public class AutoBuild {
                         net.minecraft.world.item.Item item = null;
                         if (result == BlockCheck.Result.MISSING || result.needsBreaking()) {
                             net.minecraft.world.item.ItemStack stack =
-                                    fi.dy.masa.litematica.materials.MaterialCache.getInstance().getRequiredBuildItemForState(target);
+                                    StateRules.itemFor(target);
                             item = stack.isEmpty() ? null : stack.getItem();
                         } else if (result == BlockCheck.Result.BUCKET) {
                             item = Fluids.bucketFor(target);

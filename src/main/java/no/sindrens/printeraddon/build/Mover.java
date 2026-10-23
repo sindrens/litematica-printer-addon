@@ -763,7 +763,7 @@ public class Mover {
     }
 
     private static boolean hasItemFor(LocalPlayer player, BlockState state) {
-        ItemStack needed = MaterialCache.getInstance().getRequiredBuildItemForState(state);
+        ItemStack needed = StateRules.itemFor(state);
         return !needed.isEmpty() && player.getInventory().contains(stack -> stack.is(needed.getItem()));
     }
 }

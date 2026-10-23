@@ -94,7 +94,7 @@ public class QuickPlace {
                 || !target.getFluidState().isEmpty() && target.getFluidState().isSource() && target.getBlock() instanceof net.minecraft.world.level.block.LiquidBlock) {
             return null;
         }
-        ItemStack stack = MaterialCache.getInstance().getRequiredBuildItemForState(target);
+        ItemStack stack = StateRules.itemFor(target);
         if (stack.isEmpty() || !(stack.getItem() instanceof BlockItem blockItem)) {
             return null;
         }
@@ -163,7 +163,8 @@ public class QuickPlace {
     /** The same block with the same properties, apart from ones that change by themselves or follow neighbours. */
     private static boolean matches(BlockState placed, BlockState target) {
         if (placed.getBlock() != target.getBlock()) {
-            return false;
+            // A plain stem where the schematic has one bent towards its fruit: it bends by itself
+            return StateRules.isGrowthVariant(target.getBlock(), placed.getBlock());
         }
         boolean connects = target.getBlock() instanceof RedStoneWireBlock || target.getBlock() instanceof FenceBlock
                 || target.getBlock() instanceof IronBarsBlock || target.getBlock() instanceof WallBlock;
@@ -200,7 +201,7 @@ public class QuickPlace {
         }
         BlockState target = schematic.getBlockState(next);
         Way way = way(mc, next, target);
-        ItemStack item = MaterialCache.getInstance().getRequiredBuildItemForState(target);
+        ItemStack item = StateRules.itemFor(target);
         if (way == null || item.isEmpty()) {
             return false;
         }
@@ -269,7 +270,7 @@ public class QuickPlace {
             if (AutoBuild.INSTANCE.rails.isTemp(pos) || !PlacementOrder.isReady(mc.level, schematic, pos, target)) {
                 continue;
             }
-            ItemStack item = MaterialCache.getInstance().getRequiredBuildItemForState(target);
+            ItemStack item = StateRules.itemFor(target);
             if (item.isEmpty() || !player.getInventory().contains(s -> s.is(item.getItem()))) {
                 continue;
             }

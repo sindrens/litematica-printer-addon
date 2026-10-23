@@ -36,6 +36,20 @@ public final class StateRules {
     }
 
     /** A stem that has grown a fruit is the same plant as a fresh stem: planting the seed is right. */
+    /**
+     * The item that builds a block. Like Litematica's, but an attached stem (one bent towards its fruit, which no
+     * item places) is built from seeds: the plain stem bends by itself once its fruit grows.
+     */
+    public static net.minecraft.world.item.ItemStack itemFor(net.minecraft.world.level.block.state.BlockState target) {
+        if (target.getBlock() == Blocks.ATTACHED_PUMPKIN_STEM) {
+            return new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.PUMPKIN_SEEDS);
+        }
+        if (target.getBlock() == Blocks.ATTACHED_MELON_STEM) {
+            return new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.MELON_SEEDS);
+        }
+        return fi.dy.masa.litematica.materials.MaterialCache.getInstance().getRequiredBuildItemForState(target);
+    }
+
     public static boolean isGrowthVariant(Block a, Block b) {
         return (a == Blocks.ATTACHED_PUMPKIN_STEM && b == Blocks.PUMPKIN_STEM)
                 || (a == Blocks.PUMPKIN_STEM && b == Blocks.ATTACHED_PUMPKIN_STEM)

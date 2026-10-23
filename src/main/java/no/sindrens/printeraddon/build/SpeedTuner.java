@@ -34,6 +34,7 @@ public class SpeedTuner {
     private int bad;
     private long tick;
     private long calmUntil;
+    private long lastPenalty = -1;
 
     public void reset() {
         seen.clear();
@@ -116,6 +117,11 @@ public class SpeedTuner {
             case WRONG_BLOCK, WRONG_STATE -> {
                 bad++;
                 goodInARow = 0;
+                // Several wrong blocks found in one check were placed at the same speed: slow down once
+                if (lastPenalty == tick) {
+                    return;
+                }
+                lastPenalty = tick;
                 calmUntil = tick + CALM_AFTER_MISTAKE;
                 // Never this fast again in this build
                 fastestSafe = Math.max(fastestSafe, interval() + 1);

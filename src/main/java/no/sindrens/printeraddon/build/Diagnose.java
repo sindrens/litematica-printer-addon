@@ -37,7 +37,7 @@ public final class Diagnose {
             sb.append(" (out of reach)");
         }
 
-        ItemStack item = MaterialCache.getInstance().getRequiredBuildItemForState(target);
+        ItemStack item = StateRules.itemFor(target);
         if (!item.isEmpty() && result == BlockCheck.Result.MISSING) {
             sb.append(" | item ").append(item.getHoverName().getString()).append(": ")
                     .append(mc.player.getInventory().countItem(item.getItem())).append(" in inventory");

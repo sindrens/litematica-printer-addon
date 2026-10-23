@@ -479,7 +479,7 @@ public class LayerManager {
 
         return switch (result) {
             case MISSING -> {
-                ItemStack needed = MaterialCache.getInstance().getRequiredBuildItemForState(target);
+                ItemStack needed = StateRules.itemFor(target);
                 boolean have = mc.player != null && !needed.isEmpty()
                         && mc.player.getInventory().contains(s -> s.is(needed.getItem()));
                 yield "needs " + name + (have ? " (in inventory, move closer?)" : " (§cnot in inventory§e)");
@@ -550,7 +550,7 @@ public class LayerManager {
                             if (!PlacementOrder.isReady(level, schematic, pos, target)) {
                                 findings.waiting.add(pos.immutable());
                             }
-                            ItemStack item = MaterialCache.getInstance().getRequiredBuildItemForState(target);
+                            ItemStack item = StateRules.itemFor(target);
                             if (!item.isEmpty()) {
                                 findings.needs.merge(item.getItem(), 1, Integer::sum);
                             }
