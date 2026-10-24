@@ -8,27 +8,33 @@ import net.minecraft.world.item.Items;
 import no.sindrens.printeraddon.config.Configs;
 
 /**
- * The tools a build needs, got by the add-on itself: nothing has to be in the inventory at the start. A hoe for
- * farmland comes from the inventory or storage, else it's crafted: from diamonds or iron at hand (or in storage),
- * else from stone the shop sells for very little. Never a block of diamond or iron bought for one (that was $8,550
- * for a hoe once, with 7 diamonds in a vault). A special hoe (enchanted, renamed) is put away before it breaks; an
- * ordinary one is used up.
+ * The tools a build needs, got by the add-on itself: nothing has to be in the inventory at the start. The player's
+ * rules: a plain tool from the inventory, the vaults or linked chests first; if there's none, a diamond one is
+ * crafted at once (diamonds from storage, else a block of diamond bought); the player's own tools (enchanted,
+ * renamed, or netherite) only when there's nothing else, and put away before they break. Plain tools are used until
+ * they break.
  */
 public final class Tools {
-    /** Stands for "a hoe" in the lists of what's needed: storage gives any usable hoe, crafting picks the material. */
-    public static final Item HOE = Items.STONE_HOE;
-    /** Stand for "a pickaxe" and "a shovel" (for breaking wrong blocks: hoppers and observers only drop with a pickaxe). */
-    public static final Item PICKAXE = Items.STONE_PICKAXE;
-    public static final Item SHOVEL = Items.STONE_SHOVEL;
+    /**
+     * Stand for "a hoe", "a pickaxe", "a shovel" and "an axe" in the lists of what's needed: storage gives any plain one
+     * of the kind, crafting makes a diamond one.
+     */
+    public static final Item HOE = Items.DIAMOND_HOE;
+    public static final Item PICKAXE = Items.DIAMOND_PICKAXE;
+    public static final Item SHOVEL = Items.DIAMOND_SHOVEL;
+    public static final Item AXE = Items.DIAMOND_AXE;
 
     /** True for the items that stand for a kind of tool in the lists of what's needed. */
     public static boolean isMarker(Item item) {
-        return item == HOE || item == PICKAXE || item == SHOVEL;
+        return item == HOE || item == PICKAXE || item == SHOVEL || item == AXE;
     }
 
-    /** The marker for the kind of tool this is (HOE, PICKAXE, SHOVEL), or null for anything else. */
+    /** The marker for the kind of tool this is (HOE, PICKAXE, SHOVEL, AXE), or null for anything else. */
     @javax.annotation.Nullable
     public static Item kindOf(ItemStack stack) {
+        if (stack.isEmpty()) {
+            return null;
+        }
         if (isHoe(stack)) {
             return HOE;
         }
@@ -38,58 +44,131 @@ public final class Tools {
         if (stack.is(ItemTags.SHOVELS)) {
             return SHOVEL;
         }
+        if (stack.is(ItemTags.AXES)) {
+            return AXE;
+        }
         return null;
     }
 
-    /** A tool of this kind good for a while (a hoe: see usableHoe; a pickaxe or shovel: not about to break). */
+    /** Diamonds one tool of this kind takes. */
+    public static int diamondsFor(Item kind) {
+        return kind == PICKAXE || kind == AXE ? 3 : kind == HOE ? 2 : 1;
+    }
+
+    /** One of the player's own tools: enchanted, renamed (anything more than wear), or netherite. Used last. */
+    public static boolean privateTool(ItemStack stack) {
+        return kindOf(stack) != null && (!InventoryCleaner.ordinary(stack) || isNetherite(stack.getItem()));
+    }
+
+    private static boolean isNetherite(Item item) {
+        return item == Items.NETHERITE_HOE || item == Items.NETHERITE_PICKAXE || item == Items.NETHERITE_SHOVEL
+                || item == Items.NETHERITE_AXE || item == Items.NETHERITE_SWORD;
+    }
+
+    /** A plain tool of this kind: used until it breaks (the player's own tools don't count, see privateTool). */
     public static boolean usable(Item kind, ItemStack stack) {
-        if (kind == HOE) {
-            return usableHoe(stack);
-        }
-        return kindOf(stack) == kind && (!stack.isDamageableItem()
-                || left(stack) > Math.max(Configs.Breaking.MIN_TOOL_DURABILITY.getIntegerValue(), stack.getMaxDamage() / 10));
+        return kindOf(stack) == kind && !privateTool(stack) && (!stack.isDamageableItem() || left(stack) >= 1);
+    }
+
+    /** One of the player's own tools of this kind, not about to break (for when there's no plain one). */
+    public static boolean usablePrivate(Item kind, ItemStack stack) {
+        return kindOf(stack) == kind && privateTool(stack) && !wornSpecial(stack)
+                && (!stack.isDamageableItem() || left(stack) > Configs.Breaking.MIN_TOOL_DURABILITY.getIntegerValue());
     }
 
     public static boolean has(Item kind, Inventory inventory) {
-        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+        return bestSlot(kind, inventory) >= 0;
+    }
+
+    /** How many plain tools of this kind the inventory has (the player's own don't count). */
+    public static int count(Item kind, Inventory inventory) {
+        int count = 0;
+        for (int slot = 0; slot < Inventory.INVENTORY_SIZE; slot++) {
             if (usable(kind, inventory.getItem(slot))) {
-                return true;
+                count++;
             }
         }
-        return false;
+        return count;
     }
 
     /**
-     * The pickaxe and shovel the build may need for breaking wrong blocks, that the inventory has no usable one of:
-     * a pickaxe when the schematic has blocks that drop nothing without one (hoppers, observers, concrete), a shovel
-     * when it has dirt, mud or the like.
+     * The slot of the plain tool of this kind to use, or -1: the best material first (diamond before iron or stone),
+     * of those the most worn one (each is used up before the next).
+     */
+    public static int bestSlot(Item kind, Inventory inventory) {
+        int best = -1;
+        for (int slot = 0; slot < Inventory.INVENTORY_SIZE; slot++) {
+            ItemStack stack = inventory.getItem(slot);
+            if (!usable(kind, stack)) {
+                continue;
+            }
+            if (best < 0) {
+                best = slot;
+                continue;
+            }
+            ItemStack other = inventory.getItem(best);
+            int rank = rank(stack.getItem());
+            int otherRank = rank(other.getItem());
+            if (rank > otherRank || rank == otherRank && left(stack) < left(other)) {
+                best = slot;
+            }
+        }
+        return best;
+    }
+
+    /** How good the material is: diamond 5, iron 4, stone 3, gold 2, wood 1 (netherite is the player's own). */
+    public static int rank(Item item) {
+        String id = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(item).getPath();
+        if (id.startsWith("diamond_")) {
+            return 5;
+        }
+        if (id.startsWith("iron_")) {
+            return 4;
+        }
+        if (id.startsWith("stone_")) {
+            return 3;
+        }
+        if (id.startsWith("golden_")) {
+            return 2;
+        }
+        return id.startsWith("wooden_") ? 1 : 0;
+    }
+
+    /**
+     * The tools the build may need for breaking wrong blocks, that the inventory has no plain one of: a pickaxe when
+     * the schematic has blocks that drop nothing without one (hoppers, observers, concrete), a shovel when it has dirt,
+     * mud or the like, an axe for wood and pumpkins. Not one the server won't let it craft (breaking goes on without).
      */
     public static java.util.List<Item> breakingToolsMissing(java.util.Set<net.minecraft.world.level.block.Block> blocks, Inventory inventory) {
         boolean pickaxe = false;
         boolean shovel = false;
+        boolean axe = false;
         for (net.minecraft.world.level.block.Block block : blocks) {
             net.minecraft.world.level.block.state.BlockState state = block.defaultBlockState();
             pickaxe |= state.requiresCorrectToolForDrops() && state.is(net.minecraft.tags.BlockTags.MINEABLE_WITH_PICKAXE);
             shovel |= state.is(net.minecraft.tags.BlockTags.MINEABLE_WITH_SHOVEL);
+            axe |= state.is(net.minecraft.tags.BlockTags.MINEABLE_WITH_AXE);
         }
         java.util.List<Item> missing = new java.util.ArrayList<>();
-        // Not one the server won't craft, stone or wooden (it's only for breaking wrong blocks: that goes on without)
-        if (pickaxe && !has(PICKAXE, inventory) && !(Crafter.refused(Items.STONE_PICKAXE) && Crafter.refused(Items.WOODEN_PICKAXE))) {
+        if (pickaxe && !has(PICKAXE, inventory) && !Crafter.refused(PICKAXE)) {
             missing.add(PICKAXE);
         }
-        if (shovel && !has(SHOVEL, inventory) && !(Crafter.refused(Items.STONE_SHOVEL) && Crafter.refused(Items.WOODEN_SHOVEL))) {
+        if (shovel && !has(SHOVEL, inventory) && !Crafter.refused(SHOVEL)) {
             missing.add(SHOVEL);
+        }
+        if (axe && !has(AXE, inventory) && !Crafter.refused(AXE)) {
+            missing.add(AXE);
         }
         return missing;
     }
 
-    /** A stone or wooden pickaxe or shovel, as the add-on makes them (put away with the building items). */
-    public static boolean cheapTool(ItemStack stack) {
-        Item item = stack.getItem();
-        return item == Items.STONE_PICKAXE || item == Items.STONE_SHOVEL || item == Items.WOODEN_PICKAXE || item == Items.WOODEN_SHOVEL;
+    /** A plain tool (as the add-on makes them): put away with the building items, for next time. */
+    public static boolean addonTool(ItemStack stack) {
+        return kindOf(stack) != null && !privateTool(stack);
     }
-    /** Uses of a stone hoe: how many to make for the tilling left. */
-    private static final int STONE_USES = 131;
+
+    /** Uses of a diamond hoe (what the add-on makes): how many to make for the tilling left. */
+    private static final int DIAMOND_USES = 1561;
     /** At most this many hoes are made in one go (each takes a slot). */
     private static final int MAX_AT_ONCE = 3;
 
@@ -106,36 +185,30 @@ public final class Tools {
         return stack.getItem() instanceof net.minecraft.world.item.HoeItem || stack.is(ItemTags.HOES);
     }
 
-    /** A hoe the printer may use: not about to break (a new one is got before), and not a special one that's worn. */
+    /** A hoe the printer may use: a plain one, until it breaks (see usable). */
     public static boolean usableHoe(ItemStack stack) {
-        return isHoe(stack) && !wornSpecial(stack)
-                && (!stack.isDamageableItem() || left(stack) >= Math.min(50, Math.max(5, stack.getMaxDamage() * 15 / 100)));
+        return usable(HOE, stack);
     }
 
     public static boolean hasUsableHoe(Inventory inventory) {
-        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
-            if (usableHoe(inventory.getItem(slot))) {
-                return true;
-            }
-        }
-        return false;
+        return has(HOE, inventory);
     }
 
-    /** Uses left in all the hoes of the inventory (the worn special ones not counted). */
+    /** Uses left in all the plain hoes of the inventory. */
     public static int hoeUses(Inventory inventory) {
         long uses = 0;
         for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
             ItemStack stack = inventory.getItem(slot);
-            if (isHoe(stack) && !wornSpecial(stack)) {
+            if (usableHoe(stack)) {
                 uses += Math.min(100000, left(stack));
             }
         }
         return (int) Math.min(Integer.MAX_VALUE, uses);
     }
 
-    /** How many hoes to get for this much tilling (stone ones last 131 uses each; at most 3 at a time). */
+    /** How many hoes to get for this much tilling (diamond ones last 1561 uses each; at most 3 at a time). */
     public static int hoesFor(int tilling) {
-        return Math.max(1, Math.min(MAX_AT_ONCE, (tilling + STONE_USES - 1) / STONE_USES));
+        return Math.max(1, Math.min(MAX_AT_ONCE, (tilling + DIAMOND_USES - 1) / DIAMOND_USES));
     }
 
     /**
@@ -147,18 +220,18 @@ public final class Tools {
     }
 
     /**
-     * A tool of the player's own that's special (enchanted, renamed...) and nearly worn out: the printer would use it
-     * until it breaks, so it's put away (into a vault or linked chest).
+     * A tool of the player's own (enchanted, renamed, netherite) that's nearly worn out: it's put away (into a vault
+     * or linked chest) before it breaks, and not used any more.
      */
     public static boolean wornSpecial(ItemStack stack) {
-        return isHoe(stack) && stack.isDamageableItem() && !InventoryCleaner.ordinary(stack)
+        return privateTool(stack) && stack.isDamageableItem()
                 && left(stack) <= Math.max(Configs.Breaking.MIN_TOOL_DURABILITY.getIntegerValue(), stack.getMaxDamage() / 20);
     }
 
-    /** What hoes are made of (kept while a hoe is needed, put away otherwise). */
+    /** What tools are made of (kept while a tool is needed, put away otherwise). */
     public static boolean hoeMaterial(Item item) {
         ItemStack stack = new ItemStack(item);
-        return item == Items.DIAMOND || item == Items.IRON_INGOT || item == Items.STICK || stack.is(ItemTags.STONE_TOOL_MATERIALS)
-                || stack.is(ItemTags.PLANKS) || stack.is(ItemTags.LOGS);
+        return item == Items.DIAMOND || item == Items.DIAMOND_BLOCK || item == Items.STICK || stack.is(ItemTags.PLANKS)
+                || stack.is(ItemTags.LOGS);
     }
 }

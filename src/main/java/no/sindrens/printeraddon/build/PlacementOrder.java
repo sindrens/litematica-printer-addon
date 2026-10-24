@@ -68,6 +68,12 @@ public final class PlacementOrder {
         if (water != null) {
             return "tilling waits for the water at " + water.toShortString();
         }
+        // Over a water spot of the layers being built (two layers together): only once its water is in, so the bucket
+        // still sees the spot from above
+        BlockPos under = waterBelow(level, schematic, pos);
+        if (under != null) {
+            return "waits for the water under it at " + under.toShortString();
+        }
 
         // Rails wait until they'll get the right shape (see RailHelper; only when the add-on places rails itself)
         RailHelper.Plan plan = no.sindrens.printeraddon.config.Configs.Layers.ADDON_PLACES.getBooleanValue()
@@ -116,29 +122,61 @@ public final class PlacementOrder {
         return null;
     }
 
+    /** A block that stands on the block under it (seeds and crops, redstone dust, rails, carpets): goes in right after it. */
+    public static boolean standsOnBelow(BlockState target) {
+        return needsSupport(target) && !(target.getBlock() instanceof FallingBlock);
+    }
+
+    /**
+     * The water spot of the layers being built, under this block or next to that, that's still to be filled; or null.
+     * A block over it first would keep the bucket from seeing the spot (the bucket goes where the view hits).
+     */
+    @Nullable
+    public static BlockPos waterBelow(Level level, WorldSchematic schematic, BlockPos pos) {
+        LayerManager layers = AutoBuild.INSTANCE.layers;
+        if (!layers.isActive() || pos.getY() - 1 < layers.getLayer() || pos.getY() - 1 > layers.getLayerTop()) {
+            return null;
+        }
+        BlockPos.MutableBlockPos near = new BlockPos.MutableBlockPos();
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                near.set(pos.getX() + dx, pos.getY() - 1, pos.getZ() + dz);
+                if (holdsWater(schematic.getBlockState(near)) && !level.getFluidState(near).isSource()) {
+                    return near.immutable();
+                }
+            }
+        }
+        return null;
+    }
+
     /** A block that holds a water source (water itself or a waterlogged block). */
     public static boolean holdsWater(BlockState target) {
         return target.getFluidState().isSource() && target.getFluidState().getType().isSame(net.minecraft.world.level.material.Fluids.WATER);
     }
 
     /**
-     * Farmland is tilled only once the water that keeps it wet is in (a waterlogged block or water within 4 blocks,
-     * as the game checks): tilled without water it dries back to dirt. The dirt itself may go in before.
-     * Returns the water still missing, or null.
+     * Farmland is tilled only once water that keeps it wet is in (a waterlogged block or water within 4 blocks, as the
+     * game checks): tilled without water it dries back to dirt. One is enough (all of them in reach held up the rows
+     * whose second water was in the next lane). The dirt itself may go in before. Returns the water to wait for, or null.
      */
     @Nullable
     public static BlockPos waterFirst(Level level, WorldSchematic schematic, BlockPos pos, BlockState target) {
         if (target.getBlock() != net.minecraft.world.level.block.Blocks.FARMLAND || level.getBlockState(pos).isAir()) {
             return null;
         }
+        BlockPos missing = null;
         for (BlockPos near : BlockPos.betweenClosed(pos.offset(-4, 0, -4), pos.offset(4, 1, 4))) {
-            BlockState wanted = schematic.getBlockState(near);
-            if (wanted.getFluidState().isSource() && wanted.getFluidState().getType().isSame(net.minecraft.world.level.material.Fluids.WATER)
-                    && !level.getFluidState(near).isSource()) {
-                return near.immutable();
+            if (level.getFluidState(near).is(net.minecraft.tags.FluidTags.WATER)) {
+                return null;
+            }
+            if (missing == null) {
+                BlockState wanted = schematic.getBlockState(near);
+                if (wanted.getFluidState().isSource() && wanted.getFluidState().getType().isSame(net.minecraft.world.level.material.Fluids.WATER)) {
+                    missing = near.immutable();
+                }
             }
         }
-        return null;
+        return missing;
     }
 
     /** A position is done when the schematic has nothing there or the world already matches it. */

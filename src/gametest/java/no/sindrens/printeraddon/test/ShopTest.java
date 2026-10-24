@@ -107,8 +107,8 @@ public class ShopTest implements FabricClientGameTest {
             context.runOnClient(mc -> {
                 Map<Item, Integer> list = new LinkedHashMap<>();
                 list.put(Items.HOPPER, 200);          // 3 stacks by "purchase stacks", the rest normally
-                list.put(Items.STONE, 10);
-                list.put(Items.CAULDRON, 3);          // on page 2
+                list.put(Items.STONE, 10);            // a stack costs under $50k: a whole stack (64)
+                list.put(Items.CAULDRON, 3);          // on page 2; a whole stack too
                 list.put(Items.PUMPKIN_SEEDS, 5);
                 list.put(Items.LAVA_BUCKET, 2);
                 list.put(Items.HOPPER_MINECART, 2);   // not sold
@@ -143,9 +143,10 @@ public class ShopTest implements FabricClientGameTest {
                     mc.player.getInventory().countItem(Items.LAVA_BUCKET)});
             // 3 stacks by "purchase stacks"; the last 8 after a big purchase aren't worth another one (since 0.9.9)
             check(counts[0] >= 192 && counts[0] <= 200, "hoppers: " + counts[0] + ", wanted 192 to 200");
-            check(counts[1] == 10, "stone: " + counts[1] + ", wanted 10");
-            check(counts[2] == 3, "cauldrons: " + counts[2] + ", wanted 3");
-            check(counts[3] == 5, "pumpkin seeds: " + counts[3] + ", wanted 5");
+            // Cheap items by the whole stack, rounded up (the rest goes into storage); dear ones exactly
+            check(counts[1] == 64, "stone: " + counts[1] + ", wanted a whole stack (64)");
+            check(counts[2] == 64, "cauldrons: " + counts[2] + ", wanted a whole stack (64)");
+            check(counts[3] == 5, "pumpkin seeds: " + counts[3] + ", wanted 5 (a stack costs $96k: bought exactly)");
             check(counts[4] == 2, "lava buckets: " + counts[4] + ", wanted 2");
             check(context.computeOnClient(mc -> ShopBuyer.INSTANCE.notSold().contains(Items.HOPPER_MINECART)),
                     "hopper minecart should be reported as not sold");

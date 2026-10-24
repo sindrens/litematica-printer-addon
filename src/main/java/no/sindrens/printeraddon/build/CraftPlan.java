@@ -90,11 +90,8 @@ public final class CraftPlan {
         // Always the shop first: crafted only when the shop doesn't sell it (seeds: own pumpkins first, see below)
         if ((item == Items.RAIL || item == Items.POWERED_RAIL) && sold.test(item)) {
             buy.merge(item, count, Integer::sum);
-        } else if (item == Tools.HOE) {
-            hoes(count);
-        } else if (item == Tools.PICKAXE || item == Tools.SHOVEL) {
-            stoneTool(item == Tools.PICKAXE ? Items.STONE_PICKAXE : Items.STONE_SHOVEL,
-                    item == Tools.PICKAXE ? Items.WOODEN_PICKAXE : Items.WOODEN_SHOVEL, item == Tools.PICKAXE ? 3 : 1);
+        } else if (Tools.isMarker(item)) {
+            diamondTool(item, count);
         } else if (item == Items.RAIL) {
             int crafts = ceil(count, 16);
             ingot(Items.IRON_INGOT, Items.IRON_BLOCK, 6 * crafts);
@@ -145,75 +142,27 @@ public final class CraftPlan {
     }
 
     /**
-     * Hoes for tilling: one diamond or iron hoe from what's at hand (2 diamonds or ingots, own or from storage), else
-     * stone hoes from stone the shop sells for very little (cobblestone, blackstone or cobbled deepslate, own first),
-     * else wooden ones from planks. Never a block of diamond or iron bought for a hoe. Stone for a few more is bought
-     * at once, so the next ones need no shop.
+     * Tools are always diamond (the player's rule): diamonds from the inventory (storage was looked in before), else
+     * from blocks of diamond at hand, else blocks of diamond bought (9 diamonds each: a pickaxe, an axe, a hoe and a
+     * shovel). The sticks from planks or logs.
      */
-    private void hoes(int count) {
-        if (takeAll(Items.DIAMOND, 2)) {
-            sticks(2);
-            needsTable = true;
-            craft.add(new Step(Items.DIAMOND_HOE, 1));
-            return;
+    private void diamondTool(Item tool, int count) {
+        int diamonds = Tools.diamondsFor(tool) * count;
+        int missing = diamonds - take(Items.DIAMOND, diamonds);
+        if (missing > 0) {
+            int blocks = ceil(missing, 9);
+            int ownBlocks = take(Items.DIAMOND_BLOCK, blocks);
+            if (ownBlocks < blocks && sold.test(Items.DIAMOND_BLOCK)) {
+                buy.merge(Items.DIAMOND_BLOCK, blocks - ownBlocks, Integer::sum);
+                ownBlocks = blocks;
+            }
+            if (ownBlocks > 0) {
+                craft.add(0, new Step(Items.DIAMOND, ownBlocks * 9));
+            }
         }
-        if (takeAll(Items.IRON_INGOT, 2)) {
-            sticks(2);
-            needsTable = true;
-            craft.add(new Step(Items.IRON_HOE, 1));
-            return;
-        }
-        // Wooden ones when the server won't craft stone ones
-        boolean stoneOk = !Crafter.refused(Items.STONE_HOE);
-        int stone = stoneOk ? takeTag(ItemTags.STONE_TOOL_MATERIALS, 2 * count) : 0;
-        if (stoneOk && stone < 2 * count && sold.test(Items.COBBLESTONE)) {
-            buy.merge(Items.COBBLESTONE, Math.max(2 * count - stone, 16), Integer::sum);
-            stone = 2 * count;
-        }
-        int stoneHoes = stone / 2;
-        if (stoneHoes > 0) {
-            sticks(2 * stoneHoes);
-            needsTable = true;
-            craft.add(new Step(Items.STONE_HOE, stoneHoes));
-        }
-        int wooden = count - stoneHoes;
-        if (wooden > 0) {
-            planks(2 * wooden);
-            sticks(2 * wooden);
-            needsTable = true;
-            craft.add(new Step(Items.WOODEN_HOE, wooden));
-        }
-    }
-
-    /**
-     * One stone tool (pickaxe or shovel, {@code heads} stone each): from stone at hand or bought cheaply (a few more for
-     * the next ones), else a wooden one from planks.
-     */
-    private void stoneTool(Item stone, Item wooden, int heads) {
-        // A wooden one when the server won't craft the stone one
-        boolean stoneOk = !Crafter.refused(stone);
-        int have = stoneOk ? takeTag(ItemTags.STONE_TOOL_MATERIALS, heads) : 0;
-        if (stoneOk && have < heads && sold.test(Items.COBBLESTONE)) {
-            buy.merge(Items.COBBLESTONE, Math.max(heads - have, 16), Integer::sum);
-            have = heads;
-        }
-        sticks(2);
+        sticks(2 * count);
         needsTable = true;
-        if (stoneOk && have >= heads) {
-            craft.add(new Step(stone, 1));
-        } else {
-            planks(heads);
-            craft.add(new Step(wooden, 1));
-        }
-    }
-
-    /** Takes exactly {@code count} from the inventory, or nothing if there's less. */
-    private boolean takeAll(Item item, int count) {
-        if (inventory.countItem(item) - have.getOrDefault(item, 0) < count) {
-            return false;
-        }
-        have.merge(item, count, Integer::sum);
-        return true;
+        craft.add(new Step(tool, count));
     }
 
     /** Ingots: from the inventory, else from blocks (9 each) in the inventory, else bought (blocks if sold). */

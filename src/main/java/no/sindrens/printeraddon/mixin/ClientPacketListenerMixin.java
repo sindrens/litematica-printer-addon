@@ -24,6 +24,20 @@ public class ClientPacketListenerMixin {
         no.sindrens.printeraddon.build.ServerAcks.acked(packet.sequence());
     }
 
+    /**
+     * The server chose the held slot itself: that's the one it has now. The game doesn't note it, so switching back to
+     * the slot the client last sent sent nothing, and the server went on with its own: 10 observers went in where
+     * pistons belong, with pistons in the hand on the client.
+     */
+    @Inject(method = "handleSetHeldSlot", at = @At("TAIL"))
+    private void printer_addon$heldSlotFromServer(net.minecraft.network.protocol.game.ClientboundSetHeldSlotPacket packet, CallbackInfo ci) {
+        net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+        if (mc.gameMode != null && net.minecraft.world.entity.player.Inventory.isHotbarSlot(packet.slot())) {
+            ((MultiPlayerGameModeAccessor) mc.gameMode).printer_addon$setCarriedIndex(packet.slot());
+            no.sindrens.printeraddon.build.BuildLog.line("HOTBAR", "the server set the held slot to " + (packet.slot() + 1));
+        }
+    }
+
     /** Server messages in chat ("You purchased 64x Hopper", "You don't have enough money"): heard while buying. */
     @Inject(method = "handleSystemChat", at = @At("TAIL"))
     private void printer_addon$serverMessage(net.minecraft.network.protocol.game.ClientboundSystemChatPacket packet, CallbackInfo ci) {

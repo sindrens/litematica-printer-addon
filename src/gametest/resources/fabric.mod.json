@@ -15,7 +15,8 @@
       "no.sindrens.printeraddon.test.BuildTest",
       "no.sindrens.printeraddon.test.ShopTest",
       "no.sindrens.printeraddon.test.FarmTest",
-      "no.sindrens.printeraddon.test.WideTest"
+      "no.sindrens.printeraddon.test.WideTest",
+      "no.sindrens.printeraddon.test.MiddleTest"
     ]
   },
   "mixins": [

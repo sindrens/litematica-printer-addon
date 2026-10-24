@@ -59,8 +59,11 @@ public class InventoryCleaner {
         if (layerNeeds.containsKey(Items.PUMPKIN_SEEDS)) {
             keep.add(Items.PUMPKIN);
         }
-        // What a hoe is made of stays while one is needed (this layer, or the build without a usable hoe)
-        boolean hoeNeeded = layerNeeds.containsKey(Tools.HOE) || AutoBuild.INSTANCE.wholeNeeds(Tools.HOE);
+        // What tools are made of stays while one is needed (this layer, or the build without a plain one of the kind)
+        boolean hoeNeeded = false;
+        for (Item kind : new Item[]{Tools.HOE, Tools.PICKAXE, Tools.SHOVEL, Tools.AXE}) {
+            hoeNeeded |= layerNeeds.containsKey(kind) || AutoBuild.INSTANCE.wholeNeeds(kind);
+        }
         if (layerNeeds.containsKey(Items.RAIL) || layerNeeds.containsKey(Items.POWERED_RAIL)) {
             keep.addAll(Set.of(Items.IRON_INGOT, Items.IRON_BLOCK, Items.GOLD_INGOT, Items.GOLD_BLOCK, Items.STICK,
                     Items.REDSTONE, Items.REDSTONE_BLOCK, Items.OAK_PLANKS, Items.OAK_LOG));
@@ -125,7 +128,7 @@ public class InventoryCleaner {
             if (stack.isEmpty() || isBucket(item) || !ordinary(stack)) {
                 continue;
             }
-            if (Tools.isHoe(stack) || Tools.cheapTool(stack) || !stack.isDamageableItem() && (materials.contains(item)
+            if (Tools.addonTool(stack) || !stack.isDamageableItem() && (materials.contains(item)
                     || CRAFTING_LEFTOVERS.contains(item) || isSchematicBlock(item) || Tools.hoeMaterial(item))) {
                 items.add(item);
             }

@@ -57,6 +57,18 @@ public record ManualRecipe(Item result, int count, int width, int height, String
             return new ManualRecipe(item, 1, 2, 3, new String[]{"II", " S", " S"},
                     Map.of('I', s -> s.is(Items.IRON_INGOT), 'S', stick));
         }
+        if (item == Items.DIAMOND_PICKAXE) {
+            return new ManualRecipe(item, 1, 3, 3, new String[]{"DDD", " S ", " S "},
+                    Map.of('D', s -> s.is(Items.DIAMOND), 'S', stick));
+        }
+        if (item == Items.DIAMOND_AXE) {
+            return new ManualRecipe(item, 1, 2, 3, new String[]{"DD", "DS", " S"},
+                    Map.of('D', s -> s.is(Items.DIAMOND), 'S', stick));
+        }
+        if (item == Items.DIAMOND_SHOVEL) {
+            return new ManualRecipe(item, 1, 1, 3, new String[]{"D", "S", "S"},
+                    Map.of('D', s -> s.is(Items.DIAMOND), 'S', stick));
+        }
         if (item == Items.STONE_HOE) {
             return new ManualRecipe(item, 1, 2, 3, new String[]{"CC", " S", " S"},
                     Map.of('C', s -> s.is(ItemTags.STONE_TOOL_MATERIALS), 'S', stick));

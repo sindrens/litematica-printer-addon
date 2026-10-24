@@ -32,6 +32,16 @@ public final class FlyPath {
     private static final double GREED = 1.5;
     /** Going up costs more than going sideways: around a building rather than over it. */
     private static final double CLIMB_COST = 1.5;
+    /**
+     * Flying sideways higher than both ends costs this much more per block of height: up late (right before what's in
+     * the way) and down early, not up a long ramp from far away (the printer can't reach the layer from up there).
+     */
+    private static final double HIGH_COST = 0.08;
+    /** Along a straight line: higher than the base height, and lower (down into the layer), per block flown. */
+    private static final double LINE_HIGH_COST = 0.6;
+    private static final double LINE_LOW_COST = 3;
+    /** A straight shortcut between two points of a way: only level, or this short (no ramps). */
+    private static final double SHORTCUT_RAMP = 2.5;
 
     private FlyPath() {
     }
@@ -151,6 +161,7 @@ public final class FlyPath {
                                          ToDoubleFunction<BlockPos> estimate, Predicate<BlockPos> allowed) {
         int maxY = Math.max(start.getY(), goalY) + MAX_CLIMB;
         int minY = level.getMinY() + 1;
+        int baseY = Math.max(start.getY(), goalY);
 
         Map<BlockPos, BlockPos> cameFrom = new HashMap<>();
         Map<BlockPos, Double> cost = new HashMap<>();
@@ -180,6 +191,9 @@ public final class FlyPath {
                             continue;
                         }
                         double step = Math.sqrt(dx * dx + dy * dy + dz * dz) * (dy > 0 ? CLIMB_COST : 1);
+                        if (dy == 0 && next.getY() > baseY) {
+                            step += HIGH_COST * (next.getY() - baseY);
+                        }
                         double total = here + step;
                         BlockPos immutable = next.immutable();
                         Double known = cost.get(immutable);
@@ -252,7 +266,7 @@ public final class FlyPath {
         while (i < points.size()) {
             int furthest = i;
             for (int j = points.size() - 1; j > i; j--) {
-                if (clear(level, at, points.get(j))) {
+                if (shortcutOk(at, points.get(j)) && clear(level, at, points.get(j))) {
                     furthest = j;
                     break;
                 }
@@ -262,6 +276,133 @@ public final class FlyPath {
             i = furthest + 1;
         }
         return out;
+    }
+
+    /**
+     * A straight line from a to b is fine as a shortcut: level, or short. A long slope would climb far before what's in
+     * the way (a 30 block ramp up over a farm's walls) or come down far after it, out of the printer's reach.
+     */
+    public static boolean shortcutOk(Vec3 a, Vec3 b) {
+        double dx = b.x - a.x;
+        double dz = b.z - a.z;
+        return Math.abs(b.y - a.y) < 0.5 || dx * dx + dz * dz <= SHORTCUT_RAMP * SHORTCUT_RAMP;
+    }
+
+    /**
+     * The way along the straight line from {@code from} to {@code to} (seen from above): at {@code baseY} wherever the
+     * player fits there, straight up right before what's in the way and straight down right after it, also between two
+     * walls; at the end down (or up) to {@code to}. A lane climbed a 30 block ramp to fly over the walls of hoppers in
+     * the middle of the player's farm, stayed up over the whole middle and placed nothing there. Only the points where
+     * the way turns, to be flown as they are (no shortcuts). Parts not loaded yet count as free when
+     * {@code unloadedIsFree}. Null if there's no such way (then one around what's in the way is looked for).
+     */
+    @Nullable
+    public static List<Vec3> lineWay(Level level, Vec3 from, Vec3 to, int baseY, boolean unloadedIsFree) {
+        from = lift(level, from);
+        double hx = to.x - from.x;
+        double hz = to.z - from.z;
+        double length = Math.sqrt(hx * hx + hz * hz);
+        int samples = Math.max(1, (int) Math.ceil(length / 0.5)) + 1;
+        int y0 = (int) Math.floor(from.y + 0.01);
+        int goalY = (int) Math.floor(to.y + 0.01);
+        int minY = Math.min(Math.min(y0, goalY), baseY);
+        int maxY = Math.max(Math.max(y0, goalY), baseY) + MAX_CLIMB;
+        int height = maxY - minY + 1;
+        // Per sample and height: 0 not looked at, 1 fits, 2 doesn't
+        byte[] fit = new byte[samples * height];
+        double[] sx = new double[samples];
+        double[] sz = new double[samples];
+        for (int s = 0; s < samples; s++) {
+            double t = samples == 1 ? 1 : (double) s / (samples - 1);
+            sx[s] = from.x + hx * t;
+            sz[s] = from.z + hz * t;
+        }
+        java.util.function.IntBinaryOperator fits = (s, y) -> {
+            int i = s * height + (y - minY);
+            if (fit[i] == 0) {
+                boolean ok = true;
+                // The columns the player's box (0.6 wide) is in there
+                for (int x = (int) Math.floor(sx[s] - 0.3); x <= (int) Math.floor(sx[s] + 0.3) && ok; x++) {
+                    for (int z = (int) Math.floor(sz[s] - 0.3); z <= (int) Math.floor(sz[s] + 0.3) && ok; z++) {
+                        for (int dy = 0; dy <= 1 && ok; dy++) {
+                            BlockPos pos = new BlockPos(x, y + dy, z);
+                            ok = level.isLoaded(pos) ? PathFinder.isPassable(level, pos) : unloadedIsFree;
+                        }
+                    }
+                }
+                fit[i] = (byte) (ok ? 1 : 2);
+            }
+            return fit[i];
+        };
+        if (fits.applyAsInt(0, y0) != 1 || fits.applyAsInt(samples - 1, goalY) != 1) {
+            return null;
+        }
+        double step = length / Math.max(1, samples - 1);
+        double[] cost = new double[samples * height];
+        java.util.Arrays.fill(cost, Double.MAX_VALUE);
+        int[] came = new int[samples * height];
+        java.util.Arrays.fill(came, -1);
+        PriorityQueue<double[]> open = new PriorityQueue<>((a, b) -> Double.compare(a[0], b[0]));
+        int startIndex = y0 - minY;
+        int goalIndex = (samples - 1) * height + (goalY - minY);
+        cost[startIndex] = 0;
+        open.add(new double[]{(samples - 1) * step, startIndex});
+        while (!open.isEmpty()) {
+            int node = (int) open.poll()[1];
+            if (node == goalIndex) {
+                break;
+            }
+            int s = node / height;
+            int y = node % height + minY;
+            double here = cost[node];
+            for (int move = 0; move < 4; move++) {
+                int ns = s + (move == 0 ? 1 : move == 1 ? -1 : 0);
+                int ny = y + (move == 2 ? 1 : move == 3 ? -1 : 0);
+                if (ns < 0 || ns >= samples || ny < minY || ny > maxY || fits.applyAsInt(ns, ny) != 1) {
+                    continue;
+                }
+                double add;
+                if (move < 2) {
+                    add = step * (1 + (ny > baseY ? LINE_HIGH_COST * (ny - baseY) : 0) + (ny < baseY ? LINE_LOW_COST * (baseY - ny) : 0));
+                } else {
+                    add = move == 2 ? 1 : 0.6;
+                }
+                int next = ns * height + (ny - minY);
+                if (here + add < cost[next]) {
+                    cost[next] = here + add;
+                    came[next] = node;
+                    open.add(new double[]{here + add + (samples - 1 - ns) * step, next});
+                }
+            }
+        }
+        if (came[goalIndex] < 0 && goalIndex != startIndex) {
+            return null;
+        }
+        // Back from the goal: only the points where the way turns (along to up or down, and back)
+        List<int[]> nodes = new ArrayList<>();
+        for (int node = goalIndex; node >= 0; node = came[node]) {
+            nodes.add(new int[]{node / height, node % height + minY});
+            if (node == startIndex) {
+                break;
+            }
+        }
+        Collections.reverse(nodes);
+        List<Vec3> way = new ArrayList<>();
+        for (int i = 1; i < nodes.size(); i++) {
+            int[] at = nodes.get(i);
+            boolean last = i == nodes.size() - 1;
+            if (!last) {
+                int[] before = nodes.get(i - 1);
+                int[] after = nodes.get(i + 1);
+                boolean alongIn = before[1] == at[1];
+                boolean alongOut = after[1] == at[1];
+                if (alongIn == alongOut) {
+                    continue;
+                }
+            }
+            way.add(last ? to : new Vec3(sx[at[0]], at[1], sz[at[0]]));
+        }
+        return way.isEmpty() ? List.of(to) : way;
     }
 
     /** The player's body can fly straight from a to b without touching a block (checked every 0.3 blocks). */

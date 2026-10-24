@@ -23,9 +23,13 @@ Put these in your `mods` folder:
 4. To use a chest, look at it, press `J`+`B` and click "Link".
 5. Press `J`+`B` and click Start.
 
-It builds layer by layer from the bottom, flying over each layer in straight lanes while the printer places all the way. It flies over anything that's in the way of a lane, such as the walls of a farm. If you're kicked or the server restarts, it joins again, runs your "Commands back to the build" (for example `/server skyblock`, `/is go`) and carries on. Starting it again also retries the blocks it skipped last time.
+It builds layer by layer from the bottom, flying over each layer in straight lanes while the printer places all the way. A layer whose blocks stand on the layer below, like seeds on farmland or redstone dust on observers and pistons, is built together with that layer in the same lanes. Lanes stop at tall walls, such as the walls of a farm: it finishes one side lane by lane, then the other, and doesn't fly over parts that are already built. If you're kicked or the server restarts, it joins again, runs your "Commands back to the build" (for example `/server skyblock`, `/is go`) and carries on. Starting it again also retries the blocks it skipped last time.
 
-Your inventory can start empty. It takes what it needs from your vaults, buys the rest and crafts its own tools: a hoe for farmland, and a pickaxe and shovel for breaking wrong blocks. When you stop it, or the build is done, it puts the building items back in your vaults. It warns you when they're getting full; link a chest for more room. You can clear out your vaults at any time, because it buys whatever is missing.
+Your inventory can start empty. It takes what it needs from your vaults and linked chests and buys the rest. Before a lane it tops up what the lane needs, and on the last shop trip of a layer it also buys for the next one. Anything that costs under $50,000 a stack is bought in whole stacks; what's left over goes into your vaults.
+
+It uses plain diamond tools (hoe, pickaxe, shovel, axe) until they break. If there's none in your inventory, vaults or chests, it crafts one from diamonds, or from a block of diamond it buys. Your own tools (enchanted, renamed or netherite) are used only when there's nothing else, and are put away before they break.
+
+When you stop it, or the build is done, it puts the building items back in your vaults. It warns you when they're getting full; link a chest for more room. You can clear out your vaults at any time, because it buys whatever is missing.
 
 ## Keys
 
@@ -45,7 +49,8 @@ Your inventory can start empty. It takes what it needs from your vaults, buys th
 - It stops when you take damage or another player comes close.
 - With the add-on off, Litematica Printer works as normal.
 - A farm that's already running (pistons firing) doesn't hold up a layer. Pumpkins or melons that grew where a stem belongs are broken, so the stem can be planted.
-- If the server won't let it craft a tool, it tries a wooden one and otherwise goes on without it.
+- If the server won't let it craft a tool, it goes on without it.
+- If nothing has been placed for 30 seconds while building, it plans its route again and leaves the stuck spot for later.
 - Something wrong? Press `J`+`B`, click "Open build logs folder" and send the newest log.
 
 ## Watch the speed test

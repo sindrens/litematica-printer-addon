@@ -39,7 +39,11 @@ public class ChestFetcher {
     /** Ticks between closing a vault and opening the next (servers don't like menus opened back to back). */
     private static final int VAULT_GAP = 10;
     /** What's known about a storage spot is trusted this long (the player may fill it meanwhile). */
-    private static final long KNOWN_FOR = 20 * 60 * 5;
+    /**
+     * What a vault or chest has is trusted this long (only the add-on changes it during a build: any other menu is
+     * closed): one that's known not to have what's wanted isn't opened (it was, three times in a log, for nothing).
+     */
+    private static final long KNOWN_FOR = 20 * 60 * 10;
 
     private enum Phase { GO, OPEN, TAKE, CLOSE }
 
@@ -430,14 +434,21 @@ public class ChestFetcher {
                             mc.gameMode.handleContainerInput(menu.containerId, slot.index, 0, ContainerInput.QUICK_MOVE, player);
                         }
                     }
-                    // Read again the next time it's opened
-                    known.remove(current);
+                    // What it has now (the clicks show at once): no need to open it again to find out
+                    Map<Item, Integer> after = new HashMap<>();
+                    for (Slot slot : menu.slots) {
+                        if (!(slot.container instanceof Inventory) && !slot.getItem().isEmpty()) {
+                            after.merge(slot.getItem().getItem(), slot.getItem().getCount(), Integer::sum);
+                        }
+                    }
+                    known.put(current, new Known(after, AutoBuild.clientTicks));
                     noteFill(menu);
                     BuildLog.lineOrKeep("STORAGE", current.name() + ": put away, " + taken + " items so far" + fillText(current));
                     phase = Phase.CLOSE;
                     return true;
                 }
-                // A hoe is a hoe (a pickaxe a pickaxe...): of each kind wanted, the one with the most uses left here
+                // A hoe is a hoe (a pickaxe a pickaxe...): of each kind wanted, the best plain one here (diamond
+                // first, then the one with the most uses left; never the player's own enchanted or netherite ones)
                 Map<Item, Integer> bestTool = new HashMap<>();
                 for (Slot slot : menu.slots) {
                     ItemStack stack = slot.getItem();
@@ -446,7 +457,9 @@ public class ChestFetcher {
                         continue;
                     }
                     Integer best = bestTool.get(kind);
-                    if (best == null || Tools.left(stack) > Tools.left(menu.slots.get(best).getItem())) {
+                    ItemStack bestStack = best == null ? ItemStack.EMPTY : menu.slots.get(best).getItem();
+                    if (best == null || Tools.rank(stack.getItem()) > Tools.rank(bestStack.getItem())
+                            || Tools.rank(stack.getItem()) == Tools.rank(bestStack.getItem()) && Tools.left(stack) > Tools.left(bestStack)) {
                         bestTool.put(kind, slot.index);
                     }
                 }

@@ -415,6 +415,11 @@ public class LayerManager {
                 seenFinished.add(part);
             }
         }
+        if (layerTop > layer) {
+            // Built together: what stands on a block of the layer below that isn't there yet waits for it here, not
+            // for something above (those wait until the layers above are built)
+            findings.waiting.removeIf(p -> p.getY() > layer && BlockCheck.check(mc.level, schematic, p.below()) != BlockCheck.Result.OK);
+        }
         if (waterPending > 0 && findings.water == 0 && remaining > 0) {
             BuildLog.line("LAYER", "the water on " + describeLayers() + " is all in");
         }
@@ -676,6 +681,29 @@ public class LayerManager {
         return status;
     }
 
+    private int nextNeedsFor = Integer.MIN_VALUE;
+    private java.util.Map<net.minecraft.world.item.Item, Integer> nextNeeds = java.util.Map.of();
+
+    /**
+     * What the layer above the ones being built still needs (item -> count), read once per layer: bought on the last
+     * trip of this layer, so the next one starts without a trip to the shop.
+     */
+    public java.util.Map<net.minecraft.world.item.Item, Integer> nextLayerNeeds(Minecraft mc) {
+        if (nextNeedsFor == layerTop || !active || finishingDeferred || mc.level == null) {
+            return nextNeeds;
+        }
+        nextNeedsFor = layerTop;
+        nextNeeds = java.util.Map.of();
+        WorldSchematic schematic = SchematicHelper.world();
+        if (schematic == null || layerTop + 1 > maxY || doneLayers.contains(layerTop + 1)) {
+            return nextNeeds;
+        }
+        Findings findings = new Findings();
+        scan(mc.level, schematic, SchematicHelper.areas(), layerTop + 1, null, findings);
+        nextNeeds = findings.needs;
+        return nextNeeds;
+    }
+
     public boolean isFinishingDeferred() {
         return finishingDeferred;
     }
@@ -810,9 +838,59 @@ public class LayerManager {
         }
     }
 
-    /** One layer at a time, always (farmland stays wet from the water put in before it's tilled). */
+    /** Built together with the layer below at least this many of the blocks still to place stand on it ... */
+    private static final int TOGETHER_MIN = 32;
+    /** ... and at most one in this many is anything else (the purple concrete along the edge of the player's farm). */
+    private static final int TOGETHER_OTHERS = 5;
+
+    /**
+     * The top of the layers built together from this one: the next one too when what's still to place there stands
+     * on this layer's blocks (seeds and stems on its farmland, redstone dust on its observers and pistons). Those go
+     * in right behind the block under them, in the same lanes, instead of a whole pass over the build of their own.
+     * Not when water goes in up there (it would run down where this layer isn't built yet).
+     */
     private int topFor(Level level, WorldSchematic schematic, List<SchematicHelper.Area> areas, int y) {
-        return y;
+        if (!Configs.Layers.LAYERS_TOGETHER.getBooleanValue() || y >= maxY || doneLayers.contains(y + 1)) {
+            return y;
+        }
+        int onTop = 0;
+        int others = 0;
+        int water = 0;
+        java.util.Map<String, Integer> kinds = new java.util.TreeMap<>();
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        for (SchematicHelper.Area area : areas) {
+            if (y + 1 < area.minY() || y + 1 > area.maxY()) {
+                continue;
+            }
+            for (int x = area.minX(); x <= area.maxX(); x++) {
+                for (int z = area.minZ(); z <= area.maxZ(); z++) {
+                    pos.set(x, y + 1, z);
+                    BlockState target = schematic.getBlockState(pos);
+                    if (target.isAir()) {
+                        continue;
+                    }
+                    BlockCheck.Result result = BlockCheck.check(level, schematic, pos);
+                    if (result == BlockCheck.Result.OK || result == BlockCheck.Result.UNLOADED) {
+                        continue;
+                    }
+                    if (!target.getFluidState().isEmpty()) {
+                        water++;
+                    } else if (PlacementOrder.standsOnBelow(target) && !schematic.getBlockState(pos.below()).isAir()) {
+                        onTop++;
+                        kinds.merge(blockName(target), 1, Integer::sum);
+                    } else {
+                        others++;
+                    }
+                }
+            }
+        }
+        boolean together = water == 0 && onTop >= TOGETHER_MIN && others * TOGETHER_OTHERS <= onTop;
+        if (onTop > 0) {
+            BuildLog.line("LAYER", String.format("Y %d %s Y %d: on Y %d, %d blocks still to place stand on Y %d %s, %d others%s",
+                    y + 1, together ? "built together with" : "not built together with", y, y + 1, onTop, y, kinds, others,
+                    water > 0 ? ", " + water + " with water" : ""));
+        }
+        return together ? y + 1 : y;
     }
 
     private int scanLayers(Level level, WorldSchematic schematic, List<SchematicHelper.Area> areas,
@@ -1079,7 +1157,8 @@ public class LayerManager {
                             BlockState target = schematic.getBlockState(pos);
                             // Blocks waiting for the layer's water aren't waiting for something above
                             if (!PlacementOrder.isReady(level, schematic, pos, target)
-                                    && PlacementOrder.waterFirst(level, schematic, pos, target) == null) {
+                                    && PlacementOrder.waterFirst(level, schematic, pos, target) == null
+                                    && PlacementOrder.waterBelow(level, schematic, pos) == null) {
                                 findings.waiting.add(pos.immutable());
                             }
                             ItemStack item = StateRules.itemFor(target);

@@ -69,7 +69,7 @@ public final class InventoryBudget {
             counts.merge(net.minecraft.world.item.Items.WATER_BUCKET, counts.getOrDefault(net.minecraft.world.item.Items.BUCKET, 0), Integer::sum);
         }
         // "A hoe" (pickaxe, shovel) is only asked for while there's no usable one (a worn one doesn't count)
-        for (Item marker : new Item[]{Tools.HOE, Tools.PICKAXE, Tools.SHOVEL}) {
+        for (Item marker : new Item[]{Tools.HOE, Tools.PICKAXE, Tools.SHOVEL, Tools.AXE}) {
             if (layerNeeds.containsKey(marker)) {
                 counts.put(marker, 0);
             }

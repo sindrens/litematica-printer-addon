@@ -289,7 +289,8 @@ public class BlockBreaker {
     }
 
     /**
-     * Picks the fastest tool in the hotbar for this block, skipping tools that are about to break.
+     * Picks the tool for this block: a plain one that breaks it faster first (used until it breaks), then one of the
+     * player's own (enchanted, renamed, netherite: the player's rule, those last), never one of those about to break.
      */
     private static void selectBestTool(LocalPlayer player, BlockState state) {
         if (player.getAbilities().instabuild) {
@@ -297,31 +298,34 @@ public class BlockBreaker {
         }
 
         Inventory inventory = player.getInventory();
-        int minDurability = Configs.Breaking.MIN_TOOL_DURABILITY.getIntegerValue();
         int bestSlot = -1;
+        int bestKey = -1;
         float bestScore = -1;
 
         // The whole inventory: the hotbar is kept for the layer's blocks, so tools may be in the inventory
         for (int slot = 0; slot < Inventory.INVENTORY_SIZE; slot++) {
             ItemStack stack = inventory.getItem(slot);
 
-            if (stack.isDamageableItem() && stack.getMaxDamage() - stack.getDamageValue() <= minDurability) {
+            if (worn(stack)) {
                 continue;
             }
 
+            int key = keyOf(stack, state);
             float score = scoreOf(stack, state);
-            if (score > bestScore) {
+            if (key > bestKey || key == bestKey && score > bestScore) {
+                bestKey = key;
                 bestScore = score;
                 bestSlot = slot;
             }
         }
 
-        // The selected tool might be one that is about to break: move off it
+        // The selected tool might be one of the player's own that is about to break: move off it
         ItemStack selected = inventory.getItem(inventory.getSelectedSlot());
-        boolean selectedProtected = selected.isDamageableItem()
-                && selected.getMaxDamage() - selected.getDamageValue() <= minDurability;
+        boolean selectedProtected = worn(selected);
+        int selectedKey = keyOf(selected, state);
 
-        if (bestSlot != -1 && (selectedProtected || bestScore > scoreOf(selected, state) + 0.001f)) {
+        if (bestSlot != -1 && (selectedProtected || bestKey > selectedKey
+                || bestKey == selectedKey && bestScore > scoreOf(selected, state) + 0.001f)) {
             if (!Inventory.isHotbarSlot(bestSlot)) {
                 // Swap the tool onto the last hotbar slot (the one left free for tools)
                 int toolSlot = Inventory.getSelectionSize() - 1;
@@ -333,6 +337,18 @@ public class BlockBreaker {
             }
             inventory.setSelectedSlot(bestSlot);
         }
+    }
+
+    /** One of the player's own tools that's about to break: not used (plain ones are used until they break). */
+    private static boolean worn(ItemStack stack) {
+        return Tools.privateTool(stack) && stack.isDamageableItem() && (Tools.wornSpecial(stack)
+                || stack.getMaxDamage() - stack.getDamageValue() <= Configs.Breaking.MIN_TOOL_DURABILITY.getIntegerValue());
+    }
+
+    /** 2: a plain tool that helps with this block, 1: one of the player's own that helps, 0: nothing that helps. */
+    private static int keyOf(ItemStack stack, BlockState state) {
+        boolean helps = stack.getDestroySpeed(state) > 1.0f || state.requiresCorrectToolForDrops() && stack.isCorrectToolForDrops(state);
+        return !helps ? 0 : Tools.privateTool(stack) ? 1 : 2;
     }
 
     private static float scoreOf(ItemStack stack, BlockState state) {

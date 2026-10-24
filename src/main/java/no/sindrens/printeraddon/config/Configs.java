@@ -20,6 +20,8 @@ import java.nio.file.Path;
 
 public class Configs implements IConfigHandler {
     private static final String CONFIG_FILE_NAME = PrinterAddon.MOD_ID + ".json";
+    /** 2: the fastest automatic interval went from 2 to 1. */
+    private static final int CONFIG_VERSION = 2;
 
     public static class Generic {
         public static final ConfigBoolean ADDON_ENABLED = new ConfigBoolean("addonEnabled", true,
@@ -136,6 +138,11 @@ public class Configs implements IConfigHandler {
                         + "that the game always connects), go on to the next layer and list them at the end to do by hand.\n"
                         + "Blocks you don't have the items for are waited for.",
                 "Skip unplaceable blocks after (seconds)");
+        public static final ConfigBoolean LAYERS_TOGETHER = new ConfigBoolean("buildLayersTogether", true,
+                "Build the layer above together with the one below when what goes there stands on the blocks below (seeds and\n"
+                        + "stems on farmland, redstone dust on observers and pistons): placed right behind the block under them, in the\n"
+                        + "same lanes, instead of flying over the whole build again for them. Off: always one layer at a time.",
+                "Build layers together");
         public static final ConfigBoolean EXTRA_BLOCKS_BLOCK_LAYER = new ConfigBoolean("extraBlocksBlockLayer", false,
                 "Count blocks where the schematic has air (terrain, stray blocks) as unfinished.\n"
                         + "Off: only blocks the schematic needs count. Use the 'Clear extra blocks' key to remove them.",
@@ -153,7 +160,7 @@ public class Configs implements IConfigHandler {
                 "Use printer's air place");
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                AUTO_LAYER, ADDON_PLACES, LAYER_CHECK_INTERVAL, STUCK_REPORT_SECONDS, SKIP_STUCK_SECONDS, EXTRA_BLOCKS_BLOCK_LAYER,
+                AUTO_LAYER, LAYERS_TOGETHER, ADDON_PLACES, LAYER_CHECK_INTERVAL, STUCK_REPORT_SECONDS, SKIP_STUCK_SECONDS, EXTRA_BLOCKS_BLOCK_LAYER,
                 USE_AIR_PLACE);
     }
 
@@ -265,6 +272,11 @@ public class Configs implements IConfigHandler {
                 "Only get more of an item (from linked chests or the shop) once this many or fewer are left in the inventory.\n"
                         + "How much is bought is shared between the items the layer needs, and a few slots always stay free.",
                 "Buy when this many are left");
+        public static final ConfigInteger STACKS_BELOW = new ConfigInteger("buyStacksBelow", 50000, 0, 100000000,
+                "Items whose stack costs less than this are only bought by the whole stack (the shop's stacks screen), the\n"
+                        + "amount rounded up: what's left over goes into storage for later. Setting an exact amount takes many\n"
+                        + "clicks (102 mud). Pricier ones (blocks of diamond or iron) are bought exactly. 0 = always exactly.",
+                "Whole stacks below (price per stack)");
         public static final ConfigString SHOP_SECTION = new ConfigString("shopSection", "minecraft:paper",
                 "Which button in the /shop main menu leads to the money shop. Only that one is opened.\n"
                         + "An item id (minecraft:paper) or part of the button's name. Empty = open every button.",
@@ -294,7 +306,7 @@ public class Configs implements IConfigHandler {
                 "Craft command");
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                FETCH_FROM_CHESTS, VAULTS, PUT_AWAY_ON_STOP, VAULT_COMMAND, AUTO_BUY, SELL_LEFTOVERS, BUY_WHEN_LEFT, PREFER_BLOCKS, USE_CRAFT_COMMAND, CRAFT_COMMAND,
+                FETCH_FROM_CHESTS, VAULTS, PUT_AWAY_ON_STOP, VAULT_COMMAND, AUTO_BUY, SELL_LEFTOVERS, BUY_WHEN_LEFT, STACKS_BELOW, PREFER_BLOCKS, USE_CRAFT_COMMAND, CRAFT_COMMAND,
                 SHOP_COMMAND, SHOP_SECTION, PROBE_BUY_SCREEN, MAX_PAGES, WAIT_TIMEOUT_TICKS);
     }
 
@@ -401,6 +413,7 @@ public class Configs implements IConfigHandler {
 
             if (element != null && element.isJsonObject()) {
                 JsonObject root = element.getAsJsonObject();
+                int version = root.has("configVersion") ? root.get("configVersion").getAsInt() : 1;
                 ConfigUtils.readConfigBase(root, "Generic", Generic.OPTIONS);
                 ConfigUtils.readConfigBase(root, "Breaking", Breaking.OPTIONS);
                 ConfigUtils.readConfigBase(root, "Layers", Layers.OPTIONS);
@@ -409,6 +422,12 @@ public class Configs implements IConfigHandler {
                 ConfigUtils.readConfigBase(root, "Shop", Shop.OPTIONS);
                 ConfigUtils.readConfigBase(root, "Speed", Speed.OPTIONS);
                 ConfigUtils.readConfigBase(root, "Hotkeys", Hotkeys.HOTKEY_LIST);
+                if (version < 2) {
+                    // The fastest interval is 1 now (the player's server takes it): an older setting of 2 goes down
+                    if (Speed.AUTO_SPEED_MIN_INTERVAL.getIntegerValue() == 2) {
+                        Speed.AUTO_SPEED_MIN_INTERVAL.setIntegerValue(1);
+                    }
+                }
             }
         }
 
@@ -424,6 +443,7 @@ public class Configs implements IConfigHandler {
         }
 
         JsonObject root = new JsonObject();
+        root.addProperty("configVersion", CONFIG_VERSION);
         ConfigUtils.writeConfigBase(root, "Generic", Generic.OPTIONS);
         ConfigUtils.writeConfigBase(root, "Breaking", Breaking.OPTIONS);
         ConfigUtils.writeConfigBase(root, "Layers", Layers.OPTIONS);

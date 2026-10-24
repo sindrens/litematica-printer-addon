@@ -334,13 +334,21 @@ public class SpeedTuner {
             }
             case WRONG, LANDED_NEXT -> {
                 bad++;
-                s.wrong++;
-                s.inARow = 0;
-                s.sinceMistake = 0;
                 String where = outcome == Outcome.LANDED_NEXT ? "landed in a neighbouring spot instead" : "is "
                         + AutoBuild.shortState(mc.level.getBlockState(pick.pos())) + ", should be " + AutoBuild.shortState(schematic.getBlockState(pick.pos()));
                 BuildLog.line("WRONG", pick.pos().toShortString() + " " + where + " | " + how + " | "
                         + AutoBuild.INSTANCE.inventory.describe(mc));
+                // A block of another item than the one clicked with: the server had another item in the hand (the
+                // switch didn't get there), not a click too fast. The held slot is sent again, the speed stays (10
+                // observers for pistons slowed pistons down to interval 5, and it took 2.6 minutes to get back to 2)
+                net.minecraft.world.item.ItemStack placedAs = StateRules.itemFor(mc.level.getBlockState(pick.pos()));
+                if (outcome == Outcome.WRONG && pick.item() != null && !placedAs.isEmpty() && !placedAs.is(pick.item())) {
+                    resendHeldSlot(mc, "a " + name(placedAs.getItem()) + " went in where " + name(pick.item()) + " was clicked");
+                    break;
+                }
+                s.wrong++;
+                s.inARow = 0;
+                s.sinceMistake = 0;
                 if (switched) {
                     Switch change = switches.computeIfAbsent(switchKey(pick.before(), pick.item()), k -> new Switch());
                     change.wrong++;
@@ -384,6 +392,21 @@ public class SpeedTuner {
             default -> {
             }
         }
+    }
+
+    private long heldSlotSentAt = -1000;
+
+    /** Tells the server again which hotbar slot is held (at most twice a second). */
+    private void resendHeldSlot(Minecraft mc, String why) {
+        if (mc.player == null || mc.gameMode == null || AutoBuild.clientTicks - heldSlotSentAt < 10) {
+            return;
+        }
+        heldSlotSentAt = AutoBuild.clientTicks;
+        int selected = mc.player.getInventory().getSelectedSlot();
+        mc.player.connection.send(new net.minecraft.network.protocol.game.ServerboundSetCarriedItemPacket(selected));
+        ((no.sindrens.printeraddon.mixin.MultiPlayerGameModeAccessor) mc.gameMode).printer_addon$setCarriedIndex(selected);
+        BuildLog.line("HOTBAR", why + ": the server had another item in the hand; hotbar slot " + (selected + 1)
+                + " sent again (the speed stays)");
     }
 
     /** After enough right blocks in a row: faster, in big steps while far from the fastest known safe speed. */

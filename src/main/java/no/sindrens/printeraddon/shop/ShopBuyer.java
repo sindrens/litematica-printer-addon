@@ -47,7 +47,7 @@ public class ShopBuyer {
     private static final Pattern MINUS = Pattern.compile("^[-\u2212]\\s*(\\d+)$");
     private static final Pattern TIMES = Pattern.compile("^x\\s*(\\d+)$");
 
-    private enum Phase { OPEN, WAIT_MENU, NAVIGATE, OPEN_ITEM, AMOUNT, WAIT_AMOUNT, PURCHASE, VERIFY, STACKS, SOLD }
+    private enum Phase { OPEN, WAIT_MENU, NAVIGATE, OPEN_ITEM, AMOUNT, WAIT_AMOUNT, PURCHASE, VERIFY, STACKS, SOLD, BACK, BACK_CHECK }
 
     private static final class Order {
         final Item item;
@@ -73,6 +73,8 @@ public class ShopBuyer {
 
         /** Selling (all of it, shift + right click on it in the shop), not buying. */
         boolean sell;
+        /** Bought by the whole stack only (its stack costs less than the setting), the amount a whole number of stacks. */
+        boolean wholeStacks;
 
         Order(Item item, int left, ShopScanResult.Location location) {
             this.item = item;
@@ -139,6 +141,14 @@ public class ShopBuyer {
     private static final java.util.Set<Integer> MINUS_SEEN_STACKS = new java.util.HashSet<>();
     /** Every different screen the stacks button led to is written to the build log once. */
     private final java.util.Set<String> loggedScreens = new java.util.HashSet<>();
+    /** "Back" clicks on the way to the next item's page (two at most: from the stacks screen to the buy screen to the page). */
+    private int backClicks;
+
+    /** Both on the same page of the same category: the second is a "Back" away from the first's buy screen. */
+    private static boolean samePage(Order a, Order b) {
+        return a.location.path != null && a.location.path.equals(b.location.path) && a.location.page == b.location.page;
+    }
+
     /** Ticks while buying, and the last click (or shop command) at that count: the time between clicks counts from it. */
     private long ticks;
     private long lastClickTick = -1000;
@@ -278,6 +288,20 @@ public class ShopBuyer {
 
     /** The lowest buy price of one of the item in this server's shop scan, or null if it's not sold. */
     @Nullable
+    /**
+     * Bought only by the whole stack, the amount rounded up: its stack costs less than "Whole stacks below" (mud,
+     * dirt, observers; not blocks of diamond or iron). Setting an exact amount on the buy screen took many clicks.
+     */
+    public static boolean buysWholeStacks(Minecraft mc, Item item) {
+        Double each = price(mc, item);
+        return each != null && wholeStacks(item, each);
+    }
+
+    private static boolean wholeStacks(Item item, double each) {
+        int stack = item.getDefaultMaxStackSize();
+        return stack > 1 && each * stack < Configs.Shop.STACKS_BELOW.getIntegerValue();
+    }
+
     public static Double price(Minecraft mc, Item item) {
         if (!sells(mc, item)) {
             return null;
@@ -434,9 +458,18 @@ public class ShopBuyer {
                         + " | the scan from " + shop.scannedAt + " has " + shop.categories.size() + " categories, " + shop.items.size() + " items");
             } else if (entry.getValue() > 0) {
                 int count = entry.getValue();
+                int stack = entry.getKey().getDefaultMaxStackSize();
+                boolean whole = location.buyPrice != null && wholeStacks(entry.getKey(), location.buyPrice / Math.max(1, location.amountShown));
+                if (whole) {
+                    // Whole stacks, rounded up: the rest goes into storage for later
+                    count = (count + stack - 1) / stack * stack;
+                }
                 if (budget < Double.MAX_VALUE && location.buyPrice != null && location.buyPrice > 0) {
                     double each = location.buyPrice / Math.max(1, location.amountShown);
                     int affordable = (int) Math.floor(budget / each);
+                    if (whole) {
+                        affordable = affordable / stack * stack;
+                    }
                     if (affordable < count) {
                         no.sindrens.printeraddon.build.BuildLog.line("SHOP", String.format("%s: %d wanted, %d within the spending limit ($%,.0f left)",
                                 names(List.of(entry.getKey())), count, affordable, budget));
@@ -445,7 +478,9 @@ public class ShopBuyer {
                     budget -= count * each;
                 }
                 if (count > 0) {
-                    orders.add(new Order(entry.getKey(), count, location));
+                    Order order = new Order(entry.getKey(), count, location);
+                    order.wholeStacks = whole;
+                    orders.add(order);
                 } else {
                     notBought.add(entry.getKey());
                 }
@@ -458,6 +493,16 @@ public class ShopBuyer {
         if (orders.isEmpty()) {
             return false;
         }
+        // Items on the same page of the shop one after the other (a "Back" away from each other, see samePage); the
+        // pages in the order they first come up
+        List<Order> grouped = new ArrayList<>(orders);
+        Map<String, Integer> firstSeen = new java.util.HashMap<>();
+        for (int i = 0; i < grouped.size(); i++) {
+            firstSeen.putIfAbsent(grouped.get(i).location.path + "|" + grouped.get(i).location.page, i);
+        }
+        grouped.sort(java.util.Comparator.comparingInt(o -> firstSeen.get(o.location.path + "|" + o.location.page)));
+        orders.clear();
+        orders.addAll(grouped);
 
         if (stacksBroken && no.sindrens.printeraddon.build.AutoBuild.clientTicks - stacksBrokenAt > 20L * 60 * 10) {
             stacksBroken = false;
@@ -520,7 +565,7 @@ public class ShopBuyer {
 
         switch (phase) {
             case OPEN -> {
-                if (!order.sell && room(mc, order.item) <= 0) {
+                if (!order.sell && (room(mc, order.item) <= 0 || order.wholeStacks && room(mc, order.item) < order.item.getDefaultMaxStackSize())) {
                     // Not a failure: buy the rest when there's room again
                     PrinterAddon.debug("No room for more {}", order.location.name);
                     orders.pollFirst();
@@ -674,10 +719,19 @@ public class ShopBuyer {
                 int most = Math.min(order.below - 1, stacksScreen ? Integer.MAX_VALUE : 64);
                 int want = stacksScreen ? Math.min(Math.min(order.left, room), most) / stack * stack
                         : Math.max(1, Math.min(most, Math.min(order.left, room)));
-                if (stacksScreen && wantedOneStackMore(mc, order, want, room, most)) {
+                if (stacksScreen && !order.wholeStacks && wantedOneStackMore(mc, order, want, room, most)) {
                     // Most of a stack would be left over: one stack more now (the build uses them later) instead
                     // of another purchase for the rest (a log had 6 stacks, then 33, then 27: two trips more, 12 s)
                     want += stack;
+                }
+                if (stacksScreen && want < stack && order.wholeStacks) {
+                    // Whole stacks only: no room for another one (the rest next time), never a few on the normal screen
+                    orders.pollFirst();
+                    mc.player.closeContainer();
+                    phase = Phase.OPEN;
+                    waited = 0;
+                    delay = clickDelay();
+                    return;
                 }
                 if (stacksScreen && want < stack) {
                     // Less than a stack left to buy (or room for): the rest on the normal buy screen
@@ -854,6 +908,41 @@ public class ShopBuyer {
                 phase = Phase.VERIFY;
                 waited = 0;
             }
+            case BACK -> {
+                ScreenSnapshot snapshot = ScreenSnapshot.capture(mc);
+                ScreenSnapshot.Item back = snapshot == null ? null : snapshot.items().stream()
+                        .filter(i -> i.slot() < snapshot.size() && ShopText.navOf(i.name()) == ShopText.Nav.BACK).findFirst().orElse(null);
+                if (back == null || backClicks++ >= 2) {
+                    // No way back from here (or it didn't lead to the page): the shop from the start
+                    no.sindrens.printeraddon.build.BuildLog.line("SHOP", "no way back to the page of " + order.location.name
+                            + (back == null ? " (no Back button)" : "") + ": opening the shop again");
+                    phase = Phase.OPEN;
+                    return;
+                }
+                click(mc, back.slot(), Phase.BACK_CHECK);
+            }
+            case BACK_CHECK -> {
+                ScreenSnapshot snapshot = ScreenSnapshot.capture(mc);
+                ScreenSnapshot.Item item = snapshot == null ? null : itemAt(snapshot, order.location.slot);
+                if (item != null && item.itemId().equals(order.id) && !snapshot.looksLikeBuyScreen()) {
+                    // Its page: on as if the shop had just been opened and gone through to it
+                    stacksScreen = false;
+                    stepItems = 0;
+                    order.amountClicks = 0;
+                    order.probing = false;
+                    if (timedOrder != order) {
+                        timedOrder = order;
+                        timedSince = ticks;
+                        timedClicks = 0;
+                        timedOpens = 0;
+                    }
+                    phase = Phase.OPEN_ITEM;
+                    waited = 0;
+                    return;
+                }
+                // A screen between (the buy screen after the stacks screen): back once more
+                phase = Phase.BACK;
+            }
             case SOLD -> {
                 int gone = countBefore - count(mc, order.item);
                 if (gone > 0 && (count(mc, order.item) == 0 || waited > 10 + 2 * no.sindrens.printeraddon.build.ServerLag.pingTicks(mc))) {
@@ -910,6 +999,13 @@ public class ShopBuyer {
                         orders.pollFirst();
                         phase = Phase.OPEN;
                         logTiming(order);
+                        // The next one on the same page of the shop: back there (its "Back" button) instead of
+                        // closing and opening the shop again from the start
+                        Order nextOrder = orders.peekFirst();
+                        if (nextOrder != null && !nextOrder.sell && samePage(order, nextOrder)) {
+                            phase = Phase.BACK;
+                            backClicks = 0;
+                        }
                     } else {
                         // Buy screens usually stay open: set the amount again (or pick stacks again)
                         ScreenSnapshot snapshot = ScreenSnapshot.capture(mc);

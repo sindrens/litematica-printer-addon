@@ -80,6 +80,11 @@ public class Mover {
     private boolean flyPathBlind;
     /** The path is only the first part of a long way (the next part is worked out at its end). */
     private boolean flyLeg;
+    /**
+     * The path is flown point by point as it is, no shortcuts: a way that keeps to a straight line, straight up over
+     * what's in the way and straight down after it (a shortcut would be the long ramp it's there to avoid).
+     */
+    private boolean flyExact;
 
     private int workTicksWithoutProgress;
     private int lastInReach = -1;
@@ -187,11 +192,52 @@ public class Mover {
         }
         skipped.put(pos.immutable(), tick + SKIP_TICKS);
         BuildLog.line("SKIP", pos.toShortString() + " for 30 s (" + times + " of " + MAX_SKIPS + "): " + why + explain);
+        // Built over already (the layer above went on top of it): the block above comes off for it, and back after
+        AutoBuild.INSTANCE.unsealIfCovered(mc, pos, why);
     }
 
     /** How often each block of this layer was left for later. */
     private final Map<BlockPos, Integer> skipCounts = new HashMap<>();
     private static final int MAX_SKIPS = 4;
+
+    /**
+     * Nothing has been placed for a long while although there's work, and it's not buying or fetching (see
+     * AutoBuild): whatever the mover is doing doesn't get anywhere (a lane end it flew to every tick for minutes, a
+     * spot it kept coming back to). That's left for later, and it plans again from where it is. The second time in a
+     * row, the part of the layer it's in is left for two minutes.
+     */
+    public void watchdog(Minecraft mc, int strike) {
+        LocalPlayer player = mc.player;
+        if (player == null) {
+            return;
+        }
+        String doing = describe();
+        BlockPos stuckAt = spotFor != null ? spotFor : target;
+        if (laneEnd != null) {
+            laneBlocked(player, "watchdog: nothing placed for 30 s");
+        } else if (stuckAt != null && work.contains(stuckAt)) {
+            skip(stuckAt, "watchdog: nothing placed for 30 s while " + doing);
+            dropWork(stuckAt);
+        }
+        if (strike >= 2 && stuckAt != null) {
+            unreachableAreas.put(areaKey(stuckAt), tick + 2 * 60 * 20);
+        }
+        BuildLog.line("WATCHDOG", "nothing placed for " + 30 * strike + " s while " + doing + " at " + player.blockPosition().toShortString()
+                + (stuckAt != null ? " (for " + stuckAt.toShortString() + ")" : "") + ": planning again"
+                + (strike >= 2 && stuckAt != null ? ", that part of the layer left for 2 minutes" : ""));
+        flyPath = null;
+        flyTarget = null;
+        target = null;
+        spotFor = null;
+        halt(player);
+        state = State.IDLE;
+        ticksUntilScan = 0;
+    }
+
+    /** There's work on the layer: blocks to place now (not only ones waiting for their items). */
+    public boolean hasWork() {
+        return !work.isEmpty();
+    }
 
     /** Nothing on the current layers to go to (as of the last look): no block to place or break, no part to load. */
     public boolean nothingToDo() {
@@ -682,6 +728,17 @@ public class Mover {
     private List<Integer> lanes = List.of();
     private int laneIndex;
     private int laneHalf;
+    /** The lowest lane's cross coordinate and the lanes' width (they're evenly spaced from there). */
+    private int laneFirst;
+    private int laneWidth = 1;
+    /** Each lane's stretches (along it) already flown, by its cross coordinate: what's left there goes spot by spot. */
+    private final Map<Integer, List<int[]>> flownParts = new HashMap<>();
+    /** A stretch this long with nothing to do splits a lane in two (each part flown on its own). */
+    private static final int LANE_GAP = 24;
+    /** Something on a lane's line at least this high above the hover height splits the lane there (a wall). */
+    private static final int LANE_TALL = 3;
+    /** How much further away a lane part counts when something tall stands between it and the player. */
+    private static final double OVER_WALL = 30;
     /** The lane being flown: its start and end (blocks of the layer); first flying to its start. */
     @Nullable
     private BlockPos laneStart;
@@ -726,18 +783,33 @@ public class Mover {
             sweepPlanned = false;
             sweepDone = false;
             laneEnd = null;
+            sweepRetryAfterScan = -1;
+            // The new layer's blocks at once: the work is still the last layer's until the next scan
+            ticksUntilScan = 0;
         }
         if (sweepDone || !Configs.Movement.LANES.getBooleanValue() || !layers.isActive() || layers.isFinishingDeferred()) {
             return false;
         }
         if (!sweepPlanned) {
+            // Only from a scan of these layers: right after a layer change the work is still the last layer's
+            // (a block left on Y 58), and Y 60 went spot by spot with "only 0 blocks" (13 min instead of about 7)
+            if (scannedLayer != layers.getLayer() || scannedTop != layers.getLayerTop() || scans <= sweepRetryAfterScan) {
+                return false;
+            }
             // Not while most of the layer waits for its items (being bought): planned from a handful of blocks,
             // the whole layer went spot by spot (a test layer took 60 s instead of 32)
             if (work.isEmpty() || waitingForItems > work.size()) {
                 return false;
             }
             sweepPlanned = true;
-            if (!planLanes(player, schematic, reach)) {
+            int planned = planLanes(player, schematic, reach);
+            if (planned < 0) {
+                // Few blocks to do now, but many more waiting for items or not loaded yet: again after the next scan
+                sweepPlanned = false;
+                sweepRetryAfterScan = scans;
+                return false;
+            }
+            if (planned == 0) {
                 sweepDone = true;
                 return false;
             }
@@ -778,8 +850,11 @@ public class Mover {
         return true;
     }
 
-    /** The lanes for this layer from its unfinished blocks; false if it isn't one to fly in lanes. */
-    private boolean planLanes(LocalPlayer player, WorldSchematic schematic, double reach) {
+    /**
+     * The lanes for this layer from its unfinished blocks: 1 if planned, 0 if it isn't one to fly in lanes, -1 if
+     * there are too few blocks to do yet but many more waiting (for items, or not loaded): planned later.
+     */
+    private int planLanes(LocalPlayer player, WorldSchematic schematic, double reach) {
         int minX = Integer.MAX_VALUE;
         int maxX = Integer.MIN_VALUE;
         int minZ = Integer.MAX_VALUE;
@@ -816,10 +891,15 @@ public class Mover {
             lowestY = AutoBuild.INSTANCE.layers.getLayer();
         }
         String layer = AutoBuild.INSTANCE.layers.describeLayers();
+        if (blocks + 16 * notLoaded.size() < SWEEP_MIN_BLOCKS && waitingForItems + unloaded.size() >= SWEEP_MIN_BLOCKS) {
+            BuildLog.line("SWEEP", layer + ": only " + blocks + " blocks to do now, " + waitingForItems + " waiting for items and "
+                    + unloaded.size() + " not loaded: the lanes are planned once those can be done");
+            return -1;
+        }
         if (blocks + 16 * notLoaded.size() < SWEEP_MIN_BLOCKS || chains * 5 > blocks) {
             BuildLog.line("SWEEP", layer + " spot by spot: " + (blocks < SWEEP_MIN_BLOCKS ? "only " + blocks + " blocks"
                     : chains + " of " + blocks + " blocks are chains (hoppers into hoppers, rails), placed in their order"));
-            return false;
+            return 0;
         }
         lanesAlongX = maxX - minX >= maxZ - minZ;
         // As wide as the printer reaches sideways from the hover height (from the lowest blocks, with a margin)
@@ -830,10 +910,42 @@ public class Mover {
         int width = 2 * laneHalf + 1;
         int from = lanesAlongX ? minZ : minX;
         int to = lanesAlongX ? maxZ : maxX;
-        // As few lanes as cover it, centred on it (a strip 3 wide is one lane over its middle, not along its edge)
+        // As few lanes as cover it, centred on it (a strip 3 wide is one lane over its middle, not along its edge),
+        // moved sideways as far as they still cover it so their lines miss what's tall (a lane along the top of a wall
+        // of the farm can't place from up there); one lane more when that's the only way
         int span = to - from + 1;
         int count = (span + width - 1) / width;
+        int alongFrom = lanesAlongX ? minX : minZ;
+        int alongTo = lanesAlongX ? maxX : maxZ;
         int first = from + laneHalf - (count * width - span) / 2;
+        long blocked = Long.MAX_VALUE;
+        for (int lanesTried = count; lanesTried <= count + 1 && blocked > 0; lanesTried++) {
+            int slack = lanesTried * width - span;
+            int centred = from + laneHalf - slack / 2;
+            int bestFirst = centred;
+            long fewest = Long.MAX_VALUE;
+            for (int f = from + laneHalf - slack; f <= from + laneHalf; f++) {
+                long tall = 0;
+                for (int i = 0; i < lanesTried; i++) {
+                    tall += tallLength(player, f + i * width, alongFrom, alongTo);
+                }
+                if (tall < fewest || tall == fewest && Math.abs(f - centred) < Math.abs(bestFirst - centred)) {
+                    fewest = tall;
+                    bestFirst = f;
+                }
+            }
+            if (fewest < blocked) {
+                blocked = fewest;
+                first = bestFirst;
+                count = lanesTried;
+            }
+        }
+        if (blocked > 0) {
+            BuildLog.line("SWEEP", "something tall stands on the lanes' lines for " + blocked + " blocks however they're laid: over it there");
+        }
+        laneFirst = first;
+        laneWidth = width;
+        flownParts.clear();
         List<Integer> centers = new ArrayList<>();
         for (int i = 0; i < count; i++) {
             centers.add(first + i * width);
@@ -851,61 +963,201 @@ public class Mover {
                 notLoaded.isEmpty() ? "" : " and " + notLoaded.size() + " parts not loaded yet",
                 work.size() > blocks ? " (" + (work.size() - blocks) + " left in the layers below: spot by spot after the lanes)" : "",
                 planR, eyeAbove, sideways));
+        return 1;
+    }
+
+    /** One part of a lane: from-to along it, its lowest block, its blocks and the parts not loaded yet in it. */
+    private record LanePart(int index, int c, int lo, int hi, int y, int blocks, int unloaded, int of) {
+    }
+
+    /**
+     * The next part of a lane with unfinished blocks, flown from its end nearest the player. A lane is split where
+     * something tall stands on its line (a wall of the farm) or where nothing is to be done for a long stretch; each part
+     * is flown on its own, the nearest first: the parts on this side of a wall one lane after the other, the other side
+     * later, never up over the wall and down again for each lane. Over the player's farm the lanes went up over its
+     * walls and the whole middle (built already) for every lane and placed almost nothing on either side: 1 to 5 blocks a
+     * second instead of 18, and 1273 blocks left for spot by spot. False when none is left.
+     */
+    private boolean nextLane(LocalPlayer player) {
+        List<LanePart> parts = laneParts(player);
+        if (parts.isEmpty()) {
+            return false;
+        }
+        // Nearest end first; something tall in the way there counts as far (up and down again); about as near (within
+        // a block): the lanes in their order, so the sweep goes on the way it was going
+        Vec3 at = player.position();
+        parts.sort(java.util.Comparator.comparingDouble(part -> partDistance(at, part)));
+        double nearest = Double.MAX_VALUE;
+        List<double[]> rated = new ArrayList<>();
+        for (int i = 0; i < parts.size(); i++) {
+            LanePart part = parts.get(i);
+            double raw = partDistance(at, part);
+            if (raw > nearest + 1) {
+                break;
+            }
+            double distance = raw + (overWall(player, part) ? OVER_WALL : 0);
+            nearest = Math.min(nearest, distance);
+            rated.add(new double[]{i, distance});
+        }
+        LanePart best = null;
+        for (double[] rating : rated) {
+            LanePart part = parts.get((int) rating[0]);
+            if (rating[1] <= nearest + 1 && (best == null || part.index() < best.index())) {
+                best = part;
+            }
+        }
+        laneIndex = best.index();
+        int c = best.c();
+        flownParts.computeIfAbsent(c, k -> new ArrayList<>()).add(new int[]{best.lo(), best.hi()});
+        double along = lanesAlongX ? at.x : at.z;
+        boolean forward = Math.abs(along - best.lo()) <= Math.abs(along - best.hi());
+        int startAlong = forward ? best.lo() - 1 : best.hi() + 1;
+        int endAlong = forward ? best.hi() + 1 : best.lo() - 1;
+        BlockPos start = lanePos(c, startAlong, best.y());
+        BlockPos end = lanePos(c, endAlong, best.y());
+        // An end the player doesn't fit at (a column of the farm already standing up there) is pulled in
+        // along the lane: the printer still reaches the last blocks from a little before it
+        laneStart = freeLaneEnd(player, start, end);
+        laneEnd = freeLaneEnd(player, end, start);
+        laneRetries = 0;
+        laneRetryDistance = Double.MAX_VALUE;
+        // What the lane takes: if the inventory won't last it, it's topped up first, not halfway along it
+        AutoBuild.INSTANCE.beforeLane(laneItems(c, best.lo(), best.hi()));
+        laneApproach = player.position().distanceToSqr(laneHover(laneStart)) > 2.5 * 2.5;
+        flyAlongLane(player, laneApproach ? laneStart : laneEnd);
+        BuildLog.line("SWEEP", "lane " + (laneIndex + 1) + " of " + lanes.size()
+                + (best.of() > 1 ? " (" + (lanesAlongX ? "x " : "z ") + best.lo() + " to " + best.hi() + " of it, "
+                + best.of() + " parts: something tall or nothing to do in between)" : "") + ": " + best.blocks() + " blocks"
+                + (best.unloaded() > 0 ? " and " + best.unloaded() + " parts not loaded yet" : "") + ", from "
+                + laneStart.toShortString() + " to " + laneEnd.toShortString() + String.format(java.util.Locale.ROOT,
+                " | printer %.2f blocks a tick", sweepRate));
         return true;
     }
 
-    /** The next lane with unfinished blocks, flown from its end nearest the player. False when none is left. */
-    private boolean nextLane(LocalPlayer player) {
-        while (++laneIndex < lanes.size()) {
-            int c = lanes.get(laneIndex);
-            int lo = Integer.MAX_VALUE;
-            int hi = Integer.MIN_VALUE;
-            int y = Integer.MAX_VALUE;
-            int blocks = 0;
-            for (BlockPos pos : work) {
-                if (Math.abs((lanesAlongX ? pos.getZ() : pos.getX()) - c) > laneHalf || !inLayers(pos)) {
-                    continue;
-                }
-                int along = lanesAlongX ? pos.getX() : pos.getZ();
-                lo = Math.min(lo, along);
-                hi = Math.max(hi, along);
-                y = Math.min(y, pos.getY());
-                blocks++;
-            }
-            int parts = 0;
-            for (int[] part : unloadedParts()) {
-                int crossFrom = lanesAlongX ? part[2] : part[0];
-                int crossTo = lanesAlongX ? part[3] : part[1];
-                if (crossTo < c - laneHalf || crossFrom > c + laneHalf) {
-                    continue;
-                }
-                lo = Math.min(lo, lanesAlongX ? part[0] : part[2]);
-                hi = Math.max(hi, lanesAlongX ? part[1] : part[3]);
-                y = Math.min(y, AutoBuild.INSTANCE.layers.getLayer());
-                parts++;
-            }
-            if (blocks == 0 && parts == 0) {
+    /** The block of a lane at this place along it. */
+    private BlockPos lanePos(int c, int along, int y) {
+        return lanesAlongX ? new BlockPos(along, y, c) : new BlockPos(c, y, along);
+    }
+
+    /** From the player to the nearer end of a lane part, at the hover height. */
+    private double partDistance(Vec3 at, LanePart part) {
+        return Math.sqrt(Math.min(at.distanceToSqr(laneHover(lanePos(part.c(), part.lo() - 1, part.y()))),
+                at.distanceToSqr(laneHover(lanePos(part.c(), part.hi() + 1, part.y())))));
+    }
+
+    /** Something tall stands between the player and the nearer end of this part (a wall to go up over and down). */
+    private boolean overWall(LocalPlayer player, LanePart part) {
+        Vec3 at = player.position();
+        Vec3 a = laneHover(lanePos(part.c(), part.lo() - 1, part.y()));
+        Vec3 b = laneHover(lanePos(part.c(), part.hi() + 1, part.y()));
+        Vec3 end = at.distanceToSqr(a) <= at.distanceToSqr(b) ? a : b;
+        return !FlyPath.clearAsFarAsKnown(player.level(), new Vec3(at.x, end.y, at.z), end);
+    }
+
+    /**
+     * The parts of the lanes still to fly: per lane, its unfinished blocks (and the parts not loaded yet) along it, not
+     * in a stretch flown already, split where something tall stands on its line or nothing is to be done for long.
+     */
+    private List<LanePart> laneParts(LocalPlayer player) {
+        // Per lane: {from, to, lowest y, blocks, parts not loaded} for each block and each part not loaded
+        Map<Integer, List<int[]>> spans = new HashMap<>();
+        for (BlockPos pos : work) {
+            if (!inLayers(pos)) {
                 continue;
             }
-            double at = lanesAlongX ? player.getX() : player.getZ();
-            boolean forward = Math.abs(at - lo) <= Math.abs(at - hi);
-            int startAlong = forward ? lo - 1 : hi + 1;
-            int endAlong = forward ? hi + 1 : lo - 1;
-            BlockPos start = lanesAlongX ? new BlockPos(startAlong, y, c) : new BlockPos(c, y, startAlong);
-            BlockPos end = lanesAlongX ? new BlockPos(endAlong, y, c) : new BlockPos(c, y, endAlong);
-            // An end the player doesn't fit at (a column of the farm already standing up there) is pulled in
-            // along the lane: the printer still reaches the last blocks from a little before it
-            laneStart = freeLaneEnd(player, start, end);
-            laneEnd = freeLaneEnd(player, end, start);
-            laneRetries = 0;
-            laneRetryDistance = Double.MAX_VALUE;
-            laneApproach = player.position().distanceToSqr(laneHover(laneStart)) > 2.5 * 2.5;
-            flyAlongLane(player, laneApproach ? laneStart : laneEnd);
-            BuildLog.line("SWEEP", "lane " + (laneIndex + 1) + " of " + lanes.size() + ": " + blocks + " blocks"
-                    + (parts > 0 ? " and " + parts + " parts not loaded yet" : "") + ", from "
-                    + laneStart.toShortString() + " to " + laneEnd.toShortString() + String.format(java.util.Locale.ROOT,
-                    " | printer %.2f blocks a tick", sweepRate));
-            return true;
+            int c = laneOf(lanesAlongX ? pos.getZ() : pos.getX());
+            int along = lanesAlongX ? pos.getX() : pos.getZ();
+            if (c != Integer.MIN_VALUE && !flown(c, along, along)) {
+                spans.computeIfAbsent(c, k -> new ArrayList<>()).add(new int[]{along, along, pos.getY(), 1, 0});
+            }
+        }
+        for (int[] part : unloadedParts()) {
+            int crossFrom = lanesAlongX ? part[2] : part[0];
+            int crossTo = lanesAlongX ? part[3] : part[1];
+            int from = lanesAlongX ? part[0] : part[2];
+            int to = lanesAlongX ? part[1] : part[3];
+            for (int c : lanes) {
+                if (crossTo >= c - laneHalf && crossFrom <= c + laneHalf && !flown(c, from, to)) {
+                    spans.computeIfAbsent(c, k -> new ArrayList<>()).add(new int[]{from, to, AutoBuild.INSTANCE.layers.getLayer(), 0, 1});
+                }
+            }
+        }
+        List<LanePart> parts = new ArrayList<>();
+        for (int index = 0; index < lanes.size(); index++) {
+            int c = lanes.get(index);
+            List<int[]> lane = spans.get(c);
+            if (lane == null) {
+                continue;
+            }
+            lane.sort(java.util.Comparator.comparingInt(span -> span[0]));
+            List<int[]> runs = new ArrayList<>();
+            int[] run = lane.getFirst().clone();
+            for (int k = 1; k < lane.size(); k++) {
+                int[] span = lane.get(k);
+                if (span[0] > run[1] + 1 && (span[0] - run[1] - 1 >= LANE_GAP || tallOnLine(player, c, run[1] + 1, span[0] - 1))) {
+                    runs.add(run);
+                    run = span.clone();
+                    continue;
+                }
+                run[1] = Math.max(run[1], span[1]);
+                run[2] = Math.min(run[2], span[2]);
+                run[3] += span[3];
+                run[4] += span[4];
+            }
+            runs.add(run);
+            for (int[] r : runs) {
+                parts.add(new LanePart(index, c, r[0], r[1], r[2], r[3], r[4], runs.size()));
+            }
+        }
+        return parts;
+    }
+
+    /** How many places along a lane's line (from-to) have something tall on them (see tallOnLine). */
+    private int tallLength(LocalPlayer player, int c, int from, int to) {
+        int tall = 0;
+        for (int along = from; along <= to; along++) {
+            if (tallOnLine(player, c, along, along)) {
+                tall++;
+            }
+        }
+        return tall;
+    }
+
+    /** The lane (its cross coordinate) a block at this cross coordinate is in, or MIN_VALUE for none. */
+    private int laneOf(int cross) {
+        int k = Math.floorDiv(cross - (laneFirst - laneHalf), laneWidth);
+        return k < 0 || k >= lanes.size() ? Integer.MIN_VALUE : laneFirst + k * laneWidth;
+    }
+
+    /** All of from-to along this lane was flown already. */
+    private boolean flown(int c, int from, int to) {
+        for (int[] range : flownParts.getOrDefault(c, List.of())) {
+            if (from >= range[0] && to <= range[1]) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Something on the lane's line between these two places along it (both included) the player can't fly through
+     * at the hover height or the next {@link #LANE_TALL} above it: a wall, to be flown up over and down again.
+     */
+    private boolean tallOnLine(LocalPlayer player, int c, int from, int to) {
+        net.minecraft.world.level.Level level = player.level();
+        int hoverY = (int) Math.floor(laneHover(lanePos(c, from, 0)).y);
+        for (int along = from; along <= to; along++) {
+            BlockPos feet = lanePos(c, along, hoverY);
+            if (!level.isLoaded(feet)) {
+                continue;
+            }
+            boolean over = false;
+            for (int up = 0; up < LANE_TALL && !over; up++) {
+                over = FlyPath.fits(level, feet.above(up));
+            }
+            if (!over) {
+                return true;
+            }
         }
         return false;
     }
@@ -944,6 +1196,26 @@ public class Mover {
         moveStartTick = tick;
         moveFrom = player.position();
         state = State.FLYING;
+    }
+
+    /** What the blocks of the lane at this cross position, from-to along it, take, item by item. */
+    private Map<net.minecraft.world.item.Item, Integer> laneItems(int c, int from, int to) {
+        WorldSchematic schematic = SchematicHelper.world();
+        Map<net.minecraft.world.item.Item, Integer> items = new HashMap<>();
+        if (schematic == null) {
+            return items;
+        }
+        for (BlockPos pos : work) {
+            int along = lanesAlongX ? pos.getX() : pos.getZ();
+            if (Math.abs((lanesAlongX ? pos.getZ() : pos.getX()) - c) > laneHalf || !inLayers(pos) || along < from || along > to) {
+                continue;
+            }
+            net.minecraft.world.item.ItemStack stack = StateRules.itemFor(schematic.getBlockState(pos));
+            if (!stack.isEmpty()) {
+                items.merge(stack.getItem(), 1, Integer::sum);
+            }
+        }
+        return items;
     }
 
     /** A block of the layers being built now (not one left from a layer below: those go spot by spot). */
@@ -1934,8 +2206,13 @@ public class Mover {
         }
         // Flying blind towards a part that isn't loaded: something coming up ahead (a building) is flown around, not
         // climbed (checked twice a second, the way around is worked out with what's loaded by now)
-        if (flyPathBlind && tick % 10 == 0 && tick - blindDetourFailed > 40
+        if (flyPathBlind && !flyExact && tick % 10 == 0 && tick - blindDetourFailed > 40
                 && !FlyPath.clearAsFarAsKnown(mc.level, player.position(), ahead(player.position(), flyTarget, 6))) {
+            flyPath = null;
+            return;
+        }
+        // Along a lane over parts not loaded yet: the way again now and then, with what has loaded since
+        if (flyPathBlind && flyExact && tick % 20 == 0) {
             flyPath = null;
             return;
         }
@@ -1943,7 +2220,8 @@ public class Mover {
         // On to the next turn once it's reached, or as soon as the straight line there is free (never cut a corner)
         double reached = Math.max(0.15, velocity.length());
         if (flyIndex < flyPath.size() - 1 && (waypoint.distanceToSqr(player.position()) < reached * reached
-                || (tick % 4 == 0 && FlyPath.clear(mc.level, player.position(), flyPath.get(flyIndex + 1))))) {
+                || (!flyExact && tick % 4 == 0 && FlyPath.shortcutOk(player.position(), flyPath.get(flyIndex + 1))
+                && FlyPath.clear(mc.level, player.position(), flyPath.get(flyIndex + 1))))) {
             flyIndex++;
             waypoint = flyPath.get(flyIndex);
             lastDistance = Double.MAX_VALUE;
@@ -2025,6 +2303,19 @@ public class Mover {
 
     /** Flights longer than this are flown in parts when the whole way can't be found at once. */
     private static final double LEG_LENGTH = 40;
+    /** A way straight over what's in the way is taken when it's at most this much longer than the straight line. */
+    private static final double OVER_EXTRA = 30;
+
+    /** How far it is along these points from here. */
+    private static double wayLength(Vec3 from, List<Vec3> way) {
+        double length = 0;
+        Vec3 at = from;
+        for (Vec3 point : way) {
+            length += at.distanceTo(point);
+            at = point;
+        }
+        return length;
+    }
     /** Flying towards a part that isn't loaded: how far ahead the line must be free (else around what's there). */
     private static final double BLIND_LOOK_AHEAD = 12;
     private long blindDetourFailed = -1000;
@@ -2070,6 +2361,26 @@ public class Mover {
         flyIndex = 0;
         flyPathBlind = false;
         flyLeg = false;
+        flyExact = false;
+        if (laneFlight() && !laneApproach) {
+            // Along a lane: in its own line at the hover height, straight up right before what's in the way and
+            // straight down right after it, also between two walls (never around it, never up a long ramp: a lane
+            // flew a 30 block ramp up over the farm's walls and stayed up over the whole middle). Parts not loaded
+            // yet count as free until they are
+            int hoverY = (int) Math.floor(laneHover(target).y);
+            List<Vec3> lane = FlyPath.lineWay(mc.level, from, flyTarget, hoverY, !targetLoaded);
+            if (lane != null) {
+                flyPath = lane;
+                flyExact = true;
+                flyPathBlind = !targetLoaded;
+                if (lane.size() > 1 && targetLoaded) {
+                    BuildLog.line("MOVE", "lane way: " + lane.size() + " turns, at most "
+                            + (int) Math.floor(lane.stream().mapToDouble(p -> p.y).max().orElse(hoverY)) + " high (hover height "
+                            + hoverY + ")");
+                }
+                return true;
+            }
+        }
         if (!targetLoaded) {
             // Not loaded yet (far away): nothing is known there, so towards it in a straight line; the way around
             // anything is found as soon as it has loaded. Something in the way on the part that is loaded (a
@@ -2097,6 +2408,19 @@ public class Mover {
         if (FlyPath.clear(mc.level, from, flyTarget)) {
             flyPath = List.of(flyTarget);
             return true;
+        }
+        // Over what's in the way, along the straight line, when that's not much longer: up right before it and down
+        // right after it, so the printer can go on placing until then (else around it, below)
+        if (!laneFlight()) {
+            int baseY = (int) Math.floor(Math.max(from.y, flyTarget.y) + 0.01);
+            List<Vec3> over = FlyPath.lineWay(mc.level, from, flyTarget, baseY, false);
+            if (over != null && wayLength(from, over) <= from.distanceTo(flyTarget) + OVER_EXTRA) {
+                flyPath = over;
+                flyExact = true;
+                BuildLog.line("MOVE", "way over what's in the way: " + over.size() + " turns, at most "
+                        + (int) Math.floor(over.stream().mapToDouble(p -> p.y).max().orElse(baseY)) + " high");
+                return true;
+            }
         }
         List<Vec3> way = FlyPath.find(mc.level, from, flyTarget, wayLimit(player));
         if (way == null && laneFlight()) {
@@ -2177,6 +2501,9 @@ public class Mover {
             BuildLog.line("SKIP", "area " + areaName(areaKey(target)) + " for 30 s: no flight path to the part that isn't loaded yet ("
                     + target.toShortString() + ")");
         } else if (block != null) {
+            // Left out of this layer at once (not four tries 30 s apart, each a long flight there: a stem built over
+            // by the layer above was flown to three times); tried again at the end of the build
+            skipCounts.put(block.immutable(), Math.max(skipCounts.getOrDefault(block, 0), MAX_SKIPS - 1));
             skip(block, "no flight path to any spot in reach of it");
             dropWork(block);
             // The blocks right around it are most likely in the same closed-in spot (a room of a building): left for
@@ -2305,6 +2632,11 @@ public class Mover {
     }
 
     private int scannedLayer = Integer.MIN_VALUE;
+    /** The top of the layers the last scan was for, and how many scans there were (lanes are planned after one). */
+    private int scannedTop = Integer.MIN_VALUE;
+    private int scans;
+    /** Lanes not planned yet: tried again after this scan (few blocks in the work while many wait). */
+    private int sweepRetryAfterScan = -1;
 
     /** Finds the unfinished positions in the current layer range. */
     private void scan(Minecraft mc, WorldSchematic schematic) {
@@ -2324,6 +2656,8 @@ public class Mover {
             skipCounts.clear();
             unreachableAreas.clear();
         }
+        scannedTop = layers.getLayerTop();
+        scans++;
 
         LocalPlayer player = mc.player;
         boolean creative = player.getAbilities().instabuild;

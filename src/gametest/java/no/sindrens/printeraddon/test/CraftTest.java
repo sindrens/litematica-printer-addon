@@ -14,7 +14,8 @@ import java.util.Map;
 
 /**
  * Crafting from raw materials: rails from iron blocks and logs (sticks, planks and the crafting table are made on
- * the way), powered rails from gold blocks and redstone, pumpkin seeds from pumpkins.
+ * the way), powered rails from gold blocks and redstone, pumpkin seeds from pumpkins, diamond tools from a block of
+ * diamond.
  */
 public class CraftTest implements FabricClientGameTest {
     @Override
@@ -71,9 +72,9 @@ public class CraftTest implements FabricClientGameTest {
                 throw new AssertionError("Craft test: " + have);
             }
 
-            // Tools for breaking wrong blocks, from cobblestone and a log: a stone pickaxe and a stone shovel
+            // Tools for breaking wrong blocks, always diamond: from a block of diamond (9 diamonds) and logs
             server.runCommand("clear @p");
-            server.runCommand("give @p cobblestone 4");
+            server.runCommand("give @p diamond_block 1");
             server.runCommand("give @p oak_log 2");
             context.waitTicks(20);
             Crafter tools = new Crafter();
@@ -94,54 +95,53 @@ public class CraftTest implements FabricClientGameTest {
                 context.waitTicks(1);
                 ticks++;
             }
-            String toolsHave = context.computeOnClient(mc -> "pickaxe=" + mc.player.getInventory().countItem(Items.STONE_PICKAXE)
-                    + " shovel=" + mc.player.getInventory().countItem(Items.STONE_SHOVEL));
+            String toolsHave = context.computeOnClient(mc -> "pickaxe=" + mc.player.getInventory().countItem(Items.DIAMOND_PICKAXE)
+                    + " shovel=" + mc.player.getInventory().countItem(Items.DIAMOND_SHOVEL)
+                    + " diamonds left=" + mc.player.getInventory().countItem(Items.DIAMOND));
             System.out.println("CRAFT TEST tools: " + toolsHave + " after " + ticks + " ticks; client menu "
                     + context.computeOnClient(mc -> mc.player.containerMenu.getClass().getSimpleName() + " #" + mc.player.containerMenu.containerId)
                     + ", server menu " + server.computeOnServer(s -> s.getPlayerList().getPlayers().getFirst().containerMenu.getClass().getSimpleName()
                     + " #" + s.getPlayerList().getPlayers().getFirst().containerMenu.containerId));
-            boolean both = context.computeOnClient(mc -> mc.player.getInventory().countItem(Items.STONE_PICKAXE) >= 1
-                    && mc.player.getInventory().countItem(Items.STONE_SHOVEL) >= 1);
+            boolean both = context.computeOnClient(mc -> mc.player.getInventory().countItem(Items.DIAMOND_PICKAXE) >= 1
+                    && mc.player.getInventory().countItem(Items.DIAMOND_SHOVEL) >= 1
+                    && mc.player.getInventory().countItem(Items.DIAMOND) == 5);
             if (!both) {
                 throw new AssertionError("Craft test, tools: " + toolsHave + " (plan " + toolPlan + ")");
             }
 
-            // Not in the recipe book: crafted by hand, the pattern clicked into the grid (a stone shovel on the
-            // player's server). Then with limited crafting on, the server gives nothing for it: twice, and the
-            // stone one isn't tried again (a wooden one is planned instead)
+            // Not in the recipe book: crafted by hand, the pattern clicked into the grid (a shovel on the player's
+            // server). Then with limited crafting on, the server gives nothing for it: twice, and it isn't asked for
+            // again (breaking goes on without it)
             waitForServerInventory(server, context);
             server.runCommand("clear @p");
-            server.runCommand("recipe take @p minecraft:stone_shovel");
-            server.runCommand("give @p cobblestone 3");
+            server.runCommand("recipe take @p minecraft:diamond_shovel");
+            server.runCommand("give @p diamond 3");
             server.runCommand("give @p stick 6");
             server.runCommand("give @p crafting_table");
             context.waitTicks(20);
-            int byHand = craftOne(context, Items.STONE_SHOVEL);
-            System.out.println("CRAFT TEST stone shovel by hand: " + byHand);
+            int byHand = craftOne(context, Items.DIAMOND_SHOVEL);
+            System.out.println("CRAFT TEST diamond shovel by hand: " + byHand);
             if (byHand < 1) {
-                throw new AssertionError("Craft test: the stone shovel wasn't crafted by hand");
+                throw new AssertionError("Craft test: the diamond shovel wasn't crafted by hand");
             }
             waitForServerInventory(server, context);
             // Crafting it put it in the recipe book again
-            server.runCommand("recipe take @p minecraft:stone_shovel");
+            server.runCommand("recipe take @p minecraft:diamond_shovel");
             server.runCommand("gamerule limited_crafting true");
-            server.runCommand("clear @p stone_shovel");
+            server.runCommand("clear @p diamond_shovel");
             context.waitTicks(10);
-            int refusedOnce = craftOne(context, Items.STONE_SHOVEL);
+            int refusedOnce = craftOne(context, Items.DIAMOND_SHOVEL);
             waitForServerInventory(server, context);
-            int refusedTwice = craftOne(context, Items.STONE_SHOVEL);
-            boolean refused = context.computeOnClient(mc -> Crafter.refused(Items.STONE_SHOVEL));
-            String plannedNow = context.computeOnClient(mc -> {
-                Map<Item, Integer> missing = new LinkedHashMap<>();
-                missing.put(no.sindrens.printeraddon.build.Tools.SHOVEL, 1);
-                return CraftPlan.of(mc, missing, item -> false, false).craft.toString();
-            });
+            int refusedTwice = craftOne(context, Items.DIAMOND_SHOVEL);
+            boolean refused = context.computeOnClient(mc -> Crafter.refused(Items.DIAMOND_SHOVEL));
+            String stillMissing = context.computeOnClient(mc -> no.sindrens.printeraddon.build.Tools.breakingToolsMissing(
+                    java.util.Set.of(net.minecraft.world.level.block.Blocks.DIRT), mc.player.getInventory()).toString());
             server.runCommand("gamerule limited_crafting false");
             System.out.println("CRAFT TEST limited crafting: crafted " + refusedOnce + " and " + refusedTwice + ", refused=" + refused
-                    + ", plan now " + plannedNow);
-            if (refusedOnce != 0 || refusedTwice != 0 || !refused || !plannedNow.contains("wooden_shovel") || plannedNow.contains("stone_shovel")) {
+                    + ", tools still asked for " + stillMissing);
+            if (refusedOnce != 0 || refusedTwice != 0 || !refused || stillMissing.contains("shovel")) {
                 throw new AssertionError("Craft test, limited crafting: crafted " + refusedOnce + "/" + refusedTwice + ", refused="
-                        + refused + ", plan " + plannedNow);
+                        + refused + ", tools still asked for " + stillMissing);
             }
             context.runOnClient(mc -> Crafter.forgetRefusals());
 
@@ -150,7 +150,7 @@ public class CraftTest implements FabricClientGameTest {
             // before that are sent for the table's menu, which the client no longer shows
             waitForServerInventory(server, context);
             server.runCommand("clear @p");
-            server.runCommand("give @p cobblestone 2");
+            server.runCommand("give @p diamond 2");
             server.runCommand("give @p stick 2");
             server.runCommand("give @p dirt " + 64 * 34);
             // Until the client shows the full inventory (a moment after the commands)
@@ -186,7 +186,7 @@ public class CraftTest implements FabricClientGameTest {
             });
             System.out.println("CRAFT TEST full inventory before: " + inventoryNow);
             Crafter full = new Crafter();
-            context.runOnClient(mc -> full.craft(Items.STONE_HOE, 1));
+            context.runOnClient(mc -> full.craft(Items.DIAMOND_HOE, 1));
             ticks = 0;
             while (ticks < 20 * 20 && context.computeOnClient(mc -> full.isBusy())) {
                 context.runOnClient(full::tick);

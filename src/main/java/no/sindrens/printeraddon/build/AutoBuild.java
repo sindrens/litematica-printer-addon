@@ -93,6 +93,8 @@ public class AutoBuild {
                     BuildLog.line("GIVEUP", pos.toShortString() + " for 30 s, clicked " + MAX_TRIES + " times without a change | "
                             + Diagnose.explain(mc, schematic, pos));
                 }
+                // Built over already: the block above comes off for it (and goes back after)
+                unsealIfCovered(mc, pos, "clicked " + MAX_TRIES + " times without a change");
             } else {
                 triesAt.put(pos.immutable(), new Tries(now, tries.count() + 1, tries.since()));
             }
@@ -100,6 +102,150 @@ public class AutoBuild {
     }
 
     private record Tries(net.minecraft.world.level.block.state.BlockState state, int count, long since) {
+    }
+
+    /**
+     * The last trip for this layer (what's left of it fits in with this trip): the room left over goes to what the next
+     * layer starts with, in whole stacks, so the next layer needs no trip at its start (when in the shop anyway).
+     */
+    private void addNextLayer(Minecraft mc, net.minecraft.world.entity.player.Inventory inventory,
+                              java.util.Map<net.minecraft.world.item.Item, Integer> layerNeeds,
+                              java.util.Map<net.minecraft.world.item.Item, Integer> list) {
+        for (var entry : layerNeeds.entrySet()) {
+            net.minecraft.world.item.Item item = entry.getKey();
+            if (!Tools.isMarker(item) && !InventoryCleaner.isBucket(item)
+                    && inventory.countItem(item) + list.getOrDefault(item, 0) < entry.getValue()) {
+                return;
+            }
+        }
+        int slots = InventoryCleaner.freeSlots(inventory) - InventoryBudget.KEEP_FREE;
+        for (var entry : list.entrySet()) {
+            slots -= (entry.getValue() + entry.getKey().getDefaultMaxStackSize() - 1) / entry.getKey().getDefaultMaxStackSize();
+        }
+        if (slots <= 0) {
+            return;
+        }
+        java.util.Map<net.minecraft.world.item.Item, Integer> next = layers.nextLayerNeeds(mc);
+        java.util.Map<net.minecraft.world.item.Item, Integer> added = new java.util.LinkedHashMap<>();
+        for (var entry : next.entrySet()) {
+            net.minecraft.world.item.Item item = entry.getKey();
+            int stack = item.getDefaultMaxStackSize();
+            int want = entry.getValue() - inventory.countItem(item) - list.getOrDefault(item, 0);
+            if (slots <= 0 || want <= 0 || stack <= 1 || Tools.isMarker(item) || !gettable(mc, item)) {
+                continue;
+            }
+            // A share of the room for each of the next layer's items
+            int stacks = Math.min(slots, Math.max(1, Math.min((want + stack - 1) / stack, slots / Math.max(1, next.size()))));
+            list.merge(item, stacks * stack, Integer::sum);
+            added.put(item, stacks * stack);
+            slots -= stacks;
+        }
+        if (!added.isEmpty()) {
+            BuildLog.line("PLAN", "last trip for " + layers.describeLayers() + ": also " + added + " for the next layer");
+        }
+    }
+
+    /**
+     * The items the lane about to be flown takes more of than there are (see Mover): topped up before it, not with a
+     * stop halfway along it. Looked at once, at the lane's start (until then; later the lane is under way).
+     */
+    private java.util.Set<net.minecraft.world.item.Item> laneShort = java.util.Set.of();
+    private long laneShortUntil;
+
+    public void beforeLane(java.util.Map<net.minecraft.world.item.Item, Integer> needs) {
+        laneShort = java.util.Set.of();
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null) {
+            return;
+        }
+        java.util.Set<net.minecraft.world.item.Item> shortNow = new java.util.HashSet<>();
+        for (var entry : needs.entrySet()) {
+            if (mc.player.getInventory().countItem(entry.getKey()) < entry.getValue() && gettable(mc, entry.getKey())) {
+                shortNow.add(entry.getKey());
+            }
+        }
+        if (!shortNow.isEmpty()) {
+            laneShort = shortNow;
+            laneShortUntil = clientTicks + 60;
+            // Looked at right away (see buyMissing), not after the pause between shopping rounds
+            buyCooldown = 0;
+        }
+    }
+
+    /** Ticks of building (not buying, fetching or crafting) since a block was last placed, and the strikes so far. */
+    private int watchTicks;
+    private int watchPlaced = -1;
+    private int watchStrikes;
+    private static final int WATCH_TICKS = 20 * 30;
+
+    /**
+     * Nothing placed for 30 s of building while there's work: the mover is told to leave what it's at and plan
+     * again (a lane end flown to every tick for minutes held up two builds until they stopped as "missing").
+     */
+    private void watchdog(Minecraft mc) {
+        int placed = stats.totalPlaced();
+        if (placed != watchPlaced || !layers.isActive() || !mover.hasWork() || breaker.isBusy() || fluids.isBusy()) {
+            if (placed != watchPlaced) {
+                watchStrikes = 0;
+            }
+            watchPlaced = placed;
+            watchTicks = 0;
+            return;
+        }
+        if (++watchTicks >= WATCH_TICKS) {
+            watchTicks = 0;
+            mover.watchdog(mc, ++watchStrikes);
+        }
+    }
+
+    /**
+     * The block above a block the layer above was already built over (a pumpkin stem under the observers and
+     * pistons): it's broken so the block below can go in, then put back (held back from the printer until the one
+     * below is in, at most a minute). Block above -> the block below it, and since when.
+     */
+    private final java.util.Map<net.minecraft.core.BlockPos, net.minecraft.core.BlockPos> unsealFor = new java.util.HashMap<>();
+    private final java.util.Map<net.minecraft.core.BlockPos, Long> unsealSince = new java.util.HashMap<>();
+    private static final int UNSEAL_HOLD_TICKS = 20 * 60;
+    private final java.util.Map<net.minecraft.core.BlockPos, Integer> unsealCount = new java.util.HashMap<>();
+
+    /** Opens up a block covered by the build's own block above it, if it is one (see unsealFor). */
+    public void unsealIfCovered(Minecraft mc, net.minecraft.core.BlockPos pos, String why) {
+        fi.dy.masa.litematica.world.WorldSchematic schematic = SchematicHelper.world();
+        if (schematic == null || mc.level == null || !running) {
+            return;
+        }
+        net.minecraft.core.BlockPos above = pos.above();
+        net.minecraft.world.level.block.state.BlockState aboveState = mc.level.getBlockState(above);
+        if (unsealFor.containsKey(above) || BlockCheck.check(mc.level, schematic, pos) != BlockCheck.Result.MISSING
+                || BlockCheck.check(mc.level, schematic, above) != BlockCheck.Result.OK || aboveState.isAir()
+                || aboveState.canBeReplaced() || BlockCheck.isProtected(mc.level, above, aboveState)) {
+            return;
+        }
+        // Twice at most for a spot: if the block below still doesn't go in, it's left for the end of the build
+        if (unsealCount.merge(above.immutable(), 1, Integer::sum) > 2) {
+            return;
+        }
+        unsealFor.put(above.immutable(), pos.immutable());
+        unsealSince.put(above.immutable(), clientTicks);
+        airPlace.misplaced().add(above.immutable());
+        deferred.add(above.immutable());
+        BuildLog.line("UNSEAL", pos.toShortString() + " (" + why + ") has " + shortState(aboveState) + " of the build over it:"
+                + " breaking that, placing " + shortState(schematic.getBlockState(pos)) + ", then putting it back");
+    }
+
+    /** Held back from the printer: the block below it is to go in first (see unsealIfCovered). */
+    private boolean heldForBelow(Minecraft mc, fi.dy.masa.litematica.world.WorldSchematic schematic, net.minecraft.core.BlockPos pos) {
+        net.minecraft.core.BlockPos below = unsealFor.get(pos);
+        if (below == null) {
+            return false;
+        }
+        if (BlockCheck.check(mc.level, schematic, below) != BlockCheck.Result.MISSING
+                || clientTicks - unsealSince.getOrDefault(pos, 0L) > UNSEAL_HOLD_TICKS) {
+            unsealFor.remove(pos);
+            unsealSince.remove(pos);
+            return false;
+        }
+        return true;
     }
 
     /** When the printer last clicked each spot (kept a few seconds, for telling its blocks from other changes). */
@@ -346,7 +492,7 @@ public class AutoBuild {
             boolean waiting = acks ? ServerAcks.isWaiting(pos) : recentlyTried.containsKey(pos);
             boolean nextToWaiting = result == BlockCheck.Result.MISSING
                     && (acks ? ServerAcks.nextToWaiting(pos) : nextToUnconfirmed(pos, now, confirm));
-            if (waiting || givenUp(pos) || nextToWaiting) {
+            if (waiting || givenUp(pos) || nextToWaiting || heldForBelow(mc, schematic, pos)) {
                 held++;
                 continue;
             }
@@ -623,7 +769,7 @@ public class AutoBuild {
         cleaner.remember(needs);
         missingWhole.clear();
         needs.forEach((item, count) -> {
-            int have = mc.player.getInventory().countItem(item);
+            int have = Tools.isMarker(item) ? Tools.count(item, mc.player.getInventory()) : mc.player.getInventory().countItem(item);
             if (count > have) {
                 missingWhole.put(item, count - have);
             }
@@ -764,7 +910,10 @@ public class AutoBuild {
         boolean autoBuy = Configs.Shop.AUTO_BUY.getBooleanValue();
         int buyWhenLeft = Configs.Shop.BUY_WHEN_LEFT.getIntegerValue();
         boolean due = false;
+        boolean dueAnyway = false;
         boolean outOfSomething = false;
+        java.util.Set<net.minecraft.world.item.Item> forLane = clientTicks <= laneShortUntil ? laneShort : java.util.Set.of();
+        laneShort = java.util.Set.of();
         for (var entry : layerNeeds.entrySet()) {
             net.minecraft.world.item.Item item = entry.getKey();
             // Buckets aren't bought, and an empty one is a water bucket again a moment later (an infinite water
@@ -773,7 +922,8 @@ public class AutoBuild {
             if (InventoryCleaner.isBucket(item)) {
                 continue;
             }
-            int have = inventory.countItem(item);
+            // A tool: only the plain ones count (an enchanted diamond hoe of the player's isn't "a hoe" here)
+            int have = Tools.isMarker(item) ? Tools.count(item, inventory) : inventory.countItem(item);
             if (have >= entry.getValue()) {
                 continue;
             }
@@ -782,10 +932,14 @@ public class AutoBuild {
             if (have == 0 && !Tools.isMarker(item)) {
                 outOfSomething |= !gettable(mc, item) || !autoBuy;
             }
-            // Only once it's (nearly) used up: this many or fewer left
-            if (gettable(mc, item) && have <= buyWhenLeft
+            // Only once it's (nearly) used up: this many or fewer left; or the lane about to be flown takes more than
+            // is left (topped up before it, not with a stop halfway along it: 14 s in the middle of a lane once)
+            if (gettable(mc, item) && (have <= buyWhenLeft || forLane.contains(item))
                     && (storage || autoBuy && no.sindrens.printeraddon.shop.ShopBuyer.room(mc, item) > 0)) {
                 due = true;
+                if (have <= buyWhenLeft) {
+                    dueAnyway = true;
+                }
             }
         }
         // The layer's water needs a bucket and there's none at all (not even an empty one), or only empty ones for
@@ -825,6 +979,10 @@ public class AutoBuild {
         }
 
         InventoryBudget.Plan plan = InventoryBudget.plan(inventory, layerNeeds, neededWhole, cleaner.storable(inventory));
+        // A trip only for the lane: only if the lane's item is below its share (else it can't take more anyway)
+        if (due && !dueAnyway && !goesOn && !noBucket && forLane.stream().noneMatch(plan.wants()::containsKey)) {
+            return false;
+        }
         // Not room for all of it: what there's too much of, or what this layer doesn't need, goes into storage first
         if (plan.shortSlots() > 0 && !plan.excess().isEmpty() && storage && clientTicks - excessStoredAt > 20 * 60) {
             excessStoredAt = clientTicks;
@@ -854,6 +1012,7 @@ public class AutoBuild {
             wants.put(net.minecraft.world.item.Items.WATER_BUCKET, 1);
         }
         java.util.Map<net.minecraft.world.item.Item, Integer> list = InventoryBudget.fitNow(inventory, wants);
+        addNextLayer(mc, inventory, layerNeeds, list);
         String planLine = "inventory for " + layers.describeLayers() + ": " + plan.describe(inventory) + " | "
                 + plan.pool() + " building slots" + (plan.shortSlots() > 0 ? ", " + plan.shortSlots() + " short" : "")
                 + " | getting " + (list.isEmpty() ? "nothing" : list) + (goesOn ? " (same trip)" : "");
@@ -880,16 +1039,26 @@ public class AutoBuild {
                 fromStorage.merge(from, CraftPlan.madeFromCount(item, count), Integer::sum);
             }
         });
-        // A hoe: any one in storage; if storage is known to have none but has what one is made of (diamonds the
-        // add-on put there, say), that, so it isn't bought
-        if (list.containsKey(Tools.HOE) && !fetcher.knownHoe()) {
-            for (net.minecraft.world.item.Item material : java.util.List.of(net.minecraft.world.item.Items.DIAMOND,
-                    net.minecraft.world.item.Items.IRON_INGOT, net.minecraft.world.item.Items.COBBLESTONE, net.minecraft.world.item.Items.STICK)) {
-                int per = material == net.minecraft.world.item.Items.COBBLESTONE || material == net.minecraft.world.item.Items.STICK
-                        ? 2 * list.get(Tools.HOE) : 2;
-                if (fetcher.knownCount(material) >= 2) {
-                    fromStorage.merge(material, per, Integer::sum);
-                }
+        // A tool: a plain one in storage; and what a diamond one is made of, in case there's none (diamonds or a
+        // block of diamond, sticks), so it's crafted from those and not bought
+        int diamonds = 0;
+        int tools = 0;
+        for (var entry : list.entrySet()) {
+            if (Tools.isMarker(entry.getKey())) {
+                diamonds += Tools.diamondsFor(entry.getKey()) * entry.getValue();
+                tools += entry.getValue();
+            }
+        }
+        if (diamonds > 0) {
+            int knownDiamonds = fetcher.knownCount(net.minecraft.world.item.Items.DIAMOND);
+            if (knownDiamonds > 0) {
+                fromStorage.merge(net.minecraft.world.item.Items.DIAMOND, Math.min(knownDiamonds, diamonds), Integer::sum);
+            }
+            if (knownDiamonds < diamonds && fetcher.knownCount(net.minecraft.world.item.Items.DIAMOND_BLOCK) > 0) {
+                fromStorage.merge(net.minecraft.world.item.Items.DIAMOND_BLOCK, (diamonds - knownDiamonds + 8) / 9, Integer::sum);
+            }
+            if (fetcher.knownCount(net.minecraft.world.item.Items.STICK) > 0) {
+                fromStorage.merge(net.minecraft.world.item.Items.STICK, 2 * tools, Integer::sum);
             }
         }
         if (!fetchedThisTrip && fetcher.start(mc, fromStorage)) {
@@ -913,7 +1082,7 @@ public class AutoBuild {
             net.minecraft.world.item.Item item = entry.getKey();
             int want = entry.getValue();
             int stack = item.getDefaultMaxStackSize();
-            int have = inventory.countItem(item);
+            int have = Tools.isMarker(item) ? Tools.count(item, inventory) : inventory.countItem(item);
             // Buckets only when there's none with water at all (storage was looked in above, or had none)
             boolean bucketNeeded = item == net.minecraft.world.item.Items.WATER_BUCKET && noBucket && canBuyBucket;
             if (!gettable(mc, item) || InventoryCleaner.isBucket(item) && !bucketNeeded) {
@@ -924,7 +1093,11 @@ public class AutoBuild {
             if (have > buyWhenLeft && want < stack) {
                 continue;
             }
-            if (want >= stack / 2 && stack > 1) {
+            if (stack > 1 && no.sindrens.printeraddon.shop.ShopBuyer.buysWholeStacks(mc, item)) {
+                // By the whole stack, rounded up: what's left over goes into storage for later (setting an exact
+                // amount took many clicks: 102 mud)
+                want = (want + stack - 1) / stack * stack;
+            } else if (want >= stack / 2 && stack > 1) {
                 // Never more than the whole build still needs
                 int useful = Math.max(want, neededWhole.getOrDefault(item, 0) - have);
                 want = Math.min(useful, Math.max(stack, Math.round(want / (float) stack) * stack));
@@ -1212,6 +1385,11 @@ public class AutoBuild {
         ServerAcks.reset();
         triesAt.clear();
         givenUp.clear();
+        unsealFor.clear();
+        unsealSince.clear();
+        unsealCount.clear();
+        watchTicks = 0;
+        watchStrikes = 0;
         nextBlock = null;
         breaker.reset();
         mover.reset();
@@ -1777,6 +1955,7 @@ public class AutoBuild {
             }
         }
 
+        watchdog(mc);
         long moverStarted = Perf.start();
         mover.tick(mc);
         Perf.end("movement", moverStarted);
