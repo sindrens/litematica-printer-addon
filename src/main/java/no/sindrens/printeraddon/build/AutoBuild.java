@@ -177,6 +177,9 @@ public class AutoBuild {
     }
     private boolean buying;
     private int buyCooldown;
+    /** When storage was last looked through for a water bucket, and when its lack was last said. */
+    private long bucketLookedFor = -100000;
+    private long bucketWarned = -100000;
     private int shoppingLayer = Integer.MIN_VALUE;
     private final Safety safety = new Safety();
 
@@ -705,6 +708,12 @@ public class AutoBuild {
         boolean outOfSomething = false;
         for (var entry : layerNeeds.entrySet()) {
             net.minecraft.world.item.Item item = entry.getKey();
+            // Buckets aren't bought, and an empty one is a water bucket again a moment later (an infinite water
+            // bucket refills itself, another is filled from water nearby): never a reason for a trip (each use
+            // of the bucket used to start one, topping up 1 cherry leaf or a stack of mud on the way)
+            if (InventoryCleaner.isBucket(item)) {
+                continue;
+            }
             int have = inventory.countItem(item);
             if (have >= entry.getValue()) {
                 continue;
@@ -717,6 +726,20 @@ public class AutoBuild {
                     && (storage || autoBuy && no.sindrens.printeraddon.shop.ShopBuyer.room(mc, item) > 0)) {
                 due = true;
             }
+        }
+        // The layer's water needs a bucket and there's none at all (not even an empty one): looked for in storage
+        // (once a minute), and said (once in two minutes); the layer waited minutes for water without it once
+        boolean noBucket = layerNeeds.containsKey(net.minecraft.world.item.Items.WATER_BUCKET)
+                && inventory.countItem(net.minecraft.world.item.Items.WATER_BUCKET) + inventory.countItem(net.minecraft.world.item.Items.BUCKET) == 0;
+        if (noBucket && storage && clientTicks - bucketLookedFor > 20 * 60) {
+            bucketLookedFor = clientTicks;
+            due = true;
+        }
+        if (noBucket && clientTicks - bucketWarned > 20 * 60 * 2) {
+            bucketWarned = clientTicks;
+            Chat.warn("No water bucket in your inventory: the water on this layer can't go in"
+                    + (storage ? " (looking in your vaults and chests for one)." : ". Put one in your inventory."));
+            BuildLog.line("PLAN", "no water bucket in the inventory, the layer's water waits for one" + (storage ? ": looking in storage" : ""));
         }
         boolean goesOn = tripGoesOn;
         tripGoesOn = false;
@@ -740,9 +763,10 @@ public class AutoBuild {
                 return true;
             }
         }
+        // Storage is asked for all of it (a water bucket put there, say); the shop below only for what it delivers
         java.util.Map<net.minecraft.world.item.Item, Integer> wants = new java.util.LinkedHashMap<>();
         plan.wants().forEach((item, count) -> {
-            if (gettable(mc, item)) {
+            if (gettable(mc, item) || (storage && !fetchedThisTrip)) {
                 wants.put(item, count);
             }
         });
@@ -795,8 +819,12 @@ public class AutoBuild {
             int want = entry.getValue();
             int stack = item.getDefaultMaxStackSize();
             int have = inventory.countItem(item);
-            int rest = layerNeeds.getOrDefault(item, 0) - have;
-            if (have > buyWhenLeft && want < stack && want < rest) {
+            if (!gettable(mc, item) || InventoryCleaner.isBucket(item)) {
+                continue;
+            }
+            // Not running low: only a stack or more is worth a purchase (it bought 1 cherry leaf at 127 of 128,
+            // a stack of mud at 700 of 704); the rest comes on the trip when it does run low
+            if (have > buyWhenLeft && want < stack) {
                 continue;
             }
             if (want >= stack / 2 && stack > 1) {

@@ -38,7 +38,8 @@ public final class InventoryBudget {
         /** For the build log: "observer 640/768, piston 700/768" (held/target). */
         public String describe(Inventory inventory) {
             StringBuilder sb = new StringBuilder();
-            targets.forEach((item, target) -> sb.append(name(item)).append(' ').append(inventory.countItem(item))
+            targets.forEach((item, target) -> sb.append(name(item)).append(' ').append(inventory.countItem(item)
+                            + (item == net.minecraft.world.item.Items.WATER_BUCKET ? inventory.countItem(net.minecraft.world.item.Items.BUCKET) : 0))
                     .append('/').append(target).append(", "));
             return sb.isEmpty() ? "-" : sb.substring(0, sb.length() - 2);
         }
@@ -61,6 +62,11 @@ public final class InventoryBudget {
                 slotsHeld.merge(stack.getItem(), 1, Integer::sum);
                 counts.merge(stack.getItem(), stack.getCount(), Integer::sum);
             }
+        }
+        // An empty bucket is a water bucket a moment later (an infinite one refills itself, another is filled from
+        // water nearby): it counts as one
+        if (layerNeeds.containsKey(net.minecraft.world.item.Items.WATER_BUCKET)) {
+            counts.merge(net.minecraft.world.item.Items.WATER_BUCKET, counts.getOrDefault(net.minecraft.world.item.Items.BUCKET, 0), Integer::sum);
         }
         Map<Item, Integer> targets = new LinkedHashMap<>();
         Map<Item, Integer> wants = new LinkedHashMap<>();

@@ -67,15 +67,37 @@ public class InventoryCleaner {
                     Items.REDSTONE, Items.REDSTONE_BLOCK, Items.OAK_PLANKS, Items.OAK_LOG));
         }
         Set<Item> off = new HashSet<>();
+        Set<Item> special = new HashSet<>();
         for (int slot = 0; slot < Inventory.INVENTORY_SIZE; slot++) {
             ItemStack stack = inventory.getItem(slot);
             Item item = stack.getItem();
-            if (!stack.isEmpty() && !stack.isDamageableItem() && !keep.contains(item)
+            if (stack.isEmpty()) {
+                continue;
+            }
+            // Never buckets (an infinite water bucket was put in a vault once, and the layer's water waited for it),
+            // nor anything renamed, enchanted or otherwise special: such an item and every stack of its kind stay
+            if (isBucket(item) || !plain(stack)) {
+                special.add(item);
+                continue;
+            }
+            if (!stack.isDamageableItem() && !keep.contains(item)
                     && (materials.contains(item) || CRAFTING_LEFTOVERS.contains(item) || isSchematicBlock(item))) {
                 off.add(item);
             }
         }
+        off.removeAll(special);
         return off;
+    }
+
+    /** A bucket of any kind (water, lava, empty...): kept, and never a reason to go shopping. */
+    public static boolean isBucket(Item item) {
+        return item == Items.BUCKET || item == Items.WATER_BUCKET || item == Items.LAVA_BUCKET || item == Items.POWDER_SNOW_BUCKET
+                || item == Items.MILK_BUCKET;
+    }
+
+    /** An ordinary item, as it comes from the shop: not renamed, enchanted or otherwise changed. */
+    public static boolean plain(ItemStack stack) {
+        return stack.getComponents().equals(new ItemStack(stack.getItem()).getComponents());
     }
 
     private static boolean isSchematicBlock(Item item) {
@@ -137,8 +159,8 @@ public class InventoryCleaner {
         for (int slot = 0; slot < 36; slot++) {
             ItemStack stack = inventory.getItem(slot);
             // Only plain building materials of this schematic: never tools, nor renamed or enchanted items
-            if (stack.isEmpty() || !materials.contains(stack.getItem()) || stack.isDamageableItem()
-                    || !stack.getComponents().equals(new ItemStack(stack.getItem()).getComponents())) {
+            if (stack.isEmpty() || !materials.contains(stack.getItem()) || stack.isDamageableItem() || !plain(stack)
+                    || isBucket(stack.getItem())) {
                 continue;
             }
             Item item = stack.getItem();

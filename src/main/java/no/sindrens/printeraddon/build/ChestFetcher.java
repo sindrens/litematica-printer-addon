@@ -312,7 +312,9 @@ public class ChestFetcher {
                     for (Slot slot : menu.slots) {
                         ItemStack stack = slot.getItem();
                         Integer keep = stack.isEmpty() ? null : storing.get(stack.getItem());
-                        if (slot.container instanceof Inventory && keep != null && stacks.getOrDefault(stack.getItem(), 0) > keep) {
+                        // Never a bucket, nor anything renamed, enchanted or otherwise special (an infinite water bucket)
+                        if (slot.container instanceof Inventory && keep != null && stacks.getOrDefault(stack.getItem(), 0) > keep
+                                && InventoryCleaner.plain(stack) && !InventoryCleaner.isBucket(stack.getItem())) {
                             taken += stack.getCount();
                             stacks.merge(stack.getItem(), -1, Integer::sum);
                             mc.gameMode.handleContainerInput(menu.containerId, slot.index, 0, ContainerInput.QUICK_MOVE, player);
