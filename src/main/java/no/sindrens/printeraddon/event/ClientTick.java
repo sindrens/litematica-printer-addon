@@ -16,6 +16,7 @@ public class ClientTick implements IClientTickHandler {
             // Lost the connection or logged out: stop, but keep the resume file
             AutoBuild.INSTANCE.stopForDisconnect(mc);
             no.sindrens.printeraddon.build.Resume.onDisconnect();
+            no.sindrens.printeraddon.build.ServerLag.reset();
             return;
         }
 

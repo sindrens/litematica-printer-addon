@@ -78,6 +78,23 @@ public class Mover {
         };
     }
 
+    /** A spot to go to before building on (a chest to take items from). */
+    @Nullable
+    private BlockPos errand;
+    private boolean errandReached;
+
+    /** Go within reach of this spot (null to stop). Returns true once it's within reach. */
+    public boolean goTo(@Nullable BlockPos pos) {
+        if (pos == null || !pos.equals(errand)) {
+            errand = pos == null ? null : pos.immutable();
+            errandReached = false;
+            if (state == State.FLYING || state == State.WALKING) {
+                state = State.IDLE;
+            }
+        }
+        return errand != null && errandReached;
+    }
+
     /** True for a block the printer was given time for in reach, but nothing happened. */
     public boolean wasSkipped(BlockPos pos) {
         return skipped.containsKey(pos);
@@ -95,6 +112,7 @@ public class Mover {
 
     public void reset() {
         state = State.IDLE;
+        errand = null;
         work.clear();
         reserved.clear();
         skipped.clear();
@@ -138,6 +156,31 @@ public class Mover {
 
         double reach = reach(player);
         BlockPos feet = player.blockPosition();
+
+        // An errand (e.g. to a chest) comes before the building work
+        if (errand != null) {
+            if (player.getEyePosition().distanceToSqr(Vec3.atCenterOf(errand)) <= (reach - 0.7) * (reach - 0.7)) {
+                if (state == State.WALKING || state == State.FLYING) {
+                    halt(player);
+                }
+                state = State.IDLE;
+                errandReached = true;
+                return;
+            }
+            errandReached = false;
+            if (state != State.FLYING && state != State.WALKING) {
+                target = errand;
+                path = null;
+                stuckTicks = 0;
+                lastDistance = Double.MAX_VALUE;
+                if (ensureFlying(player)) {
+                    flyTarget = new Vec3(errand.getX() + 0.5, errand.getY() + 1.2, errand.getZ() + 0.5);
+                    state = State.FLYING;
+                }
+            }
+            move(mc, player, mode);
+            return;
+        }
 
         // Standing where a block still has to go: step aside first
         if (reserved.contains(feet) || reserved.contains(feet.above())) {

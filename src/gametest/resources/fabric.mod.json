@@ -4,8 +4,12 @@
   "version": "1.0.0",
   "name": "Printer Addon tests",
   "entrypoints": {
-    "main": ["no.sindrens.printeraddon.test.TestCommands"],
+    "main": [
+      "no.sindrens.printeraddon.test.TestCommands"
+    ],
     "fabric-client-gametest": [
+      "no.sindrens.printeraddon.test.CraftTest",
+      "no.sindrens.printeraddon.test.FetchTest",
       "no.sindrens.printeraddon.test.BuildTest",
       "no.sindrens.printeraddon.test.ShopTest",
       "no.sindrens.printeraddon.test.FarmTest"

@@ -100,6 +100,28 @@ public class ShopBuyer {
         return notBought;
     }
 
+    private static ShopScanResult cachedScan;
+    private static long cachedScanTime;
+
+    /** True if this server's shop scan lists the item with a buy price. */
+    public static boolean sells(Minecraft mc, Item item) {
+        Path file = scanFile(mc);
+        if (file == null) {
+            return false;
+        }
+        try {
+            long modified = Files.getLastModifiedTime(file).toMillis();
+            if (cachedScan == null || modified != cachedScanTime) {
+                cachedScan = new Gson().fromJson(Files.readString(file, StandardCharsets.UTF_8), ShopScanResult.class);
+                cachedScanTime = modified;
+            }
+        } catch (IOException | RuntimeException e) {
+            return false;
+        }
+        List<ShopScanResult.Location> locations = cachedScan.items.get(BuiltInRegistries.ITEM.getKey(item).toString());
+        return locations != null && locations.stream().anyMatch(l -> l.buyPrice != null);
+    }
+
     @Nullable
     public static Path scanFile(Minecraft mc) {
         Path file = FileUtils.getConfigDirectory().resolve(PrinterAddon.MOD_ID).resolve("shops")

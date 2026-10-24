@@ -195,6 +195,12 @@ public class QuickPlace {
             return false;
         }
 
+        // Items just moved: wait until the server has the same in each slot
+        AutoBuild.INSTANCE.inventory.update(mc);
+        if (AutoBuild.INSTANCE.inventory.settling()) {
+            return false;
+        }
+
         BlockPos next = findNext(mc, player, schematic);
         if (next == null) {
             return false;
@@ -217,7 +223,8 @@ public class QuickPlace {
                 inventory.setSelectedSlot(slot);
             } else {
                 InventoryUtils.setPickedItemToHand(slot, item, mc);
-                // Moving it from the inventory takes a click: place next turn
+                // Moving it from the inventory takes a click: place once the server has done it too
+                AutoBuild.INSTANCE.inventory.moved();
                 cooldown = 1;
                 return true;
             }

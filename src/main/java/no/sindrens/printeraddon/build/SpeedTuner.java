@@ -163,7 +163,8 @@ public class SpeedTuner {
                     return;
                 }
                 lastPenalty = tick;
-                PrinterAddon.debug("Wrong block at {} at interval {}: {}", pos.toShortString(), interval(), mc.level.getBlockState(pos));
+                PrinterAddon.debug("Wrong block at {} at interval {}: {} (should be {}; {})", pos.toShortString(), interval(),
+                        mc.level.getBlockState(pos), schematic.getBlockState(pos), AutoBuild.INSTANCE.inventory.describe(mc));
                 slowDown(mc, "a block came out wrong at " + pos.toShortString());
             }
             default -> {

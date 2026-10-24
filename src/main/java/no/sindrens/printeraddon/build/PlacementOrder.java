@@ -1,5 +1,6 @@
 package no.sindrens.printeraddon.build;
 
+import javax.annotation.Nullable;
 import fi.dy.masa.litematica.world.WorldSchematic;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -119,6 +120,12 @@ public final class PlacementOrder {
      * The printer places the first position in the list that it can, so the order is its priority.
      */
     public static List<BlockPos> order(Level level, WorldSchematic schematic, List<BlockPos> positions, Vec3 from) {
+        return order(level, schematic, positions, from, null);
+    }
+
+    /** Same, and among equally urgent blocks the ones placed with the item in hand come first (fewer item switches). */
+    public static List<BlockPos> order(Level level, WorldSchematic schematic, List<BlockPos> positions, Vec3 from,
+                                       @Nullable net.minecraft.world.item.Item inHand) {
         List<BlockPos> ready = new ArrayList<>(positions.size());
 
         for (BlockPos pos : positions) {
@@ -137,6 +144,7 @@ public final class PlacementOrder {
 
         ready.sort(Comparator
                 .comparingInt((BlockPos pos) -> tier(schematic, pos, schematic.getBlockState(pos)))
+                .thenComparingInt(pos -> inHand != null && StateRules.itemFor(schematic.getBlockState(pos)).is(inHand) ? 0 : 1)
                 .thenComparingDouble(pos -> from.distanceToSqr(Vec3.atCenterOf(pos))));
         return ready;
     }

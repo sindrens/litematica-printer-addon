@@ -194,14 +194,28 @@ public class Configs implements IConfigHandler {
                 "Distance in blocks for 'Stop near other players'.",
                 "Near player distance");
 
+        public static final ConfigBoolean AUTO_EAT = new ConfigBoolean("autoEat", true,
+                "During auto build, eat when the food bar gets low (starving hurts, and damage stops auto build).\n"
+                        + "Never eats rotten flesh, spider eyes, poisonous potatoes, pufferfish, chorus fruit, raw chicken or golden apples.",
+                "Eat when hungry");
+        public static final ConfigInteger EAT_BELOW = new ConfigInteger("eatBelow", 14, 1, 19,
+                "Eat when the food bar is at this or lower (20 is full, every drumstick is 2).",
+                "Eat at food level");
+
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                STOP_ON_DAMAGE, STOP_NEAR_PLAYERS, NEAR_PLAYER_DISTANCE);
+                STOP_ON_DAMAGE, STOP_NEAR_PLAYERS, NEAR_PLAYER_DISTANCE, AUTO_EAT, EAT_BELOW);
     }
 
     public static class Shop {
         public static final ConfigString SHOP_COMMAND = new ConfigString("shopCommand", "shop",
                 "Command that opens the shop, without the slash.",
                 "Shop command");
+        public static final ConfigBoolean FETCH_FROM_CHESTS = new ConfigBoolean("fetchFromChests", true,
+                "Before buying, take missing items from chests, barrels and shulker boxes nearby (not the schematic's own).",
+                "Take from chests first");
+        public static final ConfigInteger FETCH_RADIUS = new ConfigInteger("fetchRadius", 500, 8, 2000,
+                "How far away (blocks) chests are used. Only loaded chunks count, so it can't be more than your view distance.",
+                "Chest distance (blocks)");
         public static final ConfigBoolean AUTO_BUY = new ConfigBoolean("autoBuy", true,
                 "During auto build, buy what the current layer is missing from the shop (as much as fits in the inventory).\n"
                         + "Needs a shop scan of the server first (J+S). No spending limit.",
@@ -222,7 +236,7 @@ public class Configs implements IConfigHandler {
                 "Shop menu timeout (ticks)");
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                AUTO_BUY, SHOP_COMMAND, SHOP_SECTION, PROBE_BUY_SCREEN, MAX_PAGES, WAIT_TIMEOUT_TICKS);
+                FETCH_FROM_CHESTS, FETCH_RADIUS, AUTO_BUY, SHOP_COMMAND, SHOP_SECTION, PROBE_BUY_SCREEN, MAX_PAGES, WAIT_TIMEOUT_TICKS);
     }
 
     public static class Speed {
@@ -233,6 +247,10 @@ public class Configs implements IConfigHandler {
         public static final ConfigInteger AUTO_SPEED_MIN_INTERVAL = new ConfigInteger("autoSpeedMinInterval", 4, 1, 40,
                 "Automatic speed never goes below this printer interval.",
                 "Automatic speed: fastest interval");
+        public static final ConfigInteger LAG_PAUSE_TPS = new ConfigInteger("lagPauseTps", 12, 0, 19,
+                "On a server: stop placing while the server runs below this many ticks per second (20 is normal),\n"
+                        + "because clicks then get answered late and blocks come out wrong. 0 = never wait.",
+                "Wait when server TPS below");
         public static final ConfigInteger AUTO_SPEED_STEP_BLOCKS = new ConfigInteger("autoSpeedStepBlocks", 25, 5, 1000,
                 "Automatic speed goes one tick faster after this many correct blocks in a row.",
                 "Automatic speed: blocks per step");
@@ -253,7 +271,7 @@ public class Configs implements IConfigHandler {
                 "Custom: fly speed");
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                AUTO_SPEED, AUTO_SPEED_MIN_INTERVAL, AUTO_SPEED_STEP_BLOCKS, PRINTER_INTERVAL, BREAK_COOLDOWN, SHOP_CLICK_DELAY, WALK_SPEED, FLY_SPEED);
+                AUTO_SPEED, AUTO_SPEED_MIN_INTERVAL, AUTO_SPEED_STEP_BLOCKS, LAG_PAUSE_TPS, PRINTER_INTERVAL, BREAK_COOLDOWN, SHOP_CLICK_DELAY, WALK_SPEED, FLY_SPEED);
 
         public static double walkSpeed() {
             SpeedPreset preset = preset();

@@ -4,6 +4,7 @@
   "package": "no.sindrens.printeraddon.mixin",
   "compatibilityLevel": "JAVA_25",
   "client": [
+    "ClientPacketListenerMixin",
     "GuideMixin",
     "GuideExecuteMixin",
     "MinecraftMixin",

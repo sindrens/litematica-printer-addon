@@ -26,6 +26,15 @@ public class AutoBuild {
     public final RailHelper rails = new RailHelper(airPlace.misplaced());
     public final EntityPlacer entities = new EntityPlacer();
     public final QuickPlace quickPlace = new QuickPlace();
+    public final Crafter crafter = new Crafter();
+    public final ChestFetcher fetcher = new ChestFetcher();
+    public final InventoryWatch inventory = new InventoryWatch();
+    public final AutoEat eater = new AutoEat();
+    private final HotbarPrep hotbar = new HotbarPrep();
+    /** Crafting to do once the current purchase is done. */
+    private java.util.List<CraftPlan.Step> craftAfterBuying = java.util.List.of();
+    /** Items a crafting round was for: if they're still missing afterwards, crafting didn't work out. */
+    private java.util.Set<net.minecraft.world.item.Item> craftingFor = java.util.Set.of();
     private final InventoryCleaner cleaner = new InventoryCleaner();
     public final BuildStats stats = new BuildStats();
     public final SpeedTuner speed = new SpeedTuner();
@@ -80,7 +89,14 @@ public class AutoBuild {
 
     /** The printer is paused while a block is being broken, so the two don't swap the held item. */
     public boolean shouldPausePrinter() {
-        return breaker.isBusy() || fluids.isBusy() || rails.isBusy() || entities.isBusy() || false
+        if (running) {
+            // A swap still on its way to the server would make the printer click with the wrong item
+            inventory.update(Minecraft.getInstance());
+            if (inventory.settling() || ServerLag.shouldWait(Minecraft.getInstance())) {
+                return true;
+            }
+        }
+        return breaker.isBusy() || eater.isBusy() || fluids.isBusy() || rails.isBusy() || entities.isBusy() || crafter.isBusy() || fetcher.isBusy()
                 || no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.isRunning();
     }
 
@@ -128,7 +144,8 @@ public class AutoBuild {
                 forPrinter.add(pos);
             }
         }
-        java.util.List<net.minecraft.core.BlockPos> ordered = PlacementOrder.order(mc.level, schematic, forPrinter, mc.player.position());
+        java.util.List<net.minecraft.core.BlockPos> ordered = PlacementOrder.order(mc.level, schematic, forPrinter, mc.player.position(),
+                mc.player.getMainHandItem().isEmpty() ? null : mc.player.getMainHandItem().getItem());
         if (!ordered.isEmpty()) {
             nextBlock = ordered.getFirst();
         }
@@ -309,6 +326,38 @@ public class AutoBuild {
         }
 
         buyCooldown = 20 * 30;
+
+        // First what's in chests nearby (the next round buys what wasn't there)
+        if (fetcher.start(mc, list)) {
+            mover.stop(mc);
+            buyCooldown = 0;
+            return true;
+        }
+
+        // Rails, powered rails and seeds are crafted: buy what they're made of, then craft them
+        java.util.Map<net.minecraft.world.item.Item, Integer> toCraft = new java.util.LinkedHashMap<>();
+        list.entrySet().removeIf(entry -> {
+            if (CraftPlan.crafted(entry.getKey())) {
+                toCraft.put(entry.getKey(), entry.getValue());
+                return true;
+            }
+            return false;
+        });
+        if (!toCraft.isEmpty()) {
+            CraftPlan plan = CraftPlan.of(mc, toCraft, item -> no.sindrens.printeraddon.shop.ShopBuyer.sells(mc, item),
+                    Crafter.tableNearby(mc));
+            plan.buy.forEach((item, count) -> list.merge(item, count, Integer::sum));
+            craftAfterBuying = plan.craft;
+            craftingFor = toCraft.keySet();
+            PrinterAddon.debug("To craft {}: buy {}, then craft {}", toCraft, plan.buy, plan.craft);
+        }
+        if (list.isEmpty()) {
+            for (CraftPlan.Step step : craftAfterBuying) {
+                crafter.craft(step.item(), step.count());
+            }
+            craftAfterBuying = java.util.List.of();
+            return crafter.isBusy();
+        }
         if (no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.start(mc, list)) {
             buying = true;
             mover.stop(mc);
@@ -316,6 +365,11 @@ public class AutoBuild {
         }
         couldntBuy.addAll(no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.notSold());
         couldntBuy.addAll(no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.notBought());
+        // Nothing to buy after all (e.g. no shop scan): still craft what can be crafted from the inventory
+        for (CraftPlan.Step step : craftAfterBuying) {
+            crafter.craft(step.item(), step.count());
+        }
+        craftAfterBuying = java.util.List.of();
         return false;
     }
 
@@ -347,6 +401,11 @@ public class AutoBuild {
         buying = false;
         buyCooldown = 0;
         cleaner.reset();
+        crafter.reset();
+        fetcher.reset();
+        eater.reset(mc);
+        craftAfterBuying = java.util.List.of();
+        craftingFor = java.util.Set.of();
         stats.start();
         speed.reset();
         recentlyTried.clear();
@@ -386,6 +445,9 @@ public class AutoBuild {
         breaker.stop(mc);
         mover.stop(mc);
         airPlace.stop();
+        eater.reset(mc);
+        crafter.reset();
+        fetcher.reset();
 
         if (wasRunning && !resumeLater) {
             Resume.forget();
@@ -465,6 +527,9 @@ public class AutoBuild {
             return;
         }
         if (running) {
+            inventory.update(mc);
+        }
+        if (running) {
             String reason = safety.check(mc);
             if (reason != null) {
                 stop(mc, reason);
@@ -490,6 +555,16 @@ public class AutoBuild {
         stats.tick(activity());
         speed.tick(mc);
 
+        // Eating: nothing else happens meanwhile (only between other jobs, never in the middle of one)
+        if (eater.isBusy() || (!breaker.isBusy() && !crafter.isBusy() && !fetcher.isBusy() && !airPlace.isActive()
+                && !fluids.isBusy() && !rails.isBusy() && PrinterBridge.isIdle()
+                && !no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.isRunning())) {
+            if (eater.tick(mc)) {
+                mover.stop(mc);
+                return;
+            }
+        }
+
         // Buying from the shop: nothing else happens meanwhile
         no.sindrens.printeraddon.shop.ShopBuyer buyer = no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE;
         if (buyer.isRunning()) {
@@ -502,6 +577,33 @@ public class AutoBuild {
             couldntBuy.addAll(buyer.notBought());
             couldntBuy.removeAll(buyer.bought().keySet());
             buyCooldown = 40;
+            // Then craft what the purchase was for
+            for (CraftPlan.Step step : craftAfterBuying) {
+                crafter.craft(step.item(), step.count());
+            }
+            craftAfterBuying = java.util.List.of();
+        }
+
+        // Taking items from chests: nothing else happens meanwhile
+        if (fetcher.isBusy()) {
+            if (fetcher.tick(mc, mover)) {
+                return;
+            }
+            buyCooldown = 0;
+        }
+
+        // Crafting: nothing else happens meanwhile
+        if (crafter.isBusy()) {
+            if (crafter.tick(mc)) {
+                return;
+            }
+        } else if (!craftingFor.isEmpty()) {
+            for (net.minecraft.world.item.Item item : craftingFor) {
+                if (shoppingList.containsKey(item) && mc.player.getInventory().countItem(item) == 0) {
+                    couldntBuy.add(item);
+                }
+            }
+            craftingFor = java.util.Set.of();
         }
 
         closeUnwantedMenu(mc);
@@ -534,7 +636,9 @@ public class AutoBuild {
         }
         if (!breaker.isBusy() && !airPlace.isActive() && !fluids.isBusy() && !rails.isBusy() && !entities.isBusy()
                 && PrinterBridge.isIdle()) {
-            quickPlace.tick(mc);
+            if (!hotbar.tick(mc, layers.layerNeeds()) && !ServerLag.shouldWait(mc)) {
+                quickPlace.tick(mc);
+            }
         }
 
         if (layers.isActive() && !layers.tick(mc)) {
