@@ -44,6 +44,25 @@ Litematica Printer does the placing; the add-on builds whole schematics in survi
   why not, what's missing).
 - Safety: stops when you take damage or another player comes close, and never uses a nearly broken tool.
 
+## Quick guide
+
+**Once per server**
+1. Place the schematic in Litematica.
+2. `J`+`S`: scan the shop. Without a scan nothing is bought.
+3. Storage: settings (`J`+`C`) → "Player vaults (/pv)", e.g. `1,2`. For a chest: look at it, `J`+`B` → "Link".
+
+**Build**
+- `J`+`B` → Start. Builds layer by layer from the bottom, gets what's missing (storage first, then the shop),
+  crafts seeds, dust and rails, and puts leftovers away.
+- `J`+`Q` stops everything, `J`+`A` turns the add-on off. After a disconnect or restart it goes on by itself.
+
+**Good to know**
+- Don't click in the shop or `/pv` while it's buying (closed by accident: it opens them again).
+- It buys without a spending limit: keep an eye on your money.
+- `/feed` and `/craft` are used if you're allowed to (settings: "Eat with /feed", "Craft with /craft").
+- It stops when you take damage or another player comes close (settings → Safety).
+- Something wrong? `J`+`B` → "Open build logs folder" and send the newest log.
+
 ## Build log
 
 Every auto build writes its full log to `.minecraft/logs/printer_addon/build-<date>_<time>.log` (the last 20
