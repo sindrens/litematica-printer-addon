@@ -334,6 +334,8 @@ public class Mover {
 
     /** How many of the nearest unfinished blocks are asked whether they can be placed now, when choosing a spot. */
     private static final int DOABLE_CHECKS = 600;
+    /** Past the nearest ones, stop looking once this many placeable blocks are found. */
+    private static final int ENOUGH_DOABLE = 40;
     private long lastNothingDoableReport = -100000;
 
     /** How many unfinished blocks near the player are looked at when choosing where to fly. */
@@ -352,10 +354,12 @@ public class Mover {
         // What can be placed right now, nearest first. Chains (hoppers pointing into each other, rails...) can only
         // be built from where they end, so the sweep starts where blocks are placeable, not just at the north edge:
         // otherwise it creeps along a part where nothing can be placed yet
+        // The nearest ones first; when none of those can be placed, keep looking further out until some are found
+        // (a chain's start can be on the far side of the layer), so it flies straight there instead of inching
         List<BlockPos> doable = new ArrayList<>();
         int checked = 0;
         for (BlockPos pos : sorted) {
-            if (checked++ >= DOABLE_CHECKS) {
+            if (checked++ >= DOABLE_CHECKS && doable.size() >= ENOUGH_DOABLE) {
                 break;
             }
             if (canDoNow(mc, schematic, pos)) {
@@ -365,11 +369,14 @@ public class Mover {
         if (doable.isEmpty()) {
             if (tick - lastNothingDoableReport > 20 * 30 && !sorted.isEmpty()) {
                 lastNothingDoableReport = tick;
-                PrinterAddon.debug("Nothing in the {} nearest unfinished blocks can be placed now; nearest: {}",
-                        Math.min(DOABLE_CHECKS, sorted.size()), Diagnose.explain(mc, schematic, sorted.getFirst()));
+                PrinterAddon.debug("Nothing of the {} unfinished blocks can be placed now; nearest: {}",
+                        sorted.size(), Diagnose.explain(mc, schematic, sorted.getFirst()));
             }
-            // Further away than the checked ones: head that way so they get checked; otherwise wait here
-            return sorted.size() > DOABLE_CHECKS ? sorted.get(DOABLE_CHECKS) : null;
+            return null;
+        }
+        if (checked > DOABLE_CHECKS) {
+            PrinterAddon.debug("Nothing placeable nearby: the nearest placeable block is {} ({} blocks away)",
+                    doable.getFirst().toShortString(), (int) Math.sqrt(doable.getFirst().distToCenterSqr(from)));
         }
 
         // Sweep from the most northern placeable row, so no holes are left behind

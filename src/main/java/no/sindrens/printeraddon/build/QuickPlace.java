@@ -119,9 +119,14 @@ public class QuickPlace {
                 player.setYRot(rotation[0]);
                 player.setXRot(rotation[1]);
                 for (Direction face : FACES) {
-                    Vec3 hit = Vec3.atCenterOf(pos).add(face.getStepX() * 0.5, face.getStepY() * 0.5, face.getStepZ() * 0.5);
+                    // Only a click a player could make: on the face of a real block next to the spot. Clicking the
+                    // empty spot itself ("air place") is what anticheats look for, and they cancel the block
+                    BlockPos against = pos.relative(face.getOpposite());
+                    if (!canClickAgainst(level, against)) {
+                        continue;
+                    }
                     BlockPlaceContext context = new BlockPlaceContext(player, InteractionHand.MAIN_HAND, stack.copy(),
-                            new BlockHitResult(hit, face, pos, false));
+                            hitFor(pos, face));
                     if (!context.getClickedPos().equals(pos) || !context.canPlace()) {
                         continue;
                     }
@@ -137,6 +142,38 @@ public class QuickPlace {
             player.setXRot(pitch);
         }
         return null;
+    }
+
+    /** The click that puts a block at {@code pos} with {@code face} as the clicked face: on the block behind it. */
+    private static BlockHitResult hitFor(BlockPos pos, Direction face) {
+        BlockPos against = pos.relative(face.getOpposite());
+        Vec3 hit = Vec3.atCenterOf(against).add(face.getStepX() * 0.5, face.getStepY() * 0.5, face.getStepZ() * 0.5);
+        return new BlockHitResult(hit, face, against, false);
+    }
+
+    /**
+     * A block a click can go against without anything else happening: solid, and not something that opens a menu or
+     * switches when clicked (those need sneaking, which the printer does; it places against them).
+     */
+    private static boolean canClickAgainst(Level level, BlockPos pos) {
+        BlockState state = level.getBlockState(pos);
+        if (state.isAir() || state.canBeReplaced() || !state.getFluidState().isEmpty()) {
+            return false;
+        }
+        net.minecraft.world.level.block.Block block = state.getBlock();
+        return !(block instanceof net.minecraft.world.level.block.BaseEntityBlock
+                || block instanceof net.minecraft.world.level.block.DoorBlock
+                || block instanceof net.minecraft.world.level.block.TrapDoorBlock
+                || block instanceof net.minecraft.world.level.block.FenceGateBlock
+                || block instanceof net.minecraft.world.level.block.LeverBlock
+                || block instanceof net.minecraft.world.level.block.ButtonBlock
+                || block instanceof net.minecraft.world.level.block.DiodeBlock
+                || block instanceof net.minecraft.world.level.block.NoteBlock
+                || block instanceof net.minecraft.world.level.block.CraftingTableBlock
+                || block instanceof net.minecraft.world.level.block.BedBlock
+                || block instanceof net.minecraft.world.level.block.AnvilBlock
+                || block instanceof net.minecraft.world.level.block.CakeBlock
+                || block instanceof RedStoneWireBlock);
     }
 
     private static final me.aleksilassila.litematica.printer.guides.Guides PRINTER_GUIDES = new me.aleksilassila.litematica.printer.guides.Guides();
@@ -244,8 +281,7 @@ public class QuickPlace {
             player.xRotO = way.pitch();
             player.connection.send(new ServerboundMovePlayerPacket.Rot(way.yaw(), way.pitch(), player.onGround(), player.horizontalCollision));
         }
-        Vec3 hit = Vec3.atCenterOf(next).add(way.face().getStepX() * 0.5, way.face().getStepY() * 0.5, way.face().getStepZ() * 0.5);
-        mc.gameMode.useItemOn(player, InteractionHand.MAIN_HAND, new BlockHitResult(hit, way.face(), next, false));
+        mc.gameMode.useItemOn(player, InteractionHand.MAIN_HAND, hitFor(next, way.face()));
         if (turned) {
             // Turn back: the printer doesn't always set both directions itself, and would use this one
             restoreView(player, oldYaw, oldPitch);
@@ -255,7 +291,8 @@ public class QuickPlace {
         AutoBuild.INSTANCE.stats.placed();
         PrinterAddon.debug("Placed {} at {} (click {}, look {}/{})", target.getBlock().getName().getString(),
                 next.toShortString(), way.face().getName(), (int) way.yaw(), (int) way.pitch());
-        cooldown = Math.max(1, Configs.Speed.printerInterval() - 1);
+        // As fast as the printer's tuned speed (not its starting interval)
+        cooldown = Math.max(1, AutoBuild.INSTANCE.speed.interval() - 1);
         return true;
     }
 
