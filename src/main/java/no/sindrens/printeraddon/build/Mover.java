@@ -373,6 +373,9 @@ public class Mover {
             doableCacheTick = tick;
         }
         return doableCache.computeIfAbsent(pos.immutable(), p -> {
+            if (AutoBuild.INSTANCE.givenUp(p)) {
+                return false;
+            }
             BlockCheck.Result result = BlockCheck.check(mc.level, schematic, p);
             if (result.needsBreaking() || result == BlockCheck.Result.PROTECTED) {
                 return true;

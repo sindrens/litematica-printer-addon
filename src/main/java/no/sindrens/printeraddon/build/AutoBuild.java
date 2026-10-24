@@ -54,7 +54,42 @@ public class AutoBuild {
         if (mc.level != null) {
             recentlyTried.put(pos.immutable(), clientTicks);
             speed.attempted();
+            // The same click again and again with nothing changing (the server refuses it): leave that block for a
+            // while instead of standing there; the player moves on and it's tried again later, from elsewhere
+            net.minecraft.world.level.block.state.BlockState now = mc.level.getBlockState(pos);
+            Tries tries = triesAt.get(pos);
+            if (tries == null || tries.state() != now || clientTicks - tries.since() > 20 * 30) {
+                triesAt.put(pos.immutable(), new Tries(now, 1, clientTicks));
+            } else if (tries.count() + 1 >= MAX_TRIES) {
+                triesAt.remove(pos);
+                givenUp.put(pos.immutable(), clientTicks + GIVE_UP_TICKS);
+                PrinterAddon.debug("The printer tried {} {} times and nothing changed (is {}): leaving it for 30 s",
+                        pos.toShortString(), MAX_TRIES, now.getBlock().getName().getString());
+            } else {
+                triesAt.put(pos.immutable(), new Tries(now, tries.count() + 1, tries.since()));
+            }
         }
+    }
+
+    private record Tries(net.minecraft.world.level.block.state.BlockState state, int count, long since) {
+    }
+
+    private static final int MAX_TRIES = 4;
+    private static final int GIVE_UP_TICKS = 20 * 30;
+    private final java.util.Map<net.minecraft.core.BlockPos, Tries> triesAt = new java.util.HashMap<>();
+    private final java.util.Map<net.minecraft.core.BlockPos, Long> givenUp = new java.util.HashMap<>();
+
+    /** True for a block the printer kept trying without anything changing (left alone for 30 s). */
+    public boolean givenUp(net.minecraft.core.BlockPos pos) {
+        Long until = givenUp.get(pos);
+        if (until == null) {
+            return false;
+        }
+        if (until < clientTicks) {
+            givenUp.remove(pos);
+            return false;
+        }
+        return true;
     }
     /** What the whole schematic still needs (item -> count), including what's in the inventory. */
     private final java.util.Map<net.minecraft.world.item.Item, Integer> neededWhole = new java.util.HashMap<>();
@@ -161,7 +196,7 @@ public class AutoBuild {
         long holdBack = Math.max(20, 2L * ServerLag.pingTicks(mc) + 6);
         recentlyTried.values().removeIf(at -> now - at > holdBack);
         for (net.minecraft.core.BlockPos pos : all) {
-            if (recentlyTried.containsKey(pos)) {
+            if (recentlyTried.containsKey(pos) || givenUp(pos)) {
                 continue;
             }
             forPrinter.add(pos);
@@ -541,6 +576,8 @@ public class AutoBuild {
         stats.start();
         speed.reset();
         recentlyTried.clear();
+        triesAt.clear();
+        givenUp.clear();
         nextBlock = null;
         breaker.reset();
         mover.reset();
