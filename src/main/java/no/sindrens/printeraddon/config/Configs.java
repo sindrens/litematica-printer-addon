@@ -21,7 +21,7 @@ import java.nio.file.Path;
 public class Configs implements IConfigHandler {
     private static final String CONFIG_FILE_NAME = PrinterAddon.MOD_ID + ".json";
     /** 2: the fastest automatic interval went from 2 to 1. */
-    private static final int CONFIG_VERSION = 3;
+    private static final int CONFIG_VERSION = 4;
 
     public static class Generic {
         public static final ConfigBoolean ADDON_ENABLED = new ConfigBoolean("addonEnabled", true,
@@ -138,11 +138,10 @@ public class Configs implements IConfigHandler {
                         + "that the game always connects), go on to the next layer and list them at the end to do by hand.\n"
                         + "Blocks you don't have the items for are waited for.",
                 "Skip unplaceable blocks after (seconds)");
-        public static final ConfigBoolean LAYERS_TOGETHER = new ConfigBoolean("buildLayersTogether", false,
+        public static final ConfigBoolean LAYERS_TOGETHER = new ConfigBoolean("buildLayersTogether", true,
                 "Build the layer above together with the one below when what goes there stands on the blocks below (seeds and\n"
                         + "stems on farmland, redstone dust on observers and pistons): placed right behind the block under them, in the\n"
-                        + "same lanes, instead of flying over the whole build again for them. Off: always one layer at a time.\n"
-                        + "Off by default for now: in a test the seeds waited for tilling that waited for water in the next lane.",
+                        + "same lanes, instead of flying over the whole build again for them. Off: always one layer at a time.",
                 "Build layers together");
         public static final ConfigBoolean EXTRA_BLOCKS_BLOCK_LAYER = new ConfigBoolean("extraBlocksBlockLayer", false,
                 "Count blocks where the schematic has air (terrain, stray blocks) as unfinished.\n"
@@ -436,6 +435,10 @@ public class Configs implements IConfigHandler {
                     if (back.equalsIgnoreCase("server skyblock, is go") || back.equalsIgnoreCase("server skyblock,is go")) {
                         Generic.BACK_COMMANDS.setValueFromString("server Skyblock");
                     }
+                }
+                if (version < 4) {
+                    // Two layers at once was off for a while until a stand-still it ran into was fixed (0.14.1)
+                    Layers.LAYERS_TOGETHER.setBooleanValue(true);
                 }
             }
         }

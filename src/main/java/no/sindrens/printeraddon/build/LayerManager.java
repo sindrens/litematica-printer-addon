@@ -803,8 +803,17 @@ public class LayerManager {
         return switch (result) {
             case OK -> false;
             case EXTRA -> extraCounts;
-            // Something that mustn't be broken where the schematic has air: one block too many, like EXTRA
-            case PROTECTED -> (extraCounts || !schematic.getBlockState(pos).isAir()) && !AutoBuild.INSTANCE.couldNotPlace.contains(pos);
+            // Something that mustn't be broken (a container, an unbreakable block) where the schematic wants another
+            // block: never done by the add-on, so it doesn't hold the layer up; listed at the end, to fix by hand (a
+            // hopper of the player's own where the redstone goes kept a layer waiting 30 s, and the build 20 s more).
+            // Where the schematic has air: one block too many, like EXTRA
+            case PROTECTED -> {
+                if (!schematic.getBlockState(pos).isAir()) {
+                    AutoBuild.INSTANCE.couldNotPlace.add(pos.immutable());
+                    yield false;
+                }
+                yield extraCounts && !AutoBuild.INSTANCE.couldNotPlace.contains(pos);
+            }
             case WRONG_BLOCK -> !AutoBuild.INSTANCE.isConflict(pos, result, level.getBlockState(pos))
                     && !AutoBuild.INSTANCE.couldNotPlace.contains(pos);
             default -> !AutoBuild.INSTANCE.couldNotPlace.contains(pos);

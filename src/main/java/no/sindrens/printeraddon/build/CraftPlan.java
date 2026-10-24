@@ -91,7 +91,10 @@ public final class CraftPlan {
         if ((item == Items.RAIL || item == Items.POWERED_RAIL) && sold.test(item)) {
             buy.merge(item, count, Integer::sum);
         } else if (Tools.isMarker(item)) {
-            diamondTool(item, count);
+            // Nothing bought for one the server won't craft (it goes on with the tools there are)
+            if (!Crafter.refused(item)) {
+                diamondTool(item, count);
+            }
         } else if (item == Items.RAIL) {
             int crafts = ceil(count, 16);
             ingot(Items.IRON_INGOT, Items.IRON_BLOCK, 6 * crafts);
@@ -149,6 +152,8 @@ public final class CraftPlan {
     private void diamondTool(Item tool, int count) {
         int diamonds = Tools.diamondsFor(tool) * count;
         int missing = diamonds - take(Items.DIAMOND, diamonds);
+        // What's left of a block of diamond crafted for the tool before (a pickaxe and a shovel took a block each)
+        missing -= spare(Items.DIAMOND, missing);
         if (missing > 0) {
             int blocks = ceil(missing, 9);
             int ownBlocks = take(Items.DIAMOND_BLOCK, blocks);
@@ -158,6 +163,7 @@ public final class CraftPlan {
             }
             if (ownBlocks > 0) {
                 craft.add(0, new Step(Items.DIAMOND, ownBlocks * 9));
+                spares.merge(Items.DIAMOND, Math.max(0, ownBlocks * 9 - missing), Integer::sum);
             }
         }
         sticks(2 * count);

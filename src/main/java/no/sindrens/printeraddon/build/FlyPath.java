@@ -387,6 +387,37 @@ public final class FlyPath {
             }
         }
         Collections.reverse(nodes);
+        // A little room from what's in the way: straight up half a block before the last place the player fits in
+        // front of it, and down half a block after it, where there's room (going up from right in front of a building
+        // the way along carried the player on into it, 10 bumps)
+        for (int i = 1; i < nodes.size(); ) {
+            if (nodes.get(i)[0] != nodes.get(i - 1)[0]) {
+                i++;
+                continue;
+            }
+            int start = i - 1;
+            int end = i;
+            while (end + 1 < nodes.size() && nodes.get(end + 1)[0] == nodes.get(start)[0]) {
+                end++;
+            }
+            int s = nodes.get(start)[0];
+            int yA = nodes.get(start)[1];
+            int yB = nodes.get(end)[1];
+            boolean alongBefore = start > 0 && nodes.get(start - 1)[0] == s - 1 && nodes.get(start - 1)[1] == yA;
+            boolean alongAfter = end + 1 < nodes.size() && nodes.get(end + 1)[0] == s + 1 && nodes.get(end + 1)[1] == yB;
+            int shift = yB > yA && alongBefore ? -1 : yB < yA && alongAfter ? 1 : 0;
+            int moved = s + shift;
+            boolean room = shift != 0 && moved >= 0 && moved < samples;
+            for (int y = Math.min(yA, yB); y <= Math.max(yA, yB) && room; y++) {
+                room = fits.applyAsInt(moved, y) == 1;
+            }
+            if (room) {
+                for (int k = start; k <= end; k++) {
+                    nodes.get(k)[0] = moved;
+                }
+            }
+            i = end + 1;
+        }
         List<Vec3> way = new ArrayList<>();
         for (int i = 1; i < nodes.size(); i++) {
             int[] at = nodes.get(i);

@@ -289,6 +289,14 @@ public class Mover {
     private int lastPlacementCount = -1;
     /** Held for blocks to place on the way for at most this long without anything being placed. */
     private static final int HOLD_LIMIT_TICKS = 30;
+    /** Held still on purpose with nothing placed for this long (and nothing else going on): it goes on (see fly). */
+    private static final int HOLD_GIVE_UP_TICKS = 60;
+    private long lastHoldNote = -1000;
+    /**
+     * The feet this little into the block below don't stand in it: hovering right on top of a layer is at 65.99999
+     * now and then instead of 66, or a little lower for a moment after coming down to it.
+     */
+    private static final double FEET_SLACK = 0.2;
     /** How fast to glide now (from what's in reach, see glideSpeed). */
     private double glideSpeed = GLIDE_MAX;
     private long lastRetarget;
@@ -490,6 +498,12 @@ public class Mover {
         }
 
         skipped.values().removeIf(until -> until < tick);
+        // When the printer last placed something, whichever way this tick goes on below (the waits count from it)
+        int placedCount = AutoBuild.INSTANCE.stats.totalPlaced();
+        if (placedCount != lastPlacementCount) {
+            lastPlacementCount = placedCount;
+            lastPlacementTick = tick;
+        }
 
         if (--ticksUntilScan <= 0) {
             ticksUntilScan = SCAN_INTERVAL;
@@ -499,7 +513,7 @@ public class Mover {
         }
 
         double reach = reach(player);
-        BlockPos feet = player.blockPosition();
+        BlockPos feet = BlockPos.containing(player.getX(), player.getY() + FEET_SLACK, player.getZ());
 
         // An errand (e.g. to a chest) comes before the building work
         if (errand != null) {
@@ -512,6 +526,8 @@ public class Mover {
                 return;
             }
             errandReached = false;
+            // At flying speed, not at the glide speed of the lane it left (0 while that waited for a block)
+            gliding = false;
             if (state != State.FLYING && state != State.WALKING) {
                 target = errand;
                 spotFor = null;
@@ -527,13 +543,16 @@ public class Mover {
             return;
         }
 
-        // Standing where a block still has to go: step aside first
-        if (reserved.contains(feet) || reserved.contains(feet.above())) {
+        // Standing where a block still has to go: step aside first, at flying speed. Not along a lane, which takes the
+        // player on from there by itself. A lane once stood still for good over the redstone under the feet (at 65.99999):
+        // it went on here with the glide speed it had waited with, 0, never worked out again
+        if (!laneFlight() && (reserved.contains(feet) || reserved.contains(feet.above()))) {
             if (state != State.WALKING && state != State.FLYING) {
                 PrinterAddon.debug("Standing in an unfinished spot {}, moving away", feet.toShortString());
                 spotFor = null;
                 plan(mc, player, feet, mode, reach);
             }
+            gliding = false;
             move(mc, player, mode);
             return;
         }
@@ -572,11 +591,6 @@ public class Mover {
             } else if (result != BlockCheck.Result.BUCKET || d <= bucketRange(mc) * bucketRange(mc)) {
                 inReach.add(pos);
             }
-        }
-        int placedCount = AutoBuild.INSTANCE.stats.totalPlaced();
-        if (placedCount != lastPlacementCount) {
-            lastPlacementCount = placedCount;
-            lastPlacementTick = tick;
         }
         // Never waiting for good on blocks the printer doesn't take: 3 s in reach, nothing placed, nothing else going
         // on (no breaking, no bucket, no lag), and they're left out for 30 s. A lane stood still for minutes on
@@ -1078,7 +1092,10 @@ public class Mover {
         laneRetryDistance = Double.MAX_VALUE;
         // What the lane takes: if the inventory won't last it, it's topped up first, not halfway along it
         AutoBuild.INSTANCE.beforeLane(laneItems(c, best.lo(), best.hi()));
-        laneApproach = player.position().distanceToSqr(laneHover(laneStart)) > 2.5 * 2.5;
+        // Flown to its start first when that's not right here, or not in the clear from here (over a wall: the lane
+        // itself stays at the hover height, a test lane went 10 up from its first block)
+        laneApproach = player.position().distanceToSqr(laneHover(laneStart)) > 2.5 * 2.5
+                || !FlyPath.clearAsFarAsKnown(player.level(), player.position(), laneHover(laneStart));
         flyAlongLane(player, laneApproach ? laneStart : laneEnd);
         BuildLog.line("SWEEP", "lane " + (laneIndex + 1) + " of " + lanes.size()
                 + (best.of() > 1 ? " (" + (lanesAlongX ? "x " : "z ") + best.lo() + " to " + best.hi() + " of it, "
@@ -2317,13 +2334,30 @@ public class Mover {
         }
         double speed = Math.min(cruise, Math.sqrt(2 * BRAKE * toEnd));
         if (flyIndex < flyPath.size() - 1 || flyLeg) {
-            speed = Math.min(speed, Math.sqrt(TURN_SPEED * TURN_SPEED + 2 * BRAKE * distance));
+            // Straight up or down from that turn (over a wall, right in front of it): nearly stopped there, so the way
+            // along doesn't carry on into the wall (a flight over a building bumped into it 10 times on the way up)
+            Vec3 after = flyIndex < flyPath.size() - 1 ? flyPath.get(flyIndex + 1) : null;
+            boolean upOrDown = after != null && Math.sqrt((after.x - waypoint.x) * (after.x - waypoint.x)
+                    + (after.z - waypoint.z) * (after.z - waypoint.z)) < 0.3 && Math.abs(after.y - waypoint.y) > 0.5;
+            double turn = upOrDown ? 0.05 : TURN_SPEED;
+            speed = Math.min(speed, Math.sqrt(turn * turn + 2 * BRAKE * distance));
         }
         speed = Math.min(speed, distance);
-        // Holding still on purpose (a block behind still to place): not stuck
+        // Holding still on purpose (a block behind still to place): not stuck. Never for good, though: nothing placed
+        // for 3 s and nothing else going on (no breaking, no bucket, no lag), it goes on slowly
         if (speed < 0.02) {
-            stuckTicks = 0;
-            lastDistance = distance;
+            if (tick - lastPlacementTick > HOLD_GIVE_UP_TICKS && !AutoBuild.INSTANCE.breaker.isBusy()
+                    && !AutoBuild.INSTANCE.fluids.isBusy() && !ServerLag.shouldWait(mc)) {
+                speed = Math.min(GLIDE_MIN, distance);
+                if (tick - lastHoldNote > 20 * 10) {
+                    lastHoldNote = tick;
+                    BuildLog.line("MOVE", "held still for 3 s with nothing placed (" + describe() + "): going on slowly to "
+                            + BlockPos.containing(flyTarget).toShortString());
+                }
+            } else {
+                stuckTicks = 0;
+                lastDistance = distance;
+            }
         }
 
         if (distance < lastDistance - 0.01) {
@@ -2361,6 +2395,20 @@ public class Mover {
         }
 
         Vec3 motion = distance > 1.0e-6 ? to.scale(speed / distance) : Vec3.ZERO;
+        // A little off the waypoint's height on a long level way (sunk a bit coming down to it): back to that height at
+        // once, not bit by bit over the whole way. A lane went 0.3 under the hover height for its whole length, the
+        // feet in the layer's row
+        double level = Math.sqrt(to.x * to.x + to.z * to.z);
+        if (Math.abs(to.y) < 0.5 && level > 1) {
+            motion = new Vec3(motion.x, Math.max(-0.1, Math.min(0.1, to.y * 0.4)), motion.z);
+        }
+        // Along a lane: on its line sideways too, at once (a lane laid right beside a wall drifted 0.2 off its line,
+        // grazed the wall and went 6 up it)
+        if (laneFlight() && !laneApproach) {
+            double off = lanesAlongX ? laneEnd.getZ() + 0.5 - player.getZ() : laneEnd.getX() + 0.5 - player.getX();
+            double side = Math.max(-0.1, Math.min(0.1, off * 0.4));
+            motion = lanesAlongX ? new Vec3(motion.x, motion.y, motion.z + side) : new Vec3(motion.x + side, motion.y, motion.z);
+        }
         if (player.horizontalCollision) {
             motion = new Vec3(motion.x, Math.max(motion.y, 0.3), motion.z);
         }

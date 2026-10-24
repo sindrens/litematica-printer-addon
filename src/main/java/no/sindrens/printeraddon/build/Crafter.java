@@ -92,25 +92,119 @@ public class Crafter {
     private int openedMenu = -1;
 
     /**
-     * Items the server gave nothing for, with the ingredients in the grid (a recipe it doesn't let the player craft:
-     * not unlocked, with limited crafting on): how many times. Twice, and it's not tried again on this server.
+     * Items the server gave nothing for, with the ingredients put in the grid by hand (a recipe it doesn't let the
+     * player craft: not unlocked, with limited crafting on): how many times, per server, kept from game to game. Twice
+     * in all, and the server counts as one that crafts only what's in the player's recipe book: nothing else is
+     * crafted (or bought for crafting) there. A log bought 2 blocks of diamond and a stack of logs for a pickaxe and a
+     * shovel the server then didn't give, as it hadn't given a stone shovel before.
      */
     private static final java.util.Map<Item, Integer> REFUSALS = new java.util.HashMap<>();
-    private static String refusalsServer = "";
+    @Nullable
+    private static String refusalsServer;
 
+    /** Not crafted here: the server crafts only what's in the recipe book (see REFUSALS), and this isn't in it. */
     public static boolean refused(Item item) {
-        Minecraft mc = Minecraft.getInstance();
-        String server = no.sindrens.printeraddon.util.ServerName.current(mc);
-        if (!server.equals(refusalsServer)) {
-            refusalsServer = server;
-            REFUSALS.clear();
+        loadRefusals();
+        int all = 0;
+        for (int count : REFUSALS.values()) {
+            all += count;
         }
-        return REFUSALS.getOrDefault(item, 0) >= 2;
+        return all >= 2 && !inRecipeBook(item);
     }
 
     /** Tries every recipe again (for tests). */
     public static void forgetRefusals() {
+        loadRefusals();
         REFUSALS.clear();
+        saveRefusals();
+    }
+
+    private static void refusedNow(Item item) {
+        loadRefusals();
+        REFUSALS.merge(item, 1, Integer::sum);
+        saveRefusals();
+    }
+
+    private static java.nio.file.Path refusalsFile() {
+        return fi.dy.masa.malilib.util.FileUtils.getConfigDirectory().resolve(PrinterAddon.MOD_ID).resolve("crafting-refused.txt");
+    }
+
+    /** This server's refusals from the file (once per server). Lines: server, item, count. */
+    private static void loadRefusals() {
+        String server = no.sindrens.printeraddon.util.ServerName.current(Minecraft.getInstance());
+        if (server.equals(refusalsServer)) {
+            return;
+        }
+        refusalsServer = server;
+        REFUSALS.clear();
+        try {
+            if (!java.nio.file.Files.isRegularFile(refusalsFile())) {
+                return;
+            }
+            for (String line : java.nio.file.Files.readAllLines(refusalsFile())) {
+                String[] parts = line.split("\t");
+                if (parts.length == 3 && parts[0].equals(server)) {
+                    net.minecraft.resources.Identifier id = net.minecraft.resources.Identifier.tryParse(parts[1]);
+                    if (id != null && net.minecraft.core.registries.BuiltInRegistries.ITEM.containsKey(id)) {
+                        REFUSALS.put(net.minecraft.core.registries.BuiltInRegistries.ITEM.getValue(id), Integer.parseInt(parts[2].trim()));
+                    }
+                }
+            }
+        } catch (Exception e) {
+            PrinterAddon.LOGGER.warn("Couldn't read the crafting refusals", e);
+        }
+    }
+
+    private static void saveRefusals() {
+        try {
+            List<String> lines = new java.util.ArrayList<>();
+            if (java.nio.file.Files.isRegularFile(refusalsFile())) {
+                for (String line : java.nio.file.Files.readAllLines(refusalsFile())) {
+                    if (!line.startsWith(refusalsServer + "\t")) {
+                        lines.add(line);
+                    }
+                }
+            }
+            REFUSALS.forEach((item, count) -> lines.add(refusalsServer + "\t"
+                    + net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(item) + "\t" + count));
+            java.nio.file.Files.createDirectories(refusalsFile().getParent());
+            java.nio.file.Files.write(refusalsFile(), lines);
+        } catch (Exception e) {
+            PrinterAddon.LOGGER.warn("Couldn't save the crafting refusals", e);
+        }
+    }
+
+    /** When each item was last looked for in the recipe book (client ticks), and the ones found. */
+    private static final java.util.Map<Item, Long> BOOK_CHECKED = new java.util.HashMap<>();
+    private static final java.util.Set<Item> IN_BOOK = new java.util.HashSet<>();
+
+    /** The player's recipe book has a crafting recipe that makes this (ingredients there or not); looked up every 10 s. */
+    private static boolean inRecipeBook(Item item) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null || mc.level == null) {
+            return false;
+        }
+        Long checked = BOOK_CHECKED.get(item);
+        if (checked != null && AutoBuild.clientTicks - checked < 200) {
+            return IN_BOOK.contains(item);
+        }
+        BOOK_CHECKED.put(item, AutoBuild.clientTicks);
+        IN_BOOK.remove(item);
+        var context = SlotDisplayContext.fromLevel(mc.level);
+        for (var collection : mc.player.getRecipeBook().getCollections()) {
+            for (RecipeDisplayEntry entry : collection.getRecipes()) {
+                RecipeDisplay display = entry.display();
+                if (!(display instanceof ShapedCraftingRecipeDisplay) && !(display instanceof ShapelessCraftingRecipeDisplay)) {
+                    continue;
+                }
+                List<ItemStack> results = entry.resultItems(context);
+                if (!results.isEmpty() && results.getFirst().is(item)) {
+                    IN_BOOK.add(item);
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /**
@@ -141,7 +235,9 @@ public class Crafter {
     /** Queues crafting {@code count} of {@code item} (ingredients must be in the inventory by the time it runs). */
     public void craft(Item item, int count) {
         if (count > 0 && refused(item)) {
-            BuildLog.line("CRAFT", "not crafting " + new ItemStack(item).getHoverName().getString() + ": this server gave nothing for it twice");
+            BuildLog.line("CRAFT", "not crafting " + new ItemStack(item).getHoverName().getString() + ": this server crafts only"
+                    + " what's in your recipe book (it gave nothing for " + REFUSALS.keySet().stream()
+                    .map(i -> new ItemStack(i).getHoverName().getString()).toList() + " by hand), and this isn't in it");
             return;
         }
         if (count > 0) {
@@ -317,13 +413,12 @@ public class Crafter {
                     if (waited > TIMEOUT / 2) {
                         if (count(player, job.item()) - startCount <= 0 && manual != null) {
                             // The ingredients are in the grid and the server shows no result: it won't craft this
-                            // (a stone shovel on the player's server, not in the recipe book either). First call:
-                            // forgets what was known for another server
-                            refused(job.item());
-                            REFUSALS.merge(job.item(), 1, Integer::sum);
+                            // (a stone shovel on the player's server, not in the recipe book either)
+                            refusedNow(job.item());
                             BuildLog.line("CRAFT", "the server gave nothing for " + new ItemStack(job.item()).getHoverName().getString()
                                     + " with its ingredients in the grid" + (refused(job.item())
-                                    ? " again (a recipe this server doesn't allow?): not tried again on this server" : ""));
+                                    ? " (this server crafts only what's in your recipe book): nothing else is crafted by hand"
+                                    + " on this server, from now on" : ""));
                         }
                         phase = Phase.CLEAR;
                     }

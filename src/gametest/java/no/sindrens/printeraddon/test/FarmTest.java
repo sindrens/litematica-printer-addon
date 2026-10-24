@@ -173,6 +173,12 @@ public class FarmTest implements FabricClientGameTest {
                 if (minInterval != null) {
                     Configs.Speed.AUTO_SPEED_MIN_INTERVAL.setIntegerValue(Integer.parseInt(minInterval));
                 }
+                // PRINTER_ADDON_TOGETHER=0: one layer at a time (two at once where the upper one stands on the lower one
+                // is the default)
+                String together = System.getenv("PRINTER_ADDON_TOGETHER");
+                if (together != null) {
+                    Configs.Layers.LAYERS_TOGETHER.setBooleanValue(!together.equals("0"));
+                }
                 AutoBuild.INSTANCE.start(mc);
             });
 
