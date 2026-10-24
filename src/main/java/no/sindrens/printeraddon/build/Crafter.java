@@ -41,7 +41,24 @@ public class Crafter {
     private static final int WAIT = 6;
     private static final int TIMEOUT = 60;
 
-    private enum Phase { FIND, PLACE_TABLE, OPEN_TABLE, WAIT_OPEN, FILL, TAKE, CLEAR, CLOSE }
+    private enum Phase { FIND, COMMAND, PLACE_TABLE, OPEN_TABLE, WAIT_OPEN, FILL, TAKE, CLEAR, CLOSE }
+
+    /** The craft command didn't open anything (no permission): not used again this session. */
+    private static boolean craftCommandBroken;
+    private boolean usedCommand;
+
+    /** A crafting table can be opened anywhere with the server's craft command (switched on, and it works). */
+    public static boolean craftCommand() {
+        return no.sindrens.printeraddon.config.Configs.Shop.USE_CRAFT_COMMAND.getBooleanValue() && !craftCommandBroken;
+    }
+
+    /** Where a recipe that needs a crafting table is done: one in reach, else the craft command, else one placed. */
+    private Phase tablePhase(Minecraft mc) {
+        table = findTable(mc);
+        placedTable = false;
+        usedCommand = false;
+        return table != null ? Phase.OPEN_TABLE : craftCommand() ? Phase.COMMAND : Phase.PLACE_TABLE;
+    }
 
     /** Recipe clicks per fill (one set each); more sets get crafted in the next round. */
     private static final int MAX_SETS_PER_FILL = 16;
@@ -120,9 +137,7 @@ public class Crafter {
                             phase = Phase.FILL;
                             return true;
                         }
-                        table = findTable(mc);
-                        placedTable = false;
-                        phase = table != null ? Phase.OPEN_TABLE : Phase.PLACE_TABLE;
+                        phase = tablePhase(mc);
                         return true;
                     }
                     // The recipe book or the inventory may still be updating after a purchase: a few more tries
@@ -138,9 +153,13 @@ public class Crafter {
                     phase = Phase.FILL;
                     return true;
                 }
-                table = findTable(mc);
-                placedTable = false;
-                phase = table != null ? Phase.OPEN_TABLE : Phase.PLACE_TABLE;
+                phase = tablePhase(mc);
+            }
+            case COMMAND -> {
+                player.connection.sendCommand(no.sindrens.printeraddon.config.Configs.Shop.CRAFT_COMMAND.getStringValue());
+                usedCommand = true;
+                waited = 0;
+                phase = Phase.WAIT_OPEN;
             }
             case PLACE_TABLE -> {
                 BlockPos spot = tableSpot(mc);
@@ -175,7 +194,20 @@ public class Crafter {
             case WAIT_OPEN -> {
                 if (player.containerMenu instanceof CraftingMenu) {
                     phase = Phase.FILL;
-                } else if (waited > TIMEOUT) {
+                } else if (waited > TIMEOUT + 2 * ServerLag.pingTicks(mc)) {
+                    if (usedCommand) {
+                        // No permission (or no such command): a crafting table from now on
+                        craftCommandBroken = true;
+                        Chat.warn("/" + no.sindrens.printeraddon.config.Configs.Shop.CRAFT_COMMAND.getStringValue()
+                                + " didn't open a crafting table: using a crafting table instead (switch 'Craft with /craft' off to skip this).");
+                        BuildLog.line("CRAFT", "the craft command didn't open a crafting table: not used again this session");
+                        if (mc.gui.screen() != null) {
+                            player.closeContainer();
+                        }
+                        phase = tablePhase(mc);
+                        waited = 0;
+                        return true;
+                    }
                     fail(mc, "the crafting table didn't open");
                 }
             }

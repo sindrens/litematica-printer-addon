@@ -47,6 +47,20 @@ public class LayerManager {
     private boolean finishingDeferred;
     private boolean retriedSkipped;
 
+    /**
+     * Layers that are finished (or that the build went past, their leftovers waiting until the end): never read
+     * again to find where to go on, only checked in the background (see {@link #checked}). Saved with the blocks
+     * left out (see BuildProgress), so a restart goes on at the first layer not in here.
+     */
+    private final java.util.Set<Integer> doneLayers = new java.util.TreeSet<>();
+    private int checksSinceSave;
+    /** The whole build is finished: nothing to save for next time. */
+    private boolean buildFinished;
+    /** Leftovers that are fine on a layer the build went past: this many, or 1 in 100 of its blocks. */
+    private static final int PASSED_LEFTOVERS = 64;
+    /** A finished layer missing more than this is built again; fewer are placed when the player is near them. */
+    private static final int RECHECK_DEFER_LIMIT = 64;
+
     /** Litematica's layer settings before auto build, put back afterwards. */
     @Nullable
     private LayerMode previousMode;
@@ -86,18 +100,67 @@ public class LayerManager {
 
         minY = range[0];
         maxY = range[1];
-        layer = minY;
-
-        while (layer <= maxY && scan(mc.level, schematic, areas, layer, null) == 0) {
-            layer++;
+        buildFinished = false;
+        checksSinceSave = 0;
+        doneLayers.clear();
+        // Where this build was (finished layers, blocks left out): no need to read the finished layers again first
+        long started = System.nanoTime();
+        BuildProgress.Saved saved = BuildProgress.load(mc);
+        if (saved != null) {
+            for (int y : saved.done()) {
+                if (y >= minY && y <= maxY) {
+                    doneLayers.add(y);
+                }
+            }
+            AutoBuild.INSTANCE.couldNotPlace.addAll(saved.skipped());
+            AutoBuild.INSTANCE.deferred.addAll(saved.deferred());
+            if (doneLayers.size() == maxY - minY + 1) {
+                // Saved as all done: read everything again (something may have been broken since)
+                doneLayers.clear();
+            }
         }
+        int fromSave = doneLayers.size();
+        int passed = 0;
+        int leftovers = 0;
+        layer = minY;
+        java.util.Map<Integer, LayerScan> scans = new java.util.HashMap<>();
+        while (layer <= maxY) {
+            if (doneLayers.contains(layer)) {
+                layer++;
+                continue;
+            }
+            LayerScan here = scans.computeIfAbsent(layer, y -> LayerScan.of(mc.level, schematic, areas, y, 20000));
+            if (here.unfinished == 0 && here.unloaded == 0) {
+                doneLayers.add(layer++);
+                continue;
+            }
+            // A few left (or a part that isn't loaded) on a layer the build already went past (blocks it left out
+            // before a restart): they wait until the end, the build goes on where it was
+            if (layer < maxY && here.unfinished <= Math.max(PASSED_LEFTOVERS, here.blocks / 100)) {
+                LayerScan above = scans.computeIfAbsent(layer + 1, y -> LayerScan.of(mc.level, schematic, areas, y, 20000));
+                if (above.placed >= Math.max(16, above.blocks / 100)) {
+                    AutoBuild.INSTANCE.deferred.addAll(here.positions);
+                    leftovers += here.unfinished;
+                    passed++;
+                    doneLayers.add(layer++);
+                    continue;
+                }
+            }
+            break;
+        }
+        BuildLog.line("LAYER", String.format("start: %d layers known as done from the saved progress, %d read and done, %d gone past"
+                        + " (%d blocks left there wait until the end); going on at Y %d | %.1f ms | %d left out from before",
+                fromSave, doneLayers.size() - fromSave - passed, passed, leftovers, layer, (System.nanoTime() - started) / 1e6,
+                AutoBuild.INSTANCE.couldNotPlace.size()));
 
         if (layer > maxY) {
             Chat.info("Every layer is already finished.");
             return false;
         }
         if (layer > minY) {
-            Chat.info("Layers Y " + minY + " to " + (layer - 1) + " are already done: going on at Y " + layer + ".");
+            Chat.info("Layers Y " + minY + " to " + (layer - 1) + " are already done: going on at Y " + layer
+                    + (fromSave > 0 ? " (from where it was last time; the done layers are checked again while it builds)" : "")
+                    + (leftovers > 0 ? ", " + leftovers + " block" + (leftovers == 1 ? "" : "s") + " left on them are done at the end" : "") + ".");
         }
 
         layerTop = topFor(mc.level, schematic, areas, layer);
@@ -146,12 +209,74 @@ public class LayerManager {
     }
 
     public void stop() {
+        if (active && !buildFinished) {
+            saveProgress(Minecraft.getInstance());
+        }
         finishingDeferred = false;
         retriedSkipped = false;
         if (active) {
             restoreLayerRange();
         }
         active = false;
+    }
+
+    /** A finished layer (or one the build went past). */
+    public boolean isDone(int y) {
+        return active && doneLayers.contains(y);
+    }
+
+    private void saveProgress(Minecraft mc) {
+        checksSinceSave = 0;
+        if (mc.player == null || SchematicHelper.world() == null) {
+            return;
+        }
+        BuildProgress.save(mc, doneLayers, AutoBuild.INSTANCE.couldNotPlace, AutoBuild.INSTANCE.deferred);
+    }
+
+    /** The build is finished: the saved progress is removed (next time everything is read again). */
+    private void finished(Minecraft mc) {
+        buildFinished = true;
+        BuildProgress.forget(mc);
+    }
+
+    /**
+     * A finished layer was read again in the background (see AutoBuild#updateMissingWhole) and these blocks are
+     * missing there (broken since, or never placed before a restart). A few: placed when the player is near them
+     * (like the blocks that waited for something above). Many: that layer is built again first.
+     */
+    public void checked(Minecraft mc, int y, List<BlockPos> missing) {
+        if (!active || finishingDeferred || !doneLayers.contains(y) || y >= layer || missing.isEmpty()) {
+            return;
+        }
+        List<BlockPos> fresh = new ArrayList<>();
+        for (BlockPos pos : missing) {
+            if (!AutoBuild.INSTANCE.couldNotPlace.contains(pos) && !AutoBuild.INSTANCE.deferred.contains(pos)) {
+                fresh.add(pos);
+            }
+        }
+        if (fresh.isEmpty()) {
+            return;
+        }
+        StringBuilder examples = new StringBuilder();
+        for (BlockPos pos : fresh.subList(0, Math.min(5, fresh.size()))) {
+            examples.append(pos.toShortString()).append("; ");
+        }
+        if (fresh.size() <= RECHECK_DEFER_LIMIT) {
+            AutoBuild.INSTANCE.deferred.addAll(fresh);
+            BuildLog.line("VERIFY", "Layer Y " + y + " (done) has " + fresh.size() + " block" + (fresh.size() == 1 ? "" : "s")
+                    + " missing: placed when the player is near them | " + examples);
+            Chat.detail("Layer Y " + y + ": " + fresh.size() + " block" + (fresh.size() == 1 ? "" : "s")
+                    + " missing there, placed on the way.");
+            return;
+        }
+        BuildLog.line("VERIFY", "Layer Y " + y + " (done) has " + fresh.size() + " blocks missing: building it again first | " + examples);
+        Chat.warn("Layer Y " + y + " is missing " + fresh.size() + " blocks (broken, or not placed before): building it again first.");
+        doneLayers.remove(y);
+        layer = y;
+        layerTop = y;
+        applyLayer();
+        resetProgress();
+        saveProgress(mc);
     }
 
     /** The player's own layer view from before auto build changed it, as text (for the resume file). */
@@ -245,18 +370,27 @@ public class LayerManager {
         }
 
         if (remaining == 0) {
-            // Check twice in a row so a block the server hasn't confirmed yet doesn't count
+            // Check twice in a row so a block the server hasn't confirmed yet doesn't count: the second time as
+            // soon as the server's answer is surely there (not a whole check interval later: that was 2 s per layer)
             if (++completeChecks < 2) {
+                ticksUntilCheck = Math.max(10, 2 * ServerLag.pingTicks(mc) + 6);
                 return true;
             }
 
             Chat.info(describeLayers() + " done.");
             AutoBuild.INSTANCE.stats.layerDone(describeLayers());
             AutoBuild.INSTANCE.speed.newLayer();
+            for (int y = layer; y <= layerTop; y++) {
+                doneLayers.add(y);
+            }
             layer = layerTop;
             do {
                 layer++;
-            } while (layer <= maxY && scan(mc.level, schematic, areas, layer, null) == 0);
+                if (layer <= maxY && !doneLayers.contains(layer) && scan(mc.level, schematic, areas, layer, null) == 0) {
+                    doneLayers.add(layer);
+                }
+            } while (layer <= maxY && doneLayers.contains(layer));
+            saveProgress(mc);
 
             if (layer > maxY) {
                 if (!retriedSkipped && !AutoBuild.INSTANCE.couldNotPlace.isEmpty()) {
@@ -277,6 +411,7 @@ public class LayerManager {
                 Chat.announce("Build finished", "everything in the schematic is placed", true);
                 Chat.info(AutoBuild.INSTANCE.stats.total());
                 reportUnfinished(mc, schematic);
+                finished(mc);
                 stop();
                 return false;
             }
@@ -288,6 +423,10 @@ public class LayerManager {
         }
 
         completeChecks = 0;
+        // Where the build is, on disk now and then (a crash or a lost connection doesn't lose it)
+        if (++checksSinceSave >= 5) {
+            saveProgress(mc);
+        }
 
         int placed = AutoBuild.INSTANCE.stats.totalPlaced();
         if (remaining != lastRemaining || placed != lastPlaced) {
@@ -317,10 +456,11 @@ public class LayerManager {
         List<BlockPos> left = unfinishedDeferred(mc.level, schematic);
         if (left.isEmpty()) {
             Chat.info("\u00a7aBuild finished!");
-                Chat.announce("Build finished", "everything in the schematic is placed", true);
+            Chat.announce("Build finished", "everything in the schematic is placed", true);
             AutoBuild.INSTANCE.stats.layerDone("Last blocks");
             Chat.info(AutoBuild.INSTANCE.stats.total());
             reportUnfinished(mc, schematic);
+            finished(mc);
             stop();
             return false;
         }
@@ -385,7 +525,7 @@ public class LayerManager {
         Chat.actionBar(describeLayers());
     }
 
-    private String describeLayers() {
+    public String describeLayers() {
         return layerTop == layer ? "Layer Y " + layer : "Layers Y " + layer + "-" + layerTop;
     }
 
@@ -422,6 +562,7 @@ public class LayerManager {
         if (min > layer) {
             for (int y = layer; y <= Math.min(layerTop, min - 1); y++) {
                 collectUnfinished(mc.level, schematic, areas, y, left);
+                doneLayers.add(y);
             }
             AutoBuild.INSTANCE.deferred.addAll(left);
         }
@@ -760,5 +901,49 @@ public class LayerManager {
         }
 
         return remaining;
+    }
+
+    /** One layer read for the start: what's left (in the parts that are loaded), not loaded, placed. */
+    private static final class LayerScan {
+        int unfinished;
+        int unloaded;
+        int placed;
+        /** Blocks of the layer in the loaded parts (not air in the schematic). */
+        int blocks;
+        final List<BlockPos> positions = new ArrayList<>();
+
+        static LayerScan of(Level level, WorldSchematic schematic, List<SchematicHelper.Area> areas, int y, int keep) {
+            LayerScan scan = new LayerScan();
+            boolean extraCounts = Configs.Layers.EXTRA_BLOCKS_BLOCK_LAYER.getBooleanValue();
+            BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+            for (SchematicHelper.Area area : areas) {
+                if (y < area.minY() || y > area.maxY()) {
+                    continue;
+                }
+                for (int x = area.minX(); x <= area.maxX(); x++) {
+                    for (int z = area.minZ(); z <= area.maxZ(); z++) {
+                        pos.set(x, y, z);
+                        BlockCheck.Result result = BlockCheck.check(level, schematic, pos);
+                        if (result == BlockCheck.Result.UNLOADED) {
+                            scan.unloaded++;
+                            continue;
+                        }
+                        boolean block = !schematic.getBlockState(pos).isAir();
+                        if (block) {
+                            scan.blocks++;
+                        }
+                        if (unfinished(level, pos, result, extraCounts)) {
+                            scan.unfinished++;
+                            if (scan.positions.size() < keep) {
+                                scan.positions.add(pos.immutable());
+                            }
+                        } else if (block && result == BlockCheck.Result.OK) {
+                            scan.placed++;
+                        }
+                    }
+                }
+            }
+            return scan;
+        }
     }
 }

@@ -125,6 +125,10 @@ public class InteractActionMixin {
 
     @Inject(method = "interact", at = @At("RETURN"))
     private void printer_addon$lookBack(Minecraft client, LocalPlayer player, InteractionHand hand, BlockHitResult hit, CallbackInfo ci) {
+        if (client.level != null) {
+            // The click went out with this sequence number: the server answers it when it's done (see ServerAcks)
+            no.sindrens.printeraddon.build.ServerAcks.clicked(((ClientLevelAccessor) client.level).printer_addon$predictions().currentSequence());
+        }
         if (printer_addon$sneaked) {
             // Back to what the keyboard says
             printer_addon$sneaked = false;

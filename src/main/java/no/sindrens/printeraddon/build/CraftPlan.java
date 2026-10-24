@@ -38,7 +38,25 @@ public final class CraftPlan {
 
     /** True for items this plans (everything else is simply bought). */
     public static boolean crafted(Item item) {
-        return item == Items.RAIL || item == Items.POWERED_RAIL || item == Items.PUMPKIN_SEEDS || item == Items.DIAMOND_HOE;
+        return item == Items.RAIL || item == Items.POWERED_RAIL || item == Items.PUMPKIN_SEEDS || item == Items.DIAMOND_HOE
+                || item == Items.REDSTONE;
+    }
+
+    /** What else an item can be made from (to look for in storage too): pumpkins for seeds, blocks for dust. */
+    @javax.annotation.Nullable
+    public static Item madeFrom(Item item) {
+        if (item == Items.PUMPKIN_SEEDS) {
+            return Items.PUMPKIN;
+        }
+        if (item == Items.REDSTONE) {
+            return Items.REDSTONE_BLOCK;
+        }
+        return null;
+    }
+
+    /** How many of {@link #madeFrom} make this many (rounded up). */
+    public static int madeFromCount(Item item, int count) {
+        return item == Items.PUMPKIN_SEEDS ? ceil(count, 4) : item == Items.REDSTONE ? ceil(count, 9) : 0;
     }
 
     /**
@@ -91,6 +109,22 @@ public final class CraftPlan {
             redstone(crafts);
             needsTable = true;
             craft.add(new Step(Items.POWERED_RAIL, crafts * 6));
+        } else if (item == Items.REDSTONE) {
+            // Dust: from the player's own redstone blocks first (9 each), then bought; as blocks when the shop
+            // doesn't sell dust or couldn't deliver it, or blocks cost less per dust, or crafting is preferred
+            int own = take(Items.REDSTONE_BLOCK, ceil(count, 9));
+            if (own > 0) {
+                craft.add(new Step(Items.REDSTONE, own * 9));
+            }
+            int missing = count - own * 9;
+            if (missing > 0) {
+                if (sold.test(Items.REDSTONE_BLOCK) && (!sold.test(Items.REDSTONE) || blocksBetter(Items.REDSTONE, Items.REDSTONE_BLOCK, 9))) {
+                    buy.merge(Items.REDSTONE_BLOCK, ceil(missing, 9), Integer::sum);
+                    craft.add(new Step(Items.REDSTONE, ceil(missing, 9) * 9));
+                } else {
+                    buy.merge(Items.REDSTONE, missing, Integer::sum);
+                }
+            }
         } else if (item == Items.PUMPKIN_SEEDS) {
             // Seeds are crafted from pumpkins (4 each): the player's own pumpkins (or from storage) first, then bought
             // pumpkins. Seeds are only bought when the shop has no pumpkins
@@ -143,6 +177,19 @@ public final class CraftPlan {
             buy.merge(Items.REDSTONE_BLOCK, ceil(missing, 9), Integer::sum);
             craft.add(0, new Step(Items.REDSTONE, ceil(missing, 9) * 9));
         }
+    }
+
+    /**
+     * Whether to buy the block form ({@code per} items each) rather than the item itself: when that's set (fewer
+     * purchases), or the blocks cost less per item in the shop scan.
+     */
+    private boolean blocksBetter(Item item, Item block, int per) {
+        if (no.sindrens.printeraddon.config.Configs.Shop.PREFER_BLOCKS.getBooleanValue()) {
+            return true;
+        }
+        Double itemPrice = no.sindrens.printeraddon.shop.ShopBuyer.price(Minecraft.getInstance(), item);
+        Double blockPrice = no.sindrens.printeraddon.shop.ShopBuyer.price(Minecraft.getInstance(), block);
+        return itemPrice != null && blockPrice != null && blockPrice / per < itemPrice;
     }
 
     /** Sticks: from the inventory, else crafted from planks (2 planks make 4). */

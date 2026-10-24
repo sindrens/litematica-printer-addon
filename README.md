@@ -10,16 +10,31 @@ Litematica Printer does the placing; the add-on builds whole schematics in survi
   at once), never so fast that a block behind leaves the reach, and on to the next spot before it's even there.
   Speeding up, braking and turns are smooth; the printer only waits while it flies faster than a slow walk.
 - **Automatic speed, per kind of block:** every kind (seeds, mud, pistons...) gets its own printer interval: it
-  starts at your interval, goes faster while that kind comes out right (down to interval 1) and slows down at the
-  first wrong one. Switching items that came out wrong once is done slower after. All of it is remembered per
+  starts at your interval, goes faster while that kind comes out right (down to interval 1) and one tick slower at
+  the first wrong one. Switching items that came out wrong once is done slower after. All of it is remembered per
   server (`config/printer_addon/speed-blocks.txt`) for the next build. Only the printer's own clicks count (stems
   growing, other players building don't).
+- **Waits for the server's answer, not a fixed time:** the server confirms every click; a spot that was just
+  clicked, and the spots next to it, wait exactly until it has. On a fast server that's shorter than before, and in
+  a lag spike longer (a piston clicked against an observer the server had thrown out used to land in its spot).
 - **Gets the items:** takes them from your vaults (`/pv 1`, `/pv 2`...) and the chests, barrels and shulker boxes
-  you linked (no other chest is ever opened), then buys the rest in `/shop` (ShopGUI+), several stacks per purchase
-  with the buy screen's "Purchase stacks" (a stack at a time if that screen isn't understood), and crafts rails, powered rails, a diamond hoe and pumpkin
-  seeds from iron and gold blocks, diamonds, logs, redstone and pumpkins (seeds: always pumpkins bought and
-  crafted, a stack at a time; seeds only bought if the shop has no pumpkins). Only what the current layer needs is bought; leftovers go
-  back into the linked chests when the inventory gets full.
+  you linked (no other chest is ever opened), then buys the rest in `/shop` (ShopGUI+), whole stacks per purchase
+  with the buy screen's "Purchase stacks" (a stack at a time if that screen isn't understood, tried again after 10
+  minutes), and crafts rails, powered rails, a diamond hoe, pumpkin seeds and redstone dust from iron and gold
+  blocks, diamonds, logs, redstone blocks and pumpkins (seeds: always pumpkins bought and crafted; dust: bought as
+  dust when that's cheaper, from redstone blocks when the shop can't deliver dust or "Buy blocks and craft them back"
+  is on). Uses `/craft` for recipes that need a crafting table and `/feed` when hungry (both can be switched off,
+  and fall back by themselves when you don't have the permission). A purchase that fails is tried again a few
+  minutes later instead of never.
+- **Shares the inventory between the layer's items:** each gets a part of the free slots in proportion to how many
+  it still needs (as many pistons as observers: half each), so they run out together and one trip tops them all up
+  (it used to fill everything with the one item that ran out first, then go back for the other one five times).
+  What the layer doesn't need stays until the room is needed, then goes into storage (the next layer may need it).
+- **Fast restart, also with 50+ layers:** what's finished (layers, blocks left out) is kept per server and
+  schematic in `config/printer_addon/progress/`; after a restart it goes on at the first unfinished layer at once
+  (no flying around to check a corner that isn't loaded, no going back for blocks it had left out). The finished
+  layers are checked again in the background while it builds: a few missing blocks are placed on the way, many and
+  that layer is built again first. The whole schematic is read in small pieces, so starting never freezes the game.
 - **Litematica Printer places everything.** The add-on moves, breaks wrong blocks, gets the items and sets the
   printer's own settings (it starts at your interval, keeps your range). It doesn't place blocks itself; the
   optional "Add-on places blocks itself" (buckets, rails, minecarts) is off by default.
@@ -47,6 +62,9 @@ are kept; `J`+`B` → "Open build logs folder"). Send it when something goes wro
 | `TURNS` | Every second: what the printer's turns went to (placed, paused and why, nothing in reach...), how many blocks the mover and the printer see in reach, what the player does and where |
 | `SCAN`, `LAYER`, `SNAP`, `STUCK`, `WAIT` | What's left to do, what waits for items, what isn't loaded; every 5 s a summary; when nothing is placed for a while, the nearest unfinished blocks and why |
 | `LEARN`, `PERF` | What it learned about the reach on this server; how many ms each part of the add-on took |
+| `PLAN` (inventory) | How the inventory is shared: each item held/target, the building slots, what a trip gets, what's put away to make room |
+| `STORAGE`, `SHOP`, `CRAFT`, `EAT` | Every vault/chest opened (what it was for, what was taken or put away, what's left in it, closed by you and opened again), every shop purchase and the screen when one fails, the craft and feed commands |
+| `VERIFY` | Finished layers checked again in the background: blocks missing there and what's done about it |
 | `step`, `detail`, `info`, `WARN` | Everything else it does or says |
 
 ## Install

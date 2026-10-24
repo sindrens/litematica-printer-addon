@@ -55,6 +55,52 @@ public final class SchematicHelper {
         return areas;
     }
 
+    /**
+     * Every kind of block in the enabled placements, straight from the schematics' palettes (instant: no world or
+     * schematic world reading, so it's complete before the first block is looked at).
+     */
+    public static java.util.Set<net.minecraft.world.level.block.Block> blockKinds() {
+        java.util.Set<net.minecraft.world.level.block.Block> kinds = new java.util.HashSet<>();
+        for (SchematicPlacement placement : DataManager.getSchematicPlacementManager().getAllSchematicsPlacements()) {
+            if (!placement.isEnabled() || placement.getSchematic() == null) {
+                continue;
+            }
+            try {
+                for (String region : placement.getSchematic().getAreas().keySet()) {
+                    var container = placement.getSchematic().getSubRegionContainer(region);
+                    if (container == null || container.getPalette() == null) {
+                        continue;
+                    }
+                    var palette = container.getPalette();
+                    for (int id = 0; id < palette.getPaletteSize(); id++) {
+                        net.minecraft.world.level.block.state.BlockState state = palette.getBlockState(id);
+                        if (state != null && !state.isAir()) {
+                            kinds.add(state.getBlock());
+                        }
+                    }
+                }
+            } catch (RuntimeException e) {
+                no.sindrens.printeraddon.PrinterAddon.debug("Couldn't read the palette of {}: {}", placement.getName(), e.toString());
+            }
+        }
+        return kinds;
+    }
+
+    /** What's placed where (names, files, origins, rotations, boxes): a different value is a different build. */
+    public static String fingerprint() {
+        StringBuilder sb = new StringBuilder();
+        for (SchematicPlacement placement : DataManager.getSchematicPlacementManager().getAllSchematicsPlacements()) {
+            if (!placement.isEnabled()) {
+                continue;
+            }
+            java.nio.file.Path file = placement.getSchematicFile();
+            sb.append(placement.getName()).append('@').append(file == null ? "-" : file.getFileName())
+                    .append('@').append(placement.getOrigin().toShortString()).append('@').append(placement.getRotation())
+                    .append('@').append(placement.getMirror()).append(';');
+        }
+        return sb.append(areas()).toString();
+    }
+
     public static boolean isInAnyArea(List<Area> areas, BlockPos pos) {
         for (Area area : areas) {
             if (area.contains(pos)) {

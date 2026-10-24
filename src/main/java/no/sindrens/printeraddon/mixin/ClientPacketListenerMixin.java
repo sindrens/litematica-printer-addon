@@ -1,6 +1,7 @@
 package no.sindrens.printeraddon.mixin;
 
 import net.minecraft.client.multiplayer.ClientPacketListener;
+import net.minecraft.network.protocol.game.ClientboundBlockChangedAckPacket;
 import net.minecraft.network.protocol.game.ClientboundSetTimePacket;
 import no.sindrens.printeraddon.build.ServerLag;
 import org.spongepowered.asm.mixin.Mixin;
@@ -15,5 +16,11 @@ public class ClientPacketListenerMixin {
     @Inject(method = "handleSetTime", at = @At("TAIL"))
     private void printer_addon$measureLag(ClientboundSetTimePacket packet, CallbackInfo ci) {
         ServerLag.onTime(packet.gameTime());
+    }
+
+    /** The server has done the clicks up to this sequence number (see ServerAcks). */
+    @Inject(method = "handleBlockChangedAck", at = @At("TAIL"))
+    private void printer_addon$clicksDone(ClientboundBlockChangedAckPacket packet, CallbackInfo ci) {
+        no.sindrens.printeraddon.build.ServerAcks.acked(packet.sequence());
     }
 }

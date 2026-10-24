@@ -35,12 +35,20 @@ public class InventoryCleaner {
     private static final Set<Item> CRAFTING_LEFTOVERS = Set.of(Items.DIAMOND, Items.DIAMOND_BLOCK, Items.STICK,
             Items.IRON_INGOT, Items.IRON_BLOCK, Items.GOLD_INGOT, Items.GOLD_BLOCK, Items.REDSTONE_BLOCK, Items.OAK_LOG,
             Items.OAK_PLANKS, Items.PUMPKIN);
-    private int lastLayer = Integer.MIN_VALUE;
-    private boolean storeOffLayer;
 
     /**
      * Building materials and crafting leftovers in the inventory that the current layer doesn't need (also not to
-     * craft something it needs). Never tools, food or anything else.
+     * craft something it needs): what may go into storage when the layer's items need the room. Never tools, food or
+     * anything else.
+     */
+    public Set<Item> storable(Inventory inventory) {
+        return offLayer(inventory);
+    }
+
+    /**
+     * Building materials and crafting leftovers in the inventory that the current layer doesn't need (also not to
+     * craft something it needs). Never tools, food or anything else. Blocks of this schematic count as its materials
+     * also when nothing needs them any more (left over from a finished layer, after a restart).
      */
     private Set<Item> offLayer(Inventory inventory) {
         Map<Item, Integer> layerNeeds = AutoBuild.INSTANCE.layers.layerNeeds();
@@ -60,16 +68,19 @@ public class InventoryCleaner {
             ItemStack stack = inventory.getItem(slot);
             Item item = stack.getItem();
             if (!stack.isEmpty() && !stack.isDamageableItem() && !keep.contains(item)
-                    && (materials.contains(item) || CRAFTING_LEFTOVERS.contains(item))) {
+                    && (materials.contains(item) || CRAFTING_LEFTOVERS.contains(item) || isSchematicBlock(item))) {
                 off.add(item);
             }
         }
         return off;
     }
 
+    private static boolean isSchematicBlock(Item item) {
+        return item instanceof net.minecraft.world.item.BlockItem block
+                && AutoBuild.INSTANCE.schematicBlocks.contains(block.getBlock());
+    }
+
     public void reset() {
-        lastLayer = Integer.MIN_VALUE;
-        storeOffLayer = false;
         materials.clear();
         cooldown = 0;
         sinceStored = Integer.MAX_VALUE;
@@ -94,22 +105,8 @@ public class InventoryCleaner {
             sinceStored++;
         }
         Inventory inventory = player.getInventory();
-        // A new layer: what it doesn't need goes into storage (vaults, linked chests), so the inventory holds this
-        // layer's blocks. Fetched back from there when a later layer needs it
-        int layer = AutoBuild.INSTANCE.layers.getLayer();
-        if (layer != lastLayer) {
-            lastLayer = layer;
-            storeOffLayer = AutoBuild.INSTANCE.layers.isActive();
-        }
-        if (storeOffLayer && !AutoBuild.INSTANCE.layers.layerNeeds().isEmpty()) {
-            storeOffLayer = false;
-            Set<Item> offLayer = offLayer(inventory);
-            if (!offLayer.isEmpty() && ChestFetcher.hasStorage(mc) && fetcher.startStore(mc, offLayer)) {
-                PrinterAddon.debug("New layer: putting what it doesn't need in storage: {}", offLayer);
-                sinceStored = 0;
-                return true;
-            }
-        }
+        // A new layer doesn't empty the inventory by itself: what the layer doesn't need stays (the next layer may
+        // need it) until the layer's own items need the room, then it goes into storage (see InventoryBudget)
         if (freeSlots(inventory) >= MIN_FREE_SLOTS) {
             return false;
         }
@@ -135,6 +132,10 @@ public class InventoryCleaner {
             Item item = stack.getItem();
             // Never anything the layers being built still need
             if (AutoBuild.INSTANCE.layers.layerNeeds().containsKey(item)) {
+                continue;
+            }
+            // Until the whole schematic has been read once, what later layers need isn't known: nothing is dropped
+            if (!store && !AutoBuild.INSTANCE.wholeKnown()) {
                 continue;
             }
             // Spare rails only while the schematic still has rails to place (for temporary rails)

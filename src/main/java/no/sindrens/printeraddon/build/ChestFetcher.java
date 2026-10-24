@@ -65,6 +65,10 @@ public class ChestFetcher {
     private int waited;
     private int taken;
     private int gap;
+    /** The current spot's menu was open at some point (closed again by the player: opened once more). */
+    private boolean seenOpen;
+    /** Opened again after it was closed, or after it didn't open: once per spot. */
+    private boolean retried;
 
     /** A job (fetching or storing) runs, until its end is written down (see tick). */
     private boolean active;
@@ -197,6 +201,8 @@ public class ChestFetcher {
             current = toVisit.removeFirst();
             phase = current.pos() == null ? Phase.OPEN : Phase.GO;
             waited = 0;
+            seenOpen = false;
+            retried = false;
         } else if (current == null) {
             wanted.values().removeIf(count -> count <= 0);
             if (wanted.isEmpty() || toVisit.isEmpty()) {
@@ -211,6 +217,8 @@ public class ChestFetcher {
             current = toVisit.removeFirst();
             phase = current.pos() == null ? Phase.OPEN : Phase.GO;
             waited = 0;
+            seenOpen = false;
+            retried = false;
         }
         waited++;
 
@@ -233,6 +241,8 @@ public class ChestFetcher {
             }
             case OPEN -> {
                 player.setShiftKeyDown(false);
+                BuildLog.line("STORAGE", "opening " + current.name() + (storing.isEmpty() ? " to take " + describe(wanted) : " to put away " + storing.keySet())
+                        + (retried ? " (again)" : ""));
                 if (current.pos() == null) {
                     PrinterAddon.debug("Opening {}", current.name());
                     player.connection.sendCommand(Configs.Shop.VAULT_COMMAND.getStringValue() + " " + current.vault());
@@ -245,9 +255,29 @@ public class ChestFetcher {
             }
             case TAKE -> {
                 if (!(mc.gui.screen() instanceof AbstractContainerScreen<?>) || player.containerMenu == player.inventoryMenu) {
+                    if (seenOpen && !retried) {
+                        // It was open and got closed before anything was taken (by the player, by accident): again
+                        retried = true;
+                        seenOpen = false;
+                        BuildLog.line("STORAGE", current.name() + " was closed before it was done: opening it again");
+                        phase = Phase.OPEN;
+                        waited = 0;
+                        gap = VAULT_GAP;
+                        return true;
+                    }
                     // A vault is loaded by the server the first time it's opened: that can take a few seconds
                     if (waited > OPEN_TIMEOUT + (current.pos() == null ? 60 : 0) + 2 * ServerLag.pingTicks(mc)) {
+                        if (!retried) {
+                            // The server may just have been slow, or the command got lost: once more
+                            retried = true;
+                            BuildLog.line("STORAGE", current.name() + " didn't open within " + waited + " ticks: trying once more");
+                            phase = Phase.OPEN;
+                            waited = 0;
+                            gap = VAULT_GAP;
+                            return true;
+                        }
                         PrinterAddon.debug("The {} didn't open", current.name());
+                        BuildLog.line("STORAGE", current.name() + " didn't open (twice)" + (current.pos() == null ? ": left alone for a minute" : ""));
                         if (current.pos() == null) {
                             // No such vault (or no /pv here, or the server was slow): not again for a minute
                             vaultDown.put(current.vault(), AutoBuild.clientTicks + 20L * 60);
@@ -255,6 +285,10 @@ public class ChestFetcher {
                         current = null;
                     }
                     return true;
+                }
+                if (!seenOpen) {
+                    seenOpen = true;
+                    waited = 0;
                 }
                 if (waited < 4 + ServerLag.pingTicks(mc)) {
                     // Let the contents arrive
@@ -274,6 +308,7 @@ public class ChestFetcher {
                     }
                     // Read again the next time it's opened
                     known.remove(current);
+                    BuildLog.line("STORAGE", current.name() + ": put away, " + taken + " items so far");
                     phase = Phase.CLOSE;
                     return true;
                 }
@@ -291,7 +326,10 @@ public class ChestFetcher {
                     int count = stack.getCount();
                     contents.merge(item, count, Integer::sum);
                     Integer want = wanted.get(item);
-                    if (want != null && want > 0 && ShopBuyer.room(mc, item) > 0) {
+                    // Never into the last few free slots (see InventoryBudget), unless it tops up a stack
+                    boolean fits = InventoryCleaner.freeSlots(player.getInventory()) > InventoryBudget.KEEP_FREE
+                            || InventoryBudget.topUpRoom(player.getInventory(), item) >= count;
+                    if (want != null && want > 0 && fits && ShopBuyer.room(mc, item) > 0) {
                         mc.gameMode.handleContainerInput(menu.containerId, slot.index, 0, ContainerInput.QUICK_MOVE, player);
                         wanted.put(item, want - count);
                         contents.merge(item, -count, Integer::sum);
@@ -300,6 +338,8 @@ public class ChestFetcher {
                 }
                 known.put(current, new Known(contents, AutoBuild.clientTicks));
                 PrinterAddon.debug("{}: took what was wanted, {} left wanted", current.name(), wanted);
+                BuildLog.line("STORAGE", current.name() + ": " + taken + " taken so far | still wanted " + describe(wanted)
+                        + " | left in it " + describe(contents));
                 phase = Phase.CLOSE;
             }
             case CLOSE -> {
@@ -366,7 +406,11 @@ public class ChestFetcher {
 
     private static String describe(Map<Item, Integer> items) {
         List<String> parts = new ArrayList<>();
-        items.forEach((item, count) -> parts.add(count + " " + new ItemStack(item).getHoverName().getString()));
-        return String.join(", ", parts);
+        items.forEach((item, count) -> {
+            if (count > 0) {
+                parts.add(count + " " + new ItemStack(item).getHoverName().getString());
+            }
+        });
+        return parts.isEmpty() ? "nothing" : String.join(", ", parts);
     }
 }

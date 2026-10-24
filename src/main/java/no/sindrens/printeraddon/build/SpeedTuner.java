@@ -33,12 +33,12 @@ import java.util.Map;
  * then click). It's set for each block right when the printer picks it.
  */
 public class SpeedTuner {
-    /** No speeding up for this long after a mistake (per kind of block). */
-    private static final int CALM_AFTER_MISTAKE = 20 * 60;
+    /** No speeding up for this long after a mistake (per kind of block): the step back is one tick, so not long. */
+    private static final int CALM_AFTER_MISTAKE = 20 * 15;
     /** A click whose block doesn't show up within this long placed nothing. */
     private static final int PICK_TIMEOUT = 20 * 3;
     /** Right blocks of a kind since its last wrong one: every this many lifts the limit the wrong one set by a tick. */
-    private static final int FORGIVE_AFTER = 300;
+    private static final int FORGIVE_AFTER = 200;
     /** Kept in memory per kind of block: the last clicks, to see when clicks stop getting through. */
     private static final int RECENT = 10;
 
@@ -235,12 +235,15 @@ public class SpeedTuner {
             return;
         }
         long now = AutoBuild.clientTicks;
-        // The server's answer (or its correction of what the client showed at once) is in after a round trip
+        // The server's answer (or its correction of what the client showed at once) is in after a round trip: when
+        // the server answers each click, exactly once it has (a block it threw out again 10 ticks later in a lag
+        // spike counted as placed after a fixed 8 ticks), else after a fixed wait
         long settle = Math.max(6, 2L * ServerLag.pingTicks(mc) + 4);
+        boolean acks = ServerAcks.works();
         for (Iterator<Pick> it = picks.iterator(); it.hasNext(); ) {
             Pick pick = it.next();
             long age = now - pick.tick();
-            if (age < settle) {
+            if (acks ? age < 2 || ServerAcks.isWaiting(pick.pos()) && age < PICK_TIMEOUT : age < settle) {
                 continue;
             }
             Outcome outcome = outcome(mc, schematic, pick);
@@ -334,14 +337,14 @@ public class SpeedTuner {
                     Switch change = switches.computeIfAbsent(switchKey(pick.before(), pick.item()), k -> new Switch());
                     change.wrong++;
                     change.minuteWrong++;
-                    change.floor = Math.max(change.floor, Math.min(slowest(), pick.interval() + 2));
+                    change.floor = Math.max(change.floor, Math.min(slowest(), pick.interval() + 1));
                 }
                 if (Configs.Speed.AUTO_SPEED.getBooleanValue()) {
                     // This kind came out wrong at this speed: not this fast again for a while (remembered for later
                     // layers and builds), and a step back up right away
                     s.floor = Math.max(s.floor, pick.interval() + 1);
                     s.calmUntil = AutoBuild.clientTicks + CALM_AFTER_MISTAKE;
-                    int slower = Math.max(s.floor, Math.min(slowest(), pick.interval() + 2));
+                    int slower = Math.max(s.floor, Math.min(slowest(), pick.interval() + 1));
                     if (slower != s.interval) {
                         s.interval = slower;
                         Chat.warn("Speed: " + name(pick.item()) + " at interval " + s.interval + " (a block came out wrong at "
@@ -363,7 +366,7 @@ public class SpeedTuner {
                     }
                 }
                 if (Configs.Speed.AUTO_SPEED.getBooleanValue() && known == RECENT && missed > RECENT / 2 && s.interval < slowest()) {
-                    s.interval = Math.min(slowest(), s.interval + 2);
+                    s.interval = Math.min(slowest(), s.interval + 1);
                     s.calmUntil = AutoBuild.clientTicks + CALM_AFTER_MISTAKE;
                     java.util.Arrays.fill(s.recent, true);
                     Chat.warn("Speed: " + name(pick.item()) + " at interval " + s.interval + " (" + missed + " of its last " + RECENT

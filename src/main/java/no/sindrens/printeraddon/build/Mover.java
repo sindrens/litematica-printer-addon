@@ -182,8 +182,8 @@ public class Mover {
         return motion.x * motion.x + motion.z * motion.z > SAFE_PLACE_SPEED * SAFE_PLACE_SPEED || Math.abs(motion.y) > 0.15;
     }
 
-    /** Fastest the player glides while the printer places (blocks a tick, 4 blocks a second: a slow walk). */
-    private static final double GLIDE_MAX = 0.2;
+    /** Fastest the player glides while the printer places (blocks a tick, almost 5 blocks a second), just under SAFE_PLACE_SPEED. */
+    private static final double GLIDE_MAX = 0.24;
     /** Slowest glide while there's still something to place on the way. */
     private static final double GLIDE_MIN = 0.04;
     /** With this many placeable blocks in reach the player stops and places them. */
@@ -234,6 +234,11 @@ public class Mover {
      * How fast to glide with these blocks to place in reach: the fewer, the faster (a lot in reach: stop and place
      * them). Never so fast that a block behind leaves the reach before the printer gets to it.
      */
+    /** Waiting for the server's answer to a click on it or next to it (the printer isn't given it meanwhile). */
+    private static boolean heldBack(BlockPos pos) {
+        return ServerAcks.works() && (ServerAcks.isWaiting(pos) || ServerAcks.nextToWaiting(pos));
+    }
+
     private double glideSpeedFor(LocalPlayer player, List<BlockPos> inReach, double reach) {
         // Breaking a block or using the bucket: that block has to stay in reach, hold still
         if (AutoBuild.INSTANCE.breaker.isBusy() || AutoBuild.INSTANCE.fluids.isBusy()) {
@@ -242,7 +247,14 @@ public class Mover {
         // Only waited for while the printer gets on with it: nothing placed for a while, glide on (what it can't
         // place now is left for the next time around, or skipped as usual)
         boolean placing = tick - lastPlacementTick < HOLD_LIMIT_TICKS;
-        int n = inReach.size();
+        // Only what the printer can click now counts: a block clicked a moment ago (or next to one) only waits for the
+        // server's answer, and slowing down for those left the printer with nothing to do (a quarter of its turns)
+        int n = 0;
+        for (BlockPos pos : inReach) {
+            if (!heldBack(pos)) {
+                n++;
+            }
+        }
         if (n >= STOP_FOR) {
             return placing ? 0 : GLIDE_MIN;
         }
@@ -253,7 +265,7 @@ public class Mover {
             Vec3 eye = player.getEyePosition();
             for (BlockPos pos : inReach) {
                 Vec3 to = Vec3.atCenterOf(pos).subtract(eye);
-                if (placing && to.dot(direction) < 0) {
+                if (placing && to.dot(direction) < 0 && !ServerAcks.isWaiting(pos)) {
                     // Behind: slower the closer it is to the edge of the reach (stopped 0.3 before it)
                     double margin = reach - to.length();
                     speed = Math.min(speed, GLIDE_MAX * Math.max(0, (margin - 0.3) / 0.9));
@@ -1543,6 +1555,29 @@ public class Mover {
     }
 
     /**
+     * What's solid in the 2 blocks above the block and around it (5 x 5), where the player would hover to place it:
+     * for the log, to see what keeps a block out of reach (a roof, leaves, the player's building...).
+     */
+    private static String blocking(Minecraft mc, BlockPos block) {
+        java.util.Map<String, Integer> found = new java.util.TreeMap<>();
+        int solid = 0;
+        int all = 0;
+        for (int dy = 1; dy <= 2; dy++) {
+            for (int dx = -2; dx <= 2; dx++) {
+                for (int dz = -2; dz <= 2; dz++) {
+                    BlockPos pos = block.offset(dx, dy, dz);
+                    all++;
+                    if (!PathFinder.isPassable(mc.level, pos)) {
+                        solid++;
+                        found.merge(mc.level.isLoaded(pos) ? mc.level.getBlockState(pos).getBlock().getName().getString() : "not loaded", 1, Integer::sum);
+                    }
+                }
+            }
+        }
+        return solid == 0 ? "nothing (" + all + " spots free)" : solid + " of " + all + " spots taken: " + found;
+    }
+
+    /**
      * Works out the way to flyTarget: straight when nothing is in the way, else around it (FlyPath). When the spot
      * itself can't be got to, any other spot from where the block is in the printer's reach; a long way part by part.
      * Returns false (and leaves the block for later) when there's no way at all.
@@ -1629,7 +1664,8 @@ public class Mover {
     private void noWay(Minecraft mc, LocalPlayer player, @Nullable BlockPos block, boolean loose) {
         PrinterAddon.debug("No flight path from {} to {}", player.position(), flyTarget);
         BuildLog.line("MOVE", "no way to " + BlockPos.containing(flyTarget).toShortString() + " or any spot in reach of "
-                + (block != null ? block.toShortString() : "it") + " from " + player.blockPosition().toShortString());
+                + (block != null ? block.toShortString() : "it") + " from " + player.blockPosition().toShortString()
+                + (block != null && !loose ? " | in the way above it: " + blocking(mc, block) : ""));
         if (loose && target != null) {
             unreachableAreas.put(areaKey(target), tick + SKIP_TICKS);
             BuildLog.line("SKIP", "area " + areaName(areaKey(target)) + " for 30 s: no flight path to the part that isn't loaded yet ("
@@ -1856,7 +1892,8 @@ public class Mover {
     /** Deferred blocks (from finished layers) that can be placed now. */
     private void addReadyDeferred(Minecraft mc, WorldSchematic schematic, boolean creative) {
         for (BlockPos pos : AutoBuild.INSTANCE.deferred) {
-            if (skipped.containsKey(pos) || work.contains(pos)) {
+            // Left out for good (no way to it): only at the very end again, not every 30 s
+            if (skipped.containsKey(pos) || work.contains(pos) || AutoBuild.INSTANCE.couldNotPlace.contains(pos)) {
                 continue;
             }
             BlockCheck.Result result = BlockCheck.check(mc.level, schematic, pos);

@@ -201,8 +201,16 @@ public class Configs implements IConfigHandler {
                 "Eat when the food bar is at this or lower (20 is full, every drumstick is 2).",
                 "Eat at food level");
 
+        public static final ConfigBoolean USE_FEED_COMMAND = new ConfigBoolean("useFeedCommand", true,
+                "Fill the food bar with the server's feed command instead of eating (if you're allowed to use it).\n"
+                        + "If the command does nothing (no permission), food from the inventory is eaten instead.",
+                "Eat with /feed");
+        public static final ConfigString FEED_COMMAND = new ConfigString("feedCommand", "feed",
+                "The feed command, without the slash.",
+                "Feed command");
+
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                STOP_ON_DAMAGE, STOP_NEAR_PLAYERS, NEAR_PLAYER_DISTANCE, AUTO_EAT, EAT_BELOW);
+                STOP_ON_DAMAGE, STOP_NEAR_PLAYERS, NEAR_PLAYER_DISTANCE, AUTO_EAT, EAT_BELOW, USE_FEED_COMMAND, FEED_COMMAND);
     }
 
     public static class Shop {
@@ -243,14 +251,28 @@ public class Configs implements IConfigHandler {
                 "How long to wait for the server to open or change a shop menu before giving up (20 ticks = 1 second).",
                 "Shop menu timeout (ticks)");
 
+        public static final ConfigBoolean PREFER_BLOCKS = new ConfigBoolean("craftFromBlocks", false,
+                "Buy items as their blocks and craft them back (a redstone block makes 9 redstone dust): 9 times fewer\n"
+                        + "purchases, but the blocks can cost more. Off: whatever is cheapest per item in the shop scan; the blocks\n"
+                        + "are always bought when the item itself can't be (not sold, or the shop didn't deliver it).",
+                "Buy blocks and craft them back");
+        public static final ConfigBoolean USE_CRAFT_COMMAND = new ConfigBoolean("useCraftCommand", true,
+                "Open a crafting table with the server's craft command when a recipe needs one (rails, hoes), instead of\n"
+                        + "placing one. If the command does nothing (no permission), a crafting table is used as before.",
+                "Craft with /craft");
+        public static final ConfigString CRAFT_COMMAND = new ConfigString("craftCommand", "craft",
+                "The command that opens a crafting table, without the slash.",
+                "Craft command");
+
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                FETCH_FROM_CHESTS, VAULTS, VAULT_COMMAND, AUTO_BUY, BUY_WHEN_LEFT, SHOP_COMMAND, SHOP_SECTION, PROBE_BUY_SCREEN, MAX_PAGES, WAIT_TIMEOUT_TICKS);
+                FETCH_FROM_CHESTS, VAULTS, VAULT_COMMAND, AUTO_BUY, BUY_WHEN_LEFT, PREFER_BLOCKS, USE_CRAFT_COMMAND, CRAFT_COMMAND,
+                SHOP_COMMAND, SHOP_SECTION, PROBE_BUY_SCREEN, MAX_PAGES, WAIT_TIMEOUT_TICKS);
     }
 
     public static class Speed {
         public static final ConfigBoolean AUTO_SPEED = new ConfigBoolean("autoSpeed", true,
-                "Find the fastest printer interval that still places right: start at the preset's interval, go one tick\n"
-                        + "faster after a run of correct blocks, two ticks slower as soon as a block comes out wrong.",
+                "Find the fastest printer interval that still places right, per kind of block: start at the preset's interval,\n"
+                        + "go faster after a run of correct blocks, one tick slower as soon as a block comes out wrong.",
                 "Automatic speed");
         public static final ConfigInteger AUTO_SPEED_MIN_INTERVAL = new ConfigInteger("autoSpeedMinInterval", 1, 1, 40,
                 "Automatic speed never goes below this printer interval. It only gets there while every block comes out\n"

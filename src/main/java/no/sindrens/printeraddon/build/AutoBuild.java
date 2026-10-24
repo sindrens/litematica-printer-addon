@@ -53,6 +53,7 @@ public class AutoBuild {
     public void printerTried(net.minecraft.core.BlockPos pos, @javax.annotation.Nullable net.minecraft.world.item.Item item) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.level != null) {
+            ServerAcks.tried(pos);
             recentlyTried.put(pos.immutable(), clientTicks);
             lastTried.put(pos.immutable(), clientTicks);
             triedDuringBuild.add(pos.immutable());
@@ -138,7 +139,35 @@ public class AutoBuild {
     /** What the whole schematic still needs (item -> count), including what's in the inventory. */
     private final java.util.Map<net.minecraft.world.item.Item, Integer> neededWhole = new java.util.HashMap<>();
     /** Items the shop couldn't sell or deliver during this build: not tried again. */
-    private final java.util.Set<net.minecraft.world.item.Item> couldntBuy = new java.util.HashSet<>();
+    private final java.util.Map<net.minecraft.world.item.Item, Long> couldntBuy = new java.util.HashMap<>();
+    /** An item the shop couldn't deliver is tried again after this long (a menu that didn't open once isn't forever). */
+    private static final long RETRY_BUYING = 20 * 60 * 5;
+
+    private void cantBuy(java.util.Collection<net.minecraft.world.item.Item> items) {
+        items.forEach(item -> couldntBuy.put(item, clientTicks + RETRY_BUYING));
+    }
+
+    /** True while the shop is known not to deliver this item (for a few minutes after it didn't). */
+    private boolean cantGet(net.minecraft.world.item.Item item) {
+        Long until = couldntBuy.get(item);
+        if (until == null) {
+            return false;
+        }
+        if (clientTicks >= until) {
+            couldntBuy.remove(item);
+            return false;
+        }
+        return true;
+    }
+
+    /** The item can be got: bought as it is, or made from something the shop delivers (dust from redstone blocks). */
+    private boolean gettable(Minecraft mc, net.minecraft.world.item.Item item) {
+        if (!cantGet(item)) {
+            return true;
+        }
+        net.minecraft.world.item.Item from = CraftPlan.madeFrom(item);
+        return from != null && !cantGet(from) && no.sindrens.printeraddon.shop.ShopBuyer.sells(mc, from);
+    }
     private boolean buying;
     private int buyCooldown;
     private int shoppingLayer = Integer.MIN_VALUE;
@@ -289,6 +318,8 @@ public class AutoBuild {
         long confirm = Math.max(3, 2L * ServerLag.pingTicks(mc) + 2);
         int unfinished = 0;
         int held = 0;
+        // When the server answers each click (it does from 1.19 on): exactly until it has, else the fixed waits
+        boolean acks = ServerAcks.works();
         for (net.minecraft.core.BlockPos pos : all) {
             if (schematic.getBlockState(pos).isAir()) {
                 continue;
@@ -298,8 +329,10 @@ public class AutoBuild {
                 continue;
             }
             unfinished++;
-            if (recentlyTried.containsKey(pos) || givenUp(pos)
-                    || (result == BlockCheck.Result.MISSING && nextToUnconfirmed(pos, now, confirm))) {
+            boolean waiting = acks ? ServerAcks.isWaiting(pos) : recentlyTried.containsKey(pos);
+            boolean nextToWaiting = result == BlockCheck.Result.MISSING
+                    && (acks ? ServerAcks.nextToWaiting(pos) : nextToUnconfirmed(pos, now, confirm));
+            if (waiting || givenUp(pos) || nextToWaiting) {
                 held++;
                 continue;
             }
@@ -376,8 +409,10 @@ public class AutoBuild {
         if (statusTicks % 10 == 0) {
             Chat.actionBar(layers.status() + "  |  Next: " + next + "  |  " + doing());
         }
-        if (statusTicks % 5 == 1) {
+        if (wholeFirstPass || statusTicks % 5 == 1) {
+            long wholeStarted = Perf.start();
             updateMissingWhole(mc, schematic);
+            Perf.end("whole schematic", wholeStarted);
         }
         if (statusTicks % 40 == 0 && Configs.Generic.STATUS_FILE.getBooleanValue()) {
             StatusFile.write(mc, layers.status(), next, nextBlock, doing(), shoppingList, missingWhole);
@@ -385,46 +420,79 @@ public class AutoBuild {
     }
 
     /**
-     * What the whole schematic still needs, per Y level. Read again in small pieces (30 columns of one level per
-     * call), so it never makes a lag spike.
+     * What the whole schematic still needs, per Y level. Read in small pieces (30 columns of one level per call), so
+     * it never makes a lag spike: the first time through as many pieces per tick as fit in 3 ms (a 50 layer build is
+     * read in a second or two), then a piece every 5 ticks. The finished layers are checked on the way (see
+     * LayerManager#checked): a block missing there (broken, or never placed before a restart) is found.
      */
     private final java.util.Map<Integer, java.util.Map<net.minecraft.world.item.Item, Integer>> wholeByY = new java.util.HashMap<>();
     private final java.util.Map<net.minecraft.world.item.Item, Integer> wholePartial = new java.util.HashMap<>();
+    private final java.util.List<net.minecraft.core.BlockPos> wholeMissing = new java.util.ArrayList<>();
     private int wholeNextY = Integer.MIN_VALUE;
     private int wholeNextX = Integer.MIN_VALUE;
+    /** The level being read is a finished layer: its missing blocks are collected. */
+    private boolean wholeChecking;
+    /** Until every level has been read once. */
+    private boolean wholeFirstPass = true;
     private static final int WHOLE_COLUMNS_PER_STEP = 30;
+    private static final long WHOLE_FIRST_PASS_NANOS = 3_000_000L;
+
+    /** What the whole schematic needs is known (every level read at least once). */
+    public boolean wholeKnown() {
+        return !wholeFirstPass;
+    }
 
     private void updateMissingWhole(Minecraft mc, fi.dy.masa.litematica.world.WorldSchematic schematic) {
+        if (schematic == null || mc.level == null) {
+            return;
+        }
         java.util.List<SchematicHelper.Area> areas = SchematicHelper.areas();
         int minY = areas.stream().mapToInt(SchematicHelper.Area::minY).min().orElse(0);
         int maxY = areas.stream().mapToInt(SchematicHelper.Area::maxY).max().orElse(-1);
         int minX = areas.stream().mapToInt(SchematicHelper.Area::minX).min().orElse(0);
         int maxX = areas.stream().mapToInt(SchematicHelper.Area::maxX).max().orElse(-1);
-        if (wholeByY.isEmpty()) {
-            // The first time all at once
-            for (int y = minY; y <= maxY; y++) {
-                wholeByY.put(y, needsAt(mc, schematic, areas, y, minX, maxX));
-            }
+        if (maxY < minY) {
+            return;
+        }
+        if (wholeNextY < minY || wholeNextY > maxY || wholeNextX < minX || wholeNextX > maxX) {
             wholeNextY = minY;
             wholeNextX = minX;
             wholePartial.clear();
-        } else {
-            if (wholeNextY < minY || wholeNextY > maxY || wholeNextX < minX) {
-                wholeNextY = minY;
-                wholeNextX = minX;
-                wholePartial.clear();
+            wholeMissing.clear();
+        }
+        long until = System.nanoTime() + WHOLE_FIRST_PASS_NANOS;
+        boolean levelDone = false;
+        do {
+            if (wholeNextX == minX) {
+                wholeChecking = layers.isActive() && layers.isDone(wholeNextY);
+                wholeMissing.clear();
             }
             int toX = Math.min(maxX, wholeNextX + WHOLE_COLUMNS_PER_STEP - 1);
-            needsAt(mc, schematic, areas, wholeNextY, wholeNextX, toX).forEach((item, count) -> wholePartial.merge(item, count, Integer::sum));
+            needsAt(mc, schematic, areas, wholeNextY, wholeNextX, toX, wholeChecking ? wholeMissing : null)
+                    .forEach((item, count) -> wholePartial.merge(item, count, Integer::sum));
             wholeNextX = toX + 1;
             if (wholeNextX <= maxX) {
-                return;
+                continue;
             }
             // This level is read through
             wholeByY.put(wholeNextY, new java.util.HashMap<>(wholePartial));
             wholePartial.clear();
+            if (wholeChecking) {
+                layers.checked(mc, wholeNextY, wholeMissing);
+            }
+            wholeMissing.clear();
+            levelDone = true;
             wholeNextX = minX;
-            wholeNextY++;
+            if (++wholeNextY > maxY) {
+                wholeNextY = minY;
+                if (wholeFirstPass) {
+                    wholeFirstPass = false;
+                    BuildLog.line("SCAN", "the whole schematic is read: " + (maxY - minY + 1) + " levels");
+                }
+            }
+        } while (wholeFirstPass && System.nanoTime() < until);
+        if (!levelDone && !neededWhole.isEmpty()) {
+            return;
         }
         java.util.Map<net.minecraft.world.item.Item, Integer> needs = new java.util.LinkedHashMap<>();
         wholeByY.values().forEach(level -> level.forEach((item, count) -> {
@@ -437,9 +505,10 @@ public class AutoBuild {
         publishWholeNeeds(mc, schematic, needs);
     }
 
+    /** Items still needed in a part of one level; with {@code missing}, the blocks the printer still has to do there too. */
     private static java.util.Map<net.minecraft.world.item.Item, Integer> needsAt(Minecraft mc,
             fi.dy.masa.litematica.world.WorldSchematic schematic, java.util.List<SchematicHelper.Area> areas, int y,
-            int fromX, int toX) {
+            int fromX, int toX, @javax.annotation.Nullable java.util.List<net.minecraft.core.BlockPos> missing) {
         java.util.Map<net.minecraft.world.item.Item, Integer> needs = new java.util.HashMap<>();
         net.minecraft.core.BlockPos.MutableBlockPos pos = new net.minecraft.core.BlockPos.MutableBlockPos();
         for (SchematicHelper.Area area : areas) {
@@ -457,6 +526,10 @@ public class AutoBuild {
                         }
                         if (result.needsBreaking() && INSTANCE.isConflict(pos, result, mc.level.getBlockState(pos))) {
                             continue;
+                        }
+                        if (missing != null && missing.size() < 4096
+                                && (result == BlockCheck.Result.MISSING || result == BlockCheck.Result.PRINTER_FIXES)) {
+                            missing.add(pos.immutable());
                         }
                         net.minecraft.world.item.Item item = null;
                         if (result == BlockCheck.Result.MISSING || result.needsBreaking()) {
@@ -525,8 +598,12 @@ public class AutoBuild {
      */
     public boolean isConflict(net.minecraft.core.BlockPos pos, BlockCheck.Result result,
                               net.minecraft.world.level.block.state.BlockState current) {
-        if (!running || result != BlockCheck.Result.WRONG_BLOCK || schematicBlocks.isEmpty()) {
+        if (!running || result != BlockCheck.Result.WRONG_BLOCK) {
             return false;
+        }
+        if (schematicBlocks.isEmpty()) {
+            // Not known yet which blocks are the schematic's: left alone until it is
+            return !wholeKnown();
         }
         if (emptyDuringBuild.contains(pos) || triedDuringBuild.contains(pos) || schematicBlocks.contains(current.getBlock())) {
             return false;
@@ -586,70 +663,144 @@ public class AutoBuild {
         return mover.activity();
     }
 
+    /** A trip (storage, then the shop) goes on after each part, until everything is up to its share. */
+    private boolean tripGoesOn;
+    /** Storage was looked in on this trip already (once per trip: a vault with nothing that fits isn't opened again). */
+    private boolean fetchedThisTrip;
+    /** The last inventory plan written to the log (written again only when it changes, or after a while). */
+    private String lastPlanLine = "";
+    private long lastPlanLineAt = -100000;
+    /** When the last excess was put away to make room (not again within a minute if that didn't help). */
+    private long excessStoredAt = -100000;
+
     /**
-     * Buys what the current layer still needs from /shop (as much as fits). When the layer can't go on because of
-     * items the shop doesn't have (or couldn't deliver), auto build pauses and says what to bring.
+     * Gets what the current layer needs, from storage first, then /shop. A trip starts when one of the layer's items
+     * is (nearly) used up; then every item the layer needs is topped up to its share of the inventory (see
+     * {@link InventoryBudget}), so the next trip is when they all run low together. When the layer can't go on
+     * because of items the shop doesn't have (or couldn't deliver), auto build pauses and says what to bring.
      */
     private boolean buyMissing(Minecraft mc) {
-        if (shoppingList.isEmpty() || mc.player.getAbilities().instabuild) {
+        java.util.Map<net.minecraft.world.item.Item, Integer> layerNeeds = layers.layerNeeds();
+        if (layerNeeds.isEmpty() || mc.player.getAbilities().instabuild) {
+            tripGoesOn = false;
             return false;
         }
         if (buyCooldown > 0) {
             return false;
         }
-        // Buy when an item is (nearly) used up
         net.minecraft.world.entity.player.Inventory inventory = mc.player.getInventory();
-        java.util.Map<net.minecraft.world.item.Item, Integer> list = new java.util.LinkedHashMap<>();
+        boolean storage = ChestFetcher.hasStorage(mc);
+        boolean autoBuy = Configs.Shop.AUTO_BUY.getBooleanValue();
+        int buyWhenLeft = Configs.Shop.BUY_WHEN_LEFT.getIntegerValue();
+        boolean due = false;
         boolean outOfSomething = false;
-        for (var entry : shoppingList.entrySet()) {
+        for (var entry : layerNeeds.entrySet()) {
             net.minecraft.world.item.Item item = entry.getKey();
             int have = inventory.countItem(item);
-            int need = have + entry.getValue();
+            if (have >= entry.getValue()) {
+                continue;
+            }
             if (have == 0) {
-                outOfSomething |= couldntBuy.contains(item) || !Configs.Shop.AUTO_BUY.getBooleanValue();
+                outOfSomething |= !gettable(mc, item) || !autoBuy;
             }
             // Only once it's (nearly) used up: this many or fewer left
-            if (!couldntBuy.contains(item) && have <= Configs.Shop.BUY_WHEN_LEFT.getIntegerValue()
-                    && no.sindrens.printeraddon.shop.ShopBuyer.room(mc, item) > 0) {
-                list.put(item, entry.getValue());
+            if (gettable(mc, item) && have <= buyWhenLeft
+                    && (storage || autoBuy && no.sindrens.printeraddon.shop.ShopBuyer.room(mc, item) > 0)) {
+                due = true;
             }
         }
-        // Never more than fits: the free slots are shared between the items, a few always stay free
-        java.util.Map<net.minecraft.world.item.Item, Integer> fitted = InventoryBudget.fit(inventory, list);
-        list.clear();
-        list.putAll(fitted);
+        boolean goesOn = tripGoesOn;
+        tripGoesOn = false;
+        if (!due && !goesOn) {
+            pauseIfOut(mc, outOfSomething);
+            return false;
+        }
+        if (!goesOn) {
+            fetchedThisTrip = false;
+        }
 
-        if (list.isEmpty() || !Configs.Shop.AUTO_BUY.getBooleanValue()) {
-            // Pause only when something is used up that can't be bought, and the layer can't go on
-            if (outOfSomething && layers.stalledFor(20 * 20)) {
-                StringBuilder sb = new StringBuilder();
-                shoppingList.forEach((item, count) -> sb.append(count).append(' ')
-                        .append(new net.minecraft.world.item.ItemStack(item).getHoverName().getString()).append(", "));
-                stop(mc, "missing " + sb.substring(0, sb.length() - 2)
-                        + ". Put them in your inventory and start auto build again (J+B menu)");
+        InventoryBudget.Plan plan = InventoryBudget.plan(inventory, layerNeeds, neededWhole, cleaner.storable(inventory));
+        // Not room for all of it: what there's too much of, or what this layer doesn't need, goes into storage first
+        if (plan.shortSlots() > 0 && !plan.excess().isEmpty() && storage && clientTicks - excessStoredAt > 20 * 60) {
+            excessStoredAt = clientTicks;
+            if (fetcher.startStore(mc, plan.excess())) {
+                BuildLog.line("PLAN", "inventory for " + layers.describeLayers() + ": " + plan.describe(inventory) + " | "
+                        + plan.pool() + " building slots, " + plan.shortSlots() + " short: putting away first " + stacks(plan.excess()));
+                tripGoesOn = true;
+                mover.stop(mc);
                 return true;
             }
+        }
+        java.util.Map<net.minecraft.world.item.Item, Integer> wants = new java.util.LinkedHashMap<>();
+        plan.wants().forEach((item, count) -> {
+            if (gettable(mc, item)) {
+                wants.put(item, count);
+            }
+        });
+        java.util.Map<net.minecraft.world.item.Item, Integer> list = InventoryBudget.fitNow(inventory, wants);
+        String planLine = "inventory for " + layers.describeLayers() + ": " + plan.describe(inventory) + " | "
+                + plan.pool() + " building slots" + (plan.shortSlots() > 0 ? ", " + plan.shortSlots() + " short" : "")
+                + " | getting " + (list.isEmpty() ? "nothing" : list) + (goesOn ? " (same trip)" : "");
+        if (!planLine.equals(lastPlanLine) || clientTicks - lastPlanLineAt > 20 * 30) {
+            lastPlanLine = planLine;
+            lastPlanLineAt = clientTicks;
+            BuildLog.line("PLAN", planLine);
+        }
+        if (list.isEmpty()) {
+            // Nothing fits (or nothing can be got): looked at again in a moment, not every tick
+            buyCooldown = 40;
+            pauseIfOut(mc, outOfSomething);
             return false;
         }
 
         buyCooldown = 20 * 30;
 
-        // First what's in storage (vaults, linked chests); the next round buys what wasn't there. For seeds also
-        // pumpkins: the player may have put pumpkins in storage to craft seeds from
+        // First what's in storage (vaults, linked chests); the same trip then buys what wasn't there. Also what
+        // they're made of: the player may have put pumpkins (for seeds) or redstone blocks (for dust) in storage
         java.util.Map<net.minecraft.world.item.Item, Integer> fromStorage = new java.util.LinkedHashMap<>(list);
-        Integer seeds = list.get(net.minecraft.world.item.Items.PUMPKIN_SEEDS);
-        if (seeds != null) {
-            fromStorage.merge(net.minecraft.world.item.Items.PUMPKIN, (seeds + 3) / 4, Integer::sum);
-        }
-        if (fetcher.start(mc, fromStorage)) {
+        list.forEach((item, count) -> {
+            net.minecraft.world.item.Item from = CraftPlan.madeFrom(item);
+            if (from != null) {
+                fromStorage.merge(from, CraftPlan.madeFromCount(item, count), Integer::sum);
+            }
+        });
+        if (!fetchedThisTrip && fetcher.start(mc, fromStorage)) {
+            fetchedThisTrip = true;
             mover.stop(mc);
             buyCooldown = 0;
+            tripGoesOn = true;
             return true;
+        }
+        if (!autoBuy) {
+            pauseIfOut(mc, outOfSomething);
+            return false;
+        }
+
+        // In the shop only what's worth a purchase: what's (nearly) used up, a stack or more, or the rest of the
+        // layer; by whole stacks where that's about the same (a purchase by the stack is one click)
+        java.util.Map<net.minecraft.world.item.Item, Integer> toBuy = new java.util.LinkedHashMap<>();
+        java.util.List<java.util.Map.Entry<net.minecraft.world.item.Item, Integer>> byUrgency = new java.util.ArrayList<>(list.entrySet());
+        byUrgency.sort(java.util.Comparator.comparingInt(e -> inventory.countItem(e.getKey())));
+        for (var entry : byUrgency) {
+            net.minecraft.world.item.Item item = entry.getKey();
+            int want = entry.getValue();
+            int stack = item.getDefaultMaxStackSize();
+            int have = inventory.countItem(item);
+            int rest = layerNeeds.getOrDefault(item, 0) - have;
+            if (have > buyWhenLeft && want < stack && want < rest) {
+                continue;
+            }
+            if (want >= stack / 2 && stack > 1) {
+                // Never more than the whole build still needs
+                int useful = Math.max(want, neededWhole.getOrDefault(item, 0) - have);
+                want = Math.min(useful, Math.max(stack, Math.round(want / (float) stack) * stack));
+            }
+            toBuy.put(item, want);
         }
 
         // Rails, powered rails and seeds are crafted: buy what they're made of, then craft them
         java.util.Map<net.minecraft.world.item.Item, Integer> toCraft = new java.util.LinkedHashMap<>();
-        list.entrySet().removeIf(entry -> {
+        toBuy.entrySet().removeIf(entry -> {
             if (CraftPlan.crafted(entry.getKey())) {
                 toCraft.put(entry.getKey(), entry.getValue());
                 return true;
@@ -657,14 +808,14 @@ public class AutoBuild {
             return false;
         });
         if (!toCraft.isEmpty()) {
-            CraftPlan plan = CraftPlan.of(mc, toCraft, item -> no.sindrens.printeraddon.shop.ShopBuyer.sells(mc, item),
-                    Crafter.tableNearby(mc));
-            plan.buy.forEach((item, count) -> list.merge(item, count, Integer::sum));
-            craftAfterBuying = plan.craft;
+            CraftPlan plan2 = CraftPlan.of(mc, toCraft, item -> no.sindrens.printeraddon.shop.ShopBuyer.sells(mc, item) && !cantGet(item),
+                    Crafter.tableNearby(mc) || Crafter.craftCommand());
+            plan2.buy.forEach((item, count) -> toBuy.merge(item, count, Integer::sum));
+            craftAfterBuying = plan2.craft;
             craftingFor = toCraft.keySet();
-            PrinterAddon.debug("To craft {}: buy {}, then craft {}", toCraft, plan.buy, plan.craft);
+            PrinterAddon.debug("To craft {}: buy {}, then craft {}", toCraft, plan2.buy, plan2.craft);
         }
-        if (list.isEmpty()) {
+        if (toBuy.isEmpty()) {
             for (CraftPlan.Step step : craftAfterBuying) {
                 crafter.craft(step.item(), step.count());
             }
@@ -673,19 +824,38 @@ public class AutoBuild {
             buyCooldown = 40;
             return crafter.isBusy();
         }
-        if (no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.start(mc, list)) {
+        if (no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.start(mc, toBuy)) {
             buying = true;
             mover.stop(mc);
             return true;
         }
-        couldntBuy.addAll(no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.notSold());
-        couldntBuy.addAll(no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.notBought());
+        cantBuy(no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.notSold());
+        cantBuy(no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.notBought());
         // Nothing to buy after all (e.g. no shop scan): still craft what can be crafted from the inventory
         for (CraftPlan.Step step : craftAfterBuying) {
             crafter.craft(step.item(), step.count());
         }
         craftAfterBuying = java.util.List.of();
         return false;
+    }
+
+    /** Pause only when something is used up that can't be got, and the layer can't go on without it. */
+    private void pauseIfOut(Minecraft mc, boolean outOfSomething) {
+        if (outOfSomething && layers.stalledFor(20 * 20)) {
+            StringBuilder sb = new StringBuilder();
+            shoppingList.forEach((item, count) -> sb.append(count).append(' ')
+                    .append(new net.minecraft.world.item.ItemStack(item).getHoverName().getString()).append(", "));
+            stop(mc, "missing " + (sb.length() > 2 ? sb.substring(0, sb.length() - 2) : "items")
+                    + ". Put them in your inventory and start auto build again (J+B menu)");
+        }
+    }
+
+    /** "observer: keep 12 stacks, hopper: all" for the build log. */
+    private static String stacks(java.util.Map<net.minecraft.world.item.Item, Integer> keep) {
+        StringBuilder sb = new StringBuilder();
+        keep.forEach((item, stacks) -> sb.append(item.toString().replace("minecraft:", "")).append(": ")
+                .append(stacks == 0 ? "all" : "keep " + stacks + " stack" + (stacks == 1 ? "" : "s")).append(", "));
+        return sb.isEmpty() ? "-" : sb.substring(0, sb.length() - 2);
     }
 
     public void start(Minecraft mc) {
@@ -756,6 +926,7 @@ public class AutoBuild {
         stats.start();
         speed.reset();
         recentlyTried.clear();
+        ServerAcks.reset();
         triesAt.clear();
         givenUp.clear();
         nextBlock = null;
@@ -775,9 +946,11 @@ public class AutoBuild {
         entities.reset();
         breaker.setForced(airPlace.misplaced());
 
-        // Read the whole schematic once now: what it needs, and which kinds of blocks it has (to tell the player's
-        // own buildings from wrong blocks before anything is broken)
-        updateMissingWhole(mc, SchematicHelper.world());
+        // Which kinds of blocks the schematic has, from its palettes (to tell the player's own buildings from wrong
+        // blocks before anything is broken); what it needs is read in the background from the first tick on
+        schematicBlocks.addAll(SchematicHelper.blockKinds());
+        wholeFirstPass = true;
+        wholeNextY = Integer.MIN_VALUE;
         if (Configs.Layers.AUTO_LAYER.getBooleanValue() && !layers.start(mc)) {
             stop(mc, null);
             return;
@@ -1026,9 +1199,13 @@ public class AutoBuild {
         }
         if (buying) {
             buying = false;
-            couldntBuy.addAll(buyer.notSold());
-            couldntBuy.addAll(buyer.notBought());
-            couldntBuy.removeAll(buyer.bought().keySet());
+            cantBuy(buyer.notSold());
+            cantBuy(buyer.notBought());
+            couldntBuy.keySet().removeAll(buyer.bought().keySet());
+            if (!buyer.notBought().isEmpty()) {
+                // Bought part of the list: the rest (other items, or the same from what it's made of) right away
+                tripGoesOn = true;
+            }
             buyCooldown = 40;
             // Then craft what the purchase was for
             for (CraftPlan.Step step : craftAfterBuying) {
@@ -1053,7 +1230,11 @@ public class AutoBuild {
         } else if (!craftingFor.isEmpty()) {
             for (net.minecraft.world.item.Item item : craftingFor) {
                 if (shoppingList.containsKey(item) && mc.player.getInventory().countItem(item) == 0) {
-                    couldntBuy.add(item);
+                    // Crafting it didn't work: not again from the same ingredients for a while either
+                    cantBuy(java.util.List.of(item));
+                    if (CraftPlan.madeFrom(item) != null) {
+                        cantBuy(java.util.List.of(CraftPlan.madeFrom(item)));
+                    }
                 }
             }
             craftingFor = java.util.Set.of();

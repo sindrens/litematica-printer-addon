@@ -29,6 +29,11 @@ public class AutoEat {
     private int ticks = -1;
     private boolean started;
     private long warnedAt = -100000;
+    /** The feed command didn't fill the food bar (no permission): food is eaten instead this session. */
+    private static boolean feedBroken;
+    /** When the feed command was last sent (-1: no answer awaited), and the food level then. */
+    private long fedAt = -1;
+    private int foodBeforeFeed;
 
     public boolean isBusy() {
         return ticks >= 0;
@@ -49,8 +54,30 @@ public class AutoEat {
             return false;
         }
         if (!isBusy()) {
+            int level = player.getFoodData().getFoodLevel();
+            if (fedAt >= 0 && AutoBuild.clientTicks - fedAt >= 40 + 2L * ServerLag.pingTicks(mc)) {
+                // Did the feed command work? (it fills the bar at once)
+                if (level <= foodBeforeFeed) {
+                    feedBroken = true;
+                    Chat.warn("/" + Configs.Safety.FEED_COMMAND.getStringValue() + " didn't fill the food bar: eating food from the inventory instead"
+                            + " (switch 'Eat with /feed' off to skip this).");
+                    BuildLog.line("EAT", "the feed command did nothing (food " + foodBeforeFeed + " -> " + level + "): not used again this session");
+                } else {
+                    BuildLog.line("EAT", "fed with the feed command: food " + foodBeforeFeed + " -> " + level);
+                }
+                fedAt = -1;
+            }
             if (!Configs.Safety.AUTO_EAT.getBooleanValue() || player.getAbilities().instabuild
-                    || player.getFoodData().getFoodLevel() > Configs.Safety.EAT_BELOW.getIntegerValue()) {
+                    || level > Configs.Safety.EAT_BELOW.getIntegerValue()) {
+                return false;
+            }
+            // The server's feed command: no food needed, no pause for building
+            if (Configs.Safety.USE_FEED_COMMAND.getBooleanValue() && !feedBroken) {
+                if (fedAt < 0) {
+                    fedAt = AutoBuild.clientTicks;
+                    foodBeforeFeed = level;
+                    player.connection.sendCommand(Configs.Safety.FEED_COMMAND.getStringValue());
+                }
                 return false;
             }
             int slot = findFood(player.getInventory());

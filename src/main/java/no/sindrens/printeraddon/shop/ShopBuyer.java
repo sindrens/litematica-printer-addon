@@ -56,6 +56,8 @@ public class ShopBuyer {
         int retries;
         /** The stacks screen has nothing small enough for what's left of this one. */
         boolean noStacks;
+        /** Bought of this order so far. */
+        int got;
 
         Order(Item item, int left, ShopScanResult.Location location) {
             this.item = item;
@@ -88,6 +90,10 @@ public class ShopBuyer {
     private String error;
     /** The "purchase stacks" screen didn't work out: a stack at a time for the rest of the session. */
     private static boolean stacksBroken;
+    /** When buying by the stack last didn't work: tried again 10 minutes later (it was off for the whole game before). */
+    private static long stacksBrokenAt;
+    /** The amount screen had no stacks button: logged once. */
+    private boolean loggedNoStacks;
     /** The last purchase went through the stacks screen (and its title, to know it again). */
     private boolean stacksPurchase;
     @Nullable
@@ -135,6 +141,19 @@ public class ShopBuyer {
         }
         List<ShopScanResult.Location> locations = cachedScan.items.get(BuiltInRegistries.ITEM.getKey(item).toString());
         return locations != null && locations.stream().anyMatch(l -> l.buyPrice != null);
+    }
+
+    /** The lowest buy price of one of the item in this server's shop scan, or null if it's not sold. */
+    @Nullable
+    public static Double price(Minecraft mc, Item item) {
+        if (!sells(mc, item)) {
+            return null;
+        }
+        ShopScanResult.Location location = cheapest(cachedScan.items.get(BuiltInRegistries.ITEM.getKey(item).toString()));
+        if (location == null || location.buyPrice == null) {
+            return null;
+        }
+        return location.buyPrice / Math.max(1, location.amountShown);
     }
 
     @Nullable
@@ -190,8 +209,13 @@ public class ShopBuyer {
             return false;
         }
 
+        if (stacksBroken && no.sindrens.printeraddon.build.AutoBuild.clientTicks - stacksBrokenAt > 20L * 60 * 10) {
+            stacksBroken = false;
+            no.sindrens.printeraddon.build.BuildLog.line("SHOP", "buying by the stack is tried again (it didn't work 10 minutes ago)");
+        }
         running = true;
         phase = Phase.OPEN;
+        no.sindrens.printeraddon.build.BuildLog.line("SHOP", "buying " + describe(orders) + (stacksBroken ? " | a stack at a time (buying by the stack didn't work)" : ""));
         Chat.info("Buying from /" + shop.shopCommand + ": " + describe(orders) + ". Don't touch the menu.");
         return true;
     }
@@ -262,10 +286,19 @@ public class ShopBuyer {
                     phase = next;
                     waited = 0;
                     delay = clickDelay();
-                } else if (waited > timeout()) {
+                } else if (waited > timeout() + 2 * no.sindrens.printeraddon.build.ServerLag.pingTicks(mc)) {
                     if (next == Phase.STACKS) {
                         // The stacks button did nothing: not the end of this purchase, a stack at a time instead
                         stacksFailed(mc, order, "nothing happened when purchase stacks was clicked");
+                    } else if (order.retries++ < 1) {
+                        // A slow server (or a lost click): once more from the start before giving up on it
+                        logScreen("no change after a click, buying " + order.location.name + " (trying again from the start)", ScreenSnapshot.capture(mc));
+                        if (mc.gui.screen() instanceof AbstractContainerScreen<?>) {
+                            mc.player.closeContainer();
+                        }
+                        phase = Phase.OPEN;
+                        waited = 0;
+                        delay = 20 + clickDelay();
                     } else {
                         fail(order, "the shop menu didn't open or change");
                     }
@@ -327,13 +360,18 @@ public class ShopBuyer {
                 int amount = amountShown(snapshot, order.id);
                 int room = room(mc, order.item);
                 int stack = order.item.getDefaultMaxStackSize();
-                // Two stacks or more still to buy (and room for them): several stacks in one purchase
-                if (!stacksBroken && !order.noStacks && Math.min(order.left, room) >= 2 * stack) {
+                // A stack or more still to buy (and room for it): whole stacks in one purchase (a stack the normal way
+                // is 49 with the +32/+16 buttons and then 15 clicks on +1)
+                if (!stacksBroken && !order.noStacks && Math.min(order.left, room) >= stack && stack > 1) {
                     Integer stacks = stacksButton(snapshot);
                     if (stacks != null) {
                         PrinterAddon.debug("Buying {} by the stack ({} wanted, room for {})", order.location.name, order.left, room);
                         click(mc, stacks, Phase.STACKS);
                         return;
+                    }
+                    if (!loggedNoStacks) {
+                        loggedNoStacks = true;
+                        logScreen("buy screen for " + order.location.name + " (no purchase stacks button found)", snapshot);
                     }
                 }
                 int want = Math.max(1, Math.min(64, Math.min(order.left, room)));
@@ -456,6 +494,7 @@ public class ShopBuyer {
                 }
                 if (got > 0 && (got >= lastAmount || waited > 10)) {
                     order.left -= got;
+                    order.got += got;
                     bought.merge(order.item, got, Integer::sum);
                     if (order.location.buyPrice != null) {
                         spent += got * order.location.buyPrice;
@@ -463,7 +502,12 @@ public class ShopBuyer {
                     PrinterAddon.debug("Bought {} {}{}", got, order.location.name, stacksPurchase ? " (by the stack)" : "");
                     boolean byStack = stacksPurchase;
                     stacksPurchase = false;
-                    if (order.left <= 0 || room(mc, order.item) <= 0) {
+                    // The last few after a big purchase aren't worth another one (setting the amount took 10 s for 7)
+                    boolean tail = order.left > 0 && order.left < 16 && order.got >= 48;
+                    if (tail) {
+                        PrinterAddon.debug("Leaving the last {} {}: not worth another purchase", order.left, order.location.name);
+                    }
+                    if (order.left <= 0 || tail || room(mc, order.item) <= 0) {
                         orders.pollFirst();
                         phase = Phase.OPEN;
                     } else {
@@ -513,7 +557,13 @@ public class ShopBuyer {
         ScreenSnapshot snapshot = ScreenSnapshot.capture(mc);
         if (snapshot == null) {
             Order order = orders.peekFirst();
-            if (order != null) {
+            if (order != null && order.retries++ < 1) {
+                // Closed (by the player, by accident, or the server): opened again from the start once
+                no.sindrens.printeraddon.build.BuildLog.line("SHOP", "the shop menu closed while buying " + order.location.name + ": opening it again");
+                phase = Phase.OPEN;
+                waited = 0;
+                delay = 20 + clickDelay();
+            } else if (order != null) {
                 fail(order, "the shop menu closed");
             }
             return;
@@ -556,6 +606,7 @@ public class ShopBuyer {
     private void fail(Order order, String why) {
         error = why;
         Chat.warn("Couldn't buy " + order.location.name + ": " + why + ".");
+        logScreen("couldn't buy " + order.location.name + " (" + why + "), the screen", ScreenSnapshot.capture(Minecraft.getInstance()));
         skip(order, why);
     }
 
@@ -697,6 +748,7 @@ public class ShopBuyer {
     /** The stacks screen didn't work out: a stack at a time for the rest of the session, starting over for this one. */
     private void stacksFailed(Minecraft mc, Order order, String why) {
         stacksBroken = true;
+        stacksBrokenAt = no.sindrens.printeraddon.build.AutoBuild.clientTicks;
         Chat.warn("Buying by the stack didn't work (" + why + "): buying a stack at a time. The build log has what the screen showed.");
         no.sindrens.printeraddon.build.BuildLog.line("SHOP", "buying by the stack stopped: " + why);
         if (mc.player != null) {
@@ -708,7 +760,11 @@ public class ShopBuyer {
     }
 
     /** A shop screen in the build log, every slot with its text (once per different screen). */
-    private void logScreen(String what, ScreenSnapshot snapshot) {
+    private void logScreen(String what, @Nullable ScreenSnapshot snapshot) {
+        if (snapshot == null) {
+            no.sindrens.printeraddon.build.BuildLog.line("SHOP", what + ": no menu open");
+            return;
+        }
         if (!loggedScreens.add(what + "|" + snapshot.title() + "|" + snapshot.items().size())) {
             return;
         }

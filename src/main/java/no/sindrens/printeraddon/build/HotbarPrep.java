@@ -32,6 +32,9 @@ public class HotbarPrep {
             return false;
         }
         Inventory inventory = player.getInventory();
+        if (topUp(mc, player, inventory, layerNeeds)) {
+            return true;
+        }
         if (mergeSmallStacks(mc, player, inventory)) {
             return true;
         }
@@ -69,6 +72,42 @@ public class HotbarPrep {
             mc.gameMode.handleContainerInput(player.inventoryMenu.containerId, from, to, ContainerInput.SWAP, player);
             AutoBuild.INSTANCE.inventory.moved();
             PrinterAddon.trace("Hotbar: moved {} to slot {} (the layer needs {})", item, to + 1, layerNeeds.get(item));
+            return true;
+        }
+        return false;
+    }
+
+    /** A stack on the hotbar with this many or fewer left is swapped for a fuller one before it runs out. */
+    private static final int TOP_UP_AT = 16;
+
+    /**
+     * A stack of the layer's blocks on the hotbar running low: swapped with the fullest stack of the same item from
+     * the inventory, before it runs out. Both slots keep their kind of item (only the counts change), so nothing has
+     * to settle: no pause for the printer (a stack running out, then the refill, each paused it 4 or 5 ticks: 8 in
+     * 100 of its turns in a log), no race with the server, and the hand doesn't run empty while there's more.
+     */
+    private static boolean topUp(Minecraft mc, LocalPlayer player, Inventory inventory, Map<Item, Integer> layerNeeds) {
+        for (int hotbar = 0; hotbar < Inventory.getSelectionSize(); hotbar++) {
+            ItemStack low = inventory.getItem(hotbar);
+            if (low.isEmpty() || low.isDamageableItem() || low.getCount() > TOP_UP_AT || low.getMaxStackSize() <= TOP_UP_AT
+                    || !layerNeeds.containsKey(low.getItem())) {
+                continue;
+            }
+            int best = -1;
+            for (int slot = Inventory.getSelectionSize(); slot < Inventory.INVENTORY_SIZE; slot++) {
+                ItemStack stack = inventory.getItem(slot);
+                if (stack.getCount() > low.getCount() && ItemStack.isSameItemSameComponents(stack, low)
+                        && (best < 0 || stack.getCount() > inventory.getItem(best).getCount())) {
+                    best = slot;
+                }
+            }
+            if (best < 0) {
+                continue;
+            }
+            int count = low.getCount();
+            mc.gameMode.handleContainerInput(player.inventoryMenu.containerId, best, hotbar, ContainerInput.SWAP, player);
+            PrinterAddon.trace("Hotbar: {} in slot {} was down to {}: swapped with the {} in slot {}", low.getItem(),
+                    hotbar + 1, count, inventory.getItem(hotbar).getCount(), best + 1);
             return true;
         }
         return false;

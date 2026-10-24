@@ -142,8 +142,8 @@ public class BuildStats {
                 sb.append(", ").append(t.name().toLowerCase().replace('_', ' ')).append(' ')
                         .append(minuteTurns[t.ordinal()] * 100 / all).append('%');
             }
-            PrinterAddon.debug("[rate] last minute: {} placed; printer's free turns{}; {}", totalPlaced - minutePlaced,
-                    sb, AutoBuild.INSTANCE.speed.describe());
+            PrinterAddon.debug("[rate] last minute: {} placed; printer's free turns{}; {}; {}", totalPlaced - minutePlaced,
+                    sb, AutoBuild.INSTANCE.speed.describe(), ServerAcks.minute());
             if (!minutePauses.isEmpty()) {
                 StringBuilder pauses = new StringBuilder();
                 minutePauses.forEach((why, n) -> pauses.append(why).append(' ').append(n * 100 / all).append("%, "));

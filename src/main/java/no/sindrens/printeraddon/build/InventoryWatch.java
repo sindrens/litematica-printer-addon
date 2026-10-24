@@ -43,9 +43,11 @@ public class InventoryWatch {
                     changes.append(", ");
                 }
                 changes.append(slot).append(": ").append(name(last[slot])).append(" -> ").append(name(now));
-                // A water bucket that's full again (or empty) changes nothing the printer clicks with
+                // A water bucket that's full again (or empty) changes nothing the printer clicks with; nor does the
+                // stack in hand being used up (nothing on its way to the server: the next click takes another slot)
                 boolean bucket = isBucket(last[slot]) && isBucket(now);
-                if (!bucket) {
+                boolean usedUp = now == null && slot == inventory.getSelectedSlot();
+                if (!bucket && !usedUp) {
                     changed++;
                     hand |= slot == inventory.getSelectedSlot();
                 }
