@@ -242,8 +242,14 @@ public class Configs implements IConfigHandler {
                 "Vault command");
         public static final ConfigBoolean AUTO_BUY = new ConfigBoolean("autoBuy", true,
                 "During auto build, buy what the current layer is missing from the shop (as much as fits in the inventory).\n"
-                        + "Needs a shop scan of the server first (J+S). No spending limit.",
+                        + "Needs a shop scan of the server first (J+S). When auto build starts it asks how much it may spend.",
                 "Buy what's missing in the shop");
+        public static final ConfigBoolean SELL_LEFTOVERS = new ConfigBoolean("sellLeftovers", true,
+                "When storage is full (or there is none) and the inventory needs room: sell in the shop what the build\n"
+                        + "doesn't need any more and the shop buys back (shift + right click, 'sell all'). Only the schematic's\n"
+                        + "own materials, never tools, renamed or enchanted items. What the shop doesn't buy stays in your\n"
+                        + "inventory (dropped only when the build is stuck for room).",
+                "Sell leftovers when storage is full");
         public static final ConfigInteger BUY_WHEN_LEFT = new ConfigInteger("buyWhenLeft", 8, 0, 64,
                 "Only get more of an item (from linked chests or the shop) once this many or fewer are left in the inventory.\n"
                         + "How much is bought is shared between the items the layer needs, and a few slots always stay free.",
@@ -277,7 +283,7 @@ public class Configs implements IConfigHandler {
                 "Craft command");
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                FETCH_FROM_CHESTS, VAULTS, VAULT_COMMAND, AUTO_BUY, BUY_WHEN_LEFT, PREFER_BLOCKS, USE_CRAFT_COMMAND, CRAFT_COMMAND,
+                FETCH_FROM_CHESTS, VAULTS, VAULT_COMMAND, AUTO_BUY, SELL_LEFTOVERS, BUY_WHEN_LEFT, PREFER_BLOCKS, USE_CRAFT_COMMAND, CRAFT_COMMAND,
                 SHOP_COMMAND, SHOP_SECTION, PROBE_BUY_SCREEN, MAX_PAGES, WAIT_TIMEOUT_TICKS);
     }
 
@@ -285,7 +291,7 @@ public class Configs implements IConfigHandler {
     public static java.util.List<IConfigBase> important() {
         return java.util.List.of(
                 Generic.ADDON_ENABLED,
-                Shop.VAULTS, Shop.FETCH_FROM_CHESTS, Shop.AUTO_BUY, Shop.PREFER_BLOCKS,
+                Shop.VAULTS, Shop.FETCH_FROM_CHESTS, Shop.AUTO_BUY, Shop.SELL_LEFTOVERS, Shop.PREFER_BLOCKS,
                 Shop.USE_CRAFT_COMMAND, Safety.USE_FEED_COMMAND, Safety.AUTO_EAT,
                 Movement.MOVE_MODE,
                 Safety.STOP_ON_DAMAGE, Safety.STOP_NEAR_PLAYERS,

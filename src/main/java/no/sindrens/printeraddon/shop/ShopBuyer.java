@@ -47,7 +47,7 @@ public class ShopBuyer {
     private static final Pattern MINUS = Pattern.compile("^[-\u2212]\\s*(\\d+)$");
     private static final Pattern TIMES = Pattern.compile("^x\\s*(\\d+)$");
 
-    private enum Phase { OPEN, WAIT_MENU, NAVIGATE, OPEN_ITEM, AMOUNT, WAIT_AMOUNT, PURCHASE, VERIFY, STACKS }
+    private enum Phase { OPEN, WAIT_MENU, NAVIGATE, OPEN_ITEM, AMOUNT, WAIT_AMOUNT, PURCHASE, VERIFY, STACKS, SOLD }
 
     private static final class Order {
         final Item item;
@@ -70,6 +70,9 @@ public class ShopBuyer {
         int amountClicks;
         /** Times the shop was opened again because the amount screen couldn't be lowered. */
         int reopened;
+
+        /** Selling (all of it, shift + right click on it in the shop), not buying. */
+        boolean sell;
 
         Order(Item item, int left, ShopScanResult.Location location) {
             this.item = item;
@@ -98,6 +101,9 @@ public class ShopBuyer {
     private int countBefore;
     private int lastAmount;
     private double spent;
+    /** Sold in this run, and about what for. */
+    private final Map<Item, Integer> sold = new LinkedHashMap<>();
+    private double earned;
     @Nullable
     private String error;
     /** The "purchase stacks" screen didn't work out: a stack at a time for the rest of the session. */
@@ -289,6 +295,79 @@ public class ShopBuyer {
         return start(mc, list, Double.MAX_VALUE);
     }
 
+    /** This run sells (see startSelling). */
+    private boolean selling;
+
+    /** What the shop pays for one, the most it pays anywhere in the scan; null if it doesn't buy it. */
+    @Nullable
+    public static Double sellPrice(Minecraft mc, Item item) {
+        // (reads this server's scan, if there is one)
+        sells(mc, item);
+        if (cachedScan == null) {
+            return null;
+        }
+        ShopScanResult.Location best = bestSale(cachedScan.items.get(BuiltInRegistries.ITEM.getKey(item).toString()));
+        return best == null ? null : best.sellPrice / Math.max(1, best.amountShown);
+    }
+
+    @Nullable
+    private static ShopScanResult.Location bestSale(@Nullable List<ShopScanResult.Location> locations) {
+        if (locations == null) {
+            return null;
+        }
+        ShopScanResult.Location best = null;
+        for (ShopScanResult.Location location : locations) {
+            if (location.sellPrice != null && location.sellPrice > 0 && (best == null || location.sellPrice > best.sellPrice)) {
+                best = location;
+            }
+        }
+        return best;
+    }
+
+    /**
+     * Sells all of each of these items in the shop (shift + right click on it: "sell all"), where the shop pays the
+     * most for it. Only for what the shop scan says it buys back. Returns false if nothing could be started.
+     */
+    public boolean startSelling(Minecraft mc, java.util.Collection<Item> items) {
+        if (running || mc.player == null) {
+            return false;
+        }
+        Path file = scanFile(mc);
+        if (file == null) {
+            return false;
+        }
+        try {
+            shop = load(file);
+        } catch (IOException | RuntimeException e) {
+            return false;
+        }
+        orders.clear();
+        sold.clear();
+        earned = 0;
+        error = null;
+        serverSaid = null;
+        messagesLogged = 0;
+        for (Item item : items) {
+            ShopScanResult.Location location = bestSale(shop.items.get(BuiltInRegistries.ITEM.getKey(item).toString()));
+            int count = count(mc, item);
+            if (location != null && count > 0) {
+                Order order = new Order(item, count, location);
+                order.sell = true;
+                orders.add(order);
+            }
+        }
+        if (orders.isEmpty()) {
+            return false;
+        }
+        running = true;
+        selling = true;
+        phase = Phase.OPEN;
+        no.sindrens.printeraddon.build.BuildLog.line("SHOP", "selling " + describe(orders) + " (storage is full and the build doesn't need them)");
+        Chat.info("Selling in /" + shop.shopCommand + " what the build doesn't need and storage has no room for: " + describe(orders)
+                + ". Don't touch the menu.");
+        return true;
+    }
+
     /** What the last trip cost (from the scanned prices). */
     public double spent() {
         return spent;
@@ -306,7 +385,9 @@ public class ShopBuyer {
         bought.clear();
         notSold.clear();
         notBought.clear();
+        sold.clear();
         spent = 0;
+        earned = 0;
         error = null;
         serverSaid = null;
         messagesLogged = 0;
@@ -415,7 +496,7 @@ public class ShopBuyer {
 
         switch (phase) {
             case OPEN -> {
-                if (room(mc, order.item) <= 0) {
+                if (!order.sell && room(mc, order.item) <= 0) {
                     // Not a failure: buy the rest when there's room again
                     PrinterAddon.debug("No room for more {}", order.location.name);
                     orders.pollFirst();
@@ -509,6 +590,17 @@ public class ShopBuyer {
                         fail(order, "the shop has changed (" + order.location.name + " isn't where it was). Scan the shop again (J+S)");
                         return;
                     }
+                }
+                if (order.sell) {
+                    // Shift + right click on it: "sell all" (what the shop's own text says)
+                    countBefore = count(mc, order.item);
+                    serverSaid = null;
+                    no.sindrens.printeraddon.build.BuildLog.line("SHOP", "selling " + countBefore + " " + order.location.name + " in " + order.location.category
+                            + " (shift + right click)");
+                    mc.gameMode.handleContainerInput(snapshot.containerId(), slot, 1, ContainerInput.QUICK_MOVE, mc.player);
+                    phase = Phase.SOLD;
+                    waited = 0;
+                    return;
                 }
                 click(mc, slot, Phase.AMOUNT);
             }
@@ -723,6 +815,24 @@ public class ShopBuyer {
                 phase = Phase.VERIFY;
                 waited = 0;
             }
+            case SOLD -> {
+                int gone = countBefore - count(mc, order.item);
+                if (gone > 0 && (count(mc, order.item) == 0 || waited > 10 + 2 * no.sindrens.printeraddon.build.ServerLag.pingTicks(mc))) {
+                    sold.merge(order.item, gone, Integer::sum);
+                    if (order.location.sellPrice != null) {
+                        earned += gone * order.location.sellPrice / Math.max(1, order.location.amountShown);
+                    }
+                    no.sindrens.printeraddon.build.BuildLog.line("SHOP", "sold " + gone + " " + order.location.name);
+                    orders.pollFirst();
+                    phase = Phase.OPEN;
+                    waited = 0;
+                    delay = clickDelay();
+                } else if (gone == 0 && refusal() != null) {
+                    fail(order, "the server said \"" + serverSaid + "\"");
+                } else if (waited > timeout()) {
+                    fail(order, "nothing was sold" + (serverSaid != null ? "; the server said \"" + serverSaid + "\"" : ""));
+                }
+            }
             case VERIFY -> {
                 int got = count(mc, order.item) - countBefore;
                 // A purchase by the stack may ask to confirm first: once
@@ -878,6 +988,19 @@ public class ShopBuyer {
         running = false;
         if (mc.gui.screen() instanceof AbstractContainerScreen<?>) {
             mc.player.closeContainer();
+        }
+        if (selling) {
+            selling = false;
+            if (!sold.isEmpty()) {
+                StringBuilder sb = new StringBuilder("Sold ");
+                sold.forEach((item, n) -> sb.append(n).append(' ').append(new ItemStack(item).getHoverName().getString()).append(", "));
+                String text = sb.substring(0, sb.length() - 2) + (earned > 0 ? String.format(" (about $%,.2f)", earned) : "");
+                Chat.info(text);
+                no.sindrens.printeraddon.build.BuildLog.line("SHOP", text);
+            } else if (error == null) {
+                Chat.warn("Nothing was sold.");
+            }
+            return;
         }
         if (!bought.isEmpty()) {
             StringBuilder sb = new StringBuilder("Bought ");

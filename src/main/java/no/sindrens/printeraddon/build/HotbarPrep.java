@@ -119,8 +119,8 @@ public class HotbarPrep {
     /**
      * Puts a small stack onto another stack of the same item (the refill before the last item leaves a single one
      * behind every stack). Only in the main inventory (never the hotbar, which the printer changes all the time),
-     * at most every 10 seconds, and never again in this build if a merge didn't do what was expected (on a server
-     * the client's view can be behind: then the clicks swap two different items back and forth).
+     * at most every 10 seconds, and not for 5 minutes if a merge didn't do what was expected (on a server the
+     * client's view can be behind: then the clicks swap two different items back and forth).
      */
     private static long lastMerge;
     private static boolean mergeBroken;
@@ -135,13 +135,18 @@ public class HotbarPrep {
 
     private boolean mergeSmallStacks(Minecraft mc, LocalPlayer player, Inventory inventory) {
         if (mergeCheckSlot >= 0) {
-            // The slot merged onto must still hold the same item
-            if (!inventory.getItem(mergeCheckSlot).is(mergeCheckItem)) {
+            // The slot merged onto must still hold the same item. Empty is fine: the hotbar refill takes that full
+            // stack right away (that once switched merging off for a whole build, leaving 7 slots of 8 to 27 hoppers)
+            ItemStack now = inventory.getItem(mergeCheckSlot);
+            if (!now.isEmpty() && !now.is(mergeCheckItem)) {
                 mergeBroken = true;
-                PrinterAddon.debug("Merging stacks went wrong (slot {} now holds {}): not merging any more in this build",
-                        mergeCheckSlot, inventory.getItem(mergeCheckSlot).getItem());
+                BuildLog.line("HOTBAR", "merging stacks went wrong (slot " + (mergeCheckSlot + 1) + " now holds "
+                        + now.getItem() + "): no merging for 5 minutes");
             }
             mergeCheckSlot = -1;
+        }
+        if (mergeBroken && AutoBuild.clientTicks - lastMerge > 20 * 60 * 5) {
+            mergeBroken = false;
         }
         if (mergeBroken || AutoBuild.clientTicks - lastMerge < 200) {
             return false;

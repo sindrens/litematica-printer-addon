@@ -86,6 +86,13 @@ public class ChestFetcher {
         active = false;
     }
 
+    /** The last time leftovers were put away, some didn't fit anywhere. */
+    private boolean storageFull;
+
+    public boolean storageFull() {
+        return storageFull;
+    }
+
     /** True if there's anywhere to take from or store to (linked chests or vaults). */
     public static boolean hasStorage(Minecraft mc) {
         return Configs.Shop.FETCH_FROM_CHESTS.getBooleanValue() && !spots(mc).isEmpty();
@@ -191,7 +198,12 @@ public class ChestFetcher {
         }
         if (current == null && !storing.isEmpty()) {
             if (!anyLeftToStore(player.getInventory()) || toVisit.isEmpty()) {
-                Chat.info("Put " + taken + " leftover items in storage.");
+                // Everywhere visited and some still here: storage is full (they're sold or kept, see InventoryCleaner)
+                storageFull = anyLeftToStore(player.getInventory());
+                Chat.info("Put " + taken + " leftover items in storage." + (storageFull ? " The rest didn't fit: storage is full." : ""));
+                if (storageFull) {
+                    BuildLog.line("STORAGE", "full: put " + taken + " items away, the rest didn't fit");
+                }
                 storing.clear();
                 toVisit.clear();
                 active = false;

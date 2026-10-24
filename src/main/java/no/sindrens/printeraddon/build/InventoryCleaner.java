@@ -15,8 +15,9 @@ import java.util.Set;
 
 /**
  * Makes room in the inventory when it's (almost) full: puts leftover building materials of this schematic that
- * no block still needs into the linked chests, or drops them when there are none (or they're full). Never touches
- * anything else (tools, food, valuables, items the build still needs).
+ * no block still needs into storage (vaults, linked chests); when that's full (or there is none), sells in the shop
+ * what it buys back, keeps the rest, and drops only when the build is stuck for room. Never touches anything else
+ * (tools, food, valuables, renamed or enchanted items, items the build still needs).
  */
 public class InventoryCleaner {
     /** Below this many free slots, leftovers are dropped. */
@@ -30,6 +31,8 @@ public class InventoryCleaner {
     private int cooldown;
     /** Ticks since leftovers were last put in chests: if the inventory is still full soon after, they're full. */
     private int sinceStored = Integer.MAX_VALUE;
+    /** Ticks since leftovers were last sold (at most once in 5 minutes). */
+    private int sinceSold = Integer.MAX_VALUE;
 
     /** Leftovers of crafting (what hoes, rails and seeds are made of) are put away too, unless needed now. */
     private static final Set<Item> CRAFTING_LEFTOVERS = Set.of(Items.DIAMOND, Items.DIAMOND_BLOCK, Items.STICK,
@@ -84,6 +87,7 @@ public class InventoryCleaner {
         materials.clear();
         cooldown = 0;
         sinceStored = Integer.MAX_VALUE;
+        sinceSold = Integer.MAX_VALUE;
     }
 
     /** Called with what the whole schematic still needs (item -> count). */
@@ -104,6 +108,9 @@ public class InventoryCleaner {
         if (sinceStored < Integer.MAX_VALUE) {
             sinceStored++;
         }
+        if (sinceSold < Integer.MAX_VALUE) {
+            sinceSold++;
+        }
         Inventory inventory = player.getInventory();
         // A new layer doesn't empty the inventory by itself: what the layer doesn't need stays (the next layer may
         // need it) until the layer's own items need the room, then it goes into storage (see InventoryBudget)
@@ -123,10 +130,15 @@ public class InventoryCleaner {
         }
 
         Set<Item> leftovers = new HashSet<>();
+        Set<Item> sellable = new HashSet<>();
+        Map<Item, Boolean> shopBuysIt = new java.util.HashMap<>();
+        int dropSlot = -1;
         boolean store = sinceStored > 20 * 60;
         for (int slot = 0; slot < 36; slot++) {
             ItemStack stack = inventory.getItem(slot);
-            if (stack.isEmpty() || !materials.contains(stack.getItem())) {
+            // Only plain building materials of this schematic: never tools, nor renamed or enchanted items
+            if (stack.isEmpty() || !materials.contains(stack.getItem()) || stack.isDamageableItem()
+                    || !stack.getComponents().equals(new ItemStack(stack.getItem()).getComponents())) {
                 continue;
             }
             Item item = stack.getItem();
@@ -148,11 +160,35 @@ public class InventoryCleaner {
                 leftovers.add(item);
                 continue;
             }
-            // Throw the whole stack, through the player's own inventory menu (no screen needed)
-            int menuSlot = slot < 9 ? 36 + slot : slot;
-            PrinterAddon.debug("Dropping {} {} to make room (the build doesn't need them)", stack.getCount(),
-                    stack.getHoverName().getString());
-            mc.gameMode.handleContainerInput(player.inventoryMenu.containerId, menuSlot, 1, ContainerInput.THROW, player);
+            // Storage is full (or there is none): what the shop buys back is sold ("sell all": only when the build
+            // needs none of it), the rest stays. Only blocks the schematic itself places (redstone dust, hoppers),
+            // never what was only crafted with (your own diamonds, ingots)
+            if (!isSchematicBlock(item)) {
+                continue;
+            }
+            if (keep == 0 && shopBuysIt.computeIfAbsent(item, i -> no.sindrens.printeraddon.shop.ShopBuyer.sellPrice(mc, i) != null)) {
+                sellable.add(item);
+            }
+            if (dropSlot < 0) {
+                dropSlot = slot;
+            }
+        }
+        if (!store && !sellable.isEmpty() && sinceSold > 20 * 60 * 5
+                && no.sindrens.printeraddon.config.Configs.Shop.SELL_LEFTOVERS.getBooleanValue()) {
+            sinceSold = 0;
+            if (no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.startSelling(mc, sellable)) {
+                PrinterAddon.debug("Storage full: selling what the build doesn't need: {}", sellable);
+                return true;
+            }
+        }
+        if (!store && dropSlot >= 0 && AutoBuild.INSTANCE.layers.stalledFor(20 * 30)) {
+            // Stuck for room with nothing to store or sell: dropped, the last way out (through the player's own
+            // inventory menu, no screen needed)
+            ItemStack stack = inventory.getItem(dropSlot);
+            BuildLog.line("DROP", stack.getCount() + " " + stack.getHoverName().getString()
+                    + ": the build is stuck for room, storage is full and the shop doesn't buy them back");
+            mc.gameMode.handleContainerInput(player.inventoryMenu.containerId, dropSlot < 9 ? 36 + dropSlot : dropSlot, 1,
+                    ContainerInput.THROW, player);
             cooldown = COOLDOWN;
             return true;
         }
