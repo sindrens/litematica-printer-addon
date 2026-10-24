@@ -257,7 +257,7 @@ public class AutoBuild {
 
     private boolean pausedByOthers() {
         return breaker.isBusy() || eater.isBusy() || fluids.isBusy() || rails.isBusy() || entities.isBusy() || crafter.isBusy() || fetcher.isBusy()
-                || no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.isRunning();
+                || no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.isRunning() || no.sindrens.printeraddon.shop.ShopScanner.INSTANCE.isRunning();
     }
 
     public boolean isRunning() {
@@ -673,6 +673,8 @@ public class AutoBuild {
 
     /** A trip (storage, then the shop) goes on after each part, until everything is up to its share. */
     private boolean tripGoesOn;
+    /** When the shop was last scanned again by itself (an item it needed wasn't in the scan). */
+    private long lastAutoRescan = -100000000L;
     /** Storage was looked in on this trip already (once per trip: a vault with nothing that fits isn't opened again). */
     private boolean fetchedThisTrip;
     /** The last inventory plan written to the log (written again only when it changes, or after a while). */
@@ -835,6 +837,19 @@ public class AutoBuild {
         if (no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.start(mc, toBuy)) {
             buying = true;
             mover.stop(mc);
+            return true;
+        }
+        // Not in the shop scan at all (an old scan, or one that missed a category): the shop is scanned again, once
+        // in a while, and the trip goes on with the new scan
+        java.util.List<net.minecraft.world.item.Item> unscanned = no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.missingFromScan();
+        if (!unscanned.isEmpty() && clientTicks - lastAutoRescan > 20L * 60 * 30) {
+            lastAutoRescan = clientTicks;
+            BuildLog.line("SHOP", unscanned + " not in the shop scan: scanning the shop again");
+            Chat.info("Not in the shop scan: scanning /" + Configs.Shop.SHOP_COMMAND.getStringValue() + " again, then buying.");
+            mover.stop(mc);
+            buyCooldown = 0;
+            tripGoesOn = true;
+            no.sindrens.printeraddon.shop.ShopScanner.INSTANCE.start(mc);
             return true;
         }
         cantBuy(no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.notSold());

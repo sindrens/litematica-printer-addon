@@ -109,6 +109,11 @@ public class ShopScanResult {
         boolean changed = false;
         for (List<Location> locations : items.values()) {
             for (Location location : locations) {
+                // "Can't buy" marks are never kept (0.9.10 saved them, and a slow server made a buyable item look so)
+                if (location.cantBuy != null) {
+                    location.cantBuy = null;
+                    changed = true;
+                }
                 Button button = buttons.get(location.path + "|" + location.page + "|" + location.slot);
                 if (button == null || button.lore == null) {
                     continue;

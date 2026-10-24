@@ -112,6 +112,13 @@ public class ShopBuyer {
     }
 
     /** Items from the last run that the shop doesn't sell. */
+    /** Of the last list, the items the shop scan doesn't have at all (a new scan may find them). */
+    private final List<Item> missingFromScan = new ArrayList<>();
+
+    public List<Item> missingFromScan() {
+        return missingFromScan;
+    }
+
     public List<Item> notSold() {
         return notSold;
     }
@@ -170,16 +177,11 @@ public class ShopBuyer {
      * into the scan, so it isn't tried again; what it's made of is bought instead (dust from redstone blocks).
      */
     private void markCantBuy(Minecraft mc, Order order) {
+        // Only for now (not saved in the scan: a slow server once made a buyable item look like this); auto build
+        // leaves it a few minutes and buys what it's made of meanwhile, if it can
         order.location.cantBuy = true;
-        Path file = scanFile(mc);
-        if (file == null || shop == null) {
-            return;
-        }
-        save(file, shop);
-        cachedScan = null;
         no.sindrens.printeraddon.build.BuildLog.line("SHOP", order.location.name + " in " + order.location.category
-                + " opens no buy screen: marked as not buyable in the shop scan");
-        Chat.warn(order.location.name + " can't be bought in the shop (clicking it does nothing): not tried again.");
+                + " opened no buy screen, twice: left for a few minutes");
     }
 
     /** The lowest buy price of one of the item in this server's shop scan, or null if it's not sold. */
@@ -232,17 +234,29 @@ public class ShopBuyer {
             return false;
         }
 
+        missingFromScan.clear();
         for (Map.Entry<Item, Integer> entry : list.entrySet()) {
             String id = BuiltInRegistries.ITEM.getKey(entry.getKey()).toString();
-            ShopScanResult.Location location = cheapest(shop.items.get(id));
+            List<ShopScanResult.Location> locations = shop.items.get(id);
+            ShopScanResult.Location location = cheapest(locations);
             if (location == null) {
                 notSold.add(entry.getKey());
+                // Why: not in the scan at all (an old or broken scan: a new one may find it), or only sold there
+                String why = locations == null || locations.isEmpty() ? "not in the shop scan"
+                        : locations.stream().anyMatch(l -> Boolean.TRUE.equals(l.cantBuy)) ? "its buy screen didn't open"
+                        : "only sold there (no buy price)";
+                if (locations == null || locations.isEmpty()) {
+                    missingFromScan.add(entry.getKey());
+                }
+                no.sindrens.printeraddon.build.BuildLog.line("SHOP", "can't buy " + names(List.of(entry.getKey())) + ": " + why
+                        + " | the scan from " + shop.scannedAt + " has " + shop.categories.size() + " categories, " + shop.items.size() + " items");
             } else if (entry.getValue() > 0) {
                 orders.add(new Order(entry.getKey(), entry.getValue(), location));
             }
         }
         if (!notSold.isEmpty()) {
-            Chat.warn("Not sold in /" + shop.shopCommand + ": " + names(notSold) + ". Put them in your inventory.");
+            Chat.warn("Not sold in /" + shop.shopCommand + ": " + names(notSold) + (missingFromScan.isEmpty() ? ". Put them in your inventory."
+                    : " (not in the shop scan: the shop is scanned again to look for it)."));
         }
         if (orders.isEmpty()) {
             return false;
