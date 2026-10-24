@@ -79,8 +79,10 @@ public final class ShopText {
     }
 
     /**
-     * True for an item in a shop page: its lore talks about buying, selling or a price. Such an item is never
-     * clicked while scanning (clicking it opens the buy screen, or buys it).
+     * True for an item in a shop page: it has a buy or sell price, or says what a click on it buys or sells ("Left
+     * click to buy"). Such an item is never clicked while scanning (clicking it opens the buy screen, or buys it).
+     * A category button that only mentions buying or selling ("Sell your mob drops here!", "Purchase & sell in this
+     * shop") is not one: it's opened, and its pages are read.
      */
     public static boolean isShopItem(List<String> lore) {
         Double[] prices = prices(lore);
@@ -89,8 +91,7 @@ public final class ShopText {
         }
         for (String line : lore) {
             String l = plain(line);
-            if (l.contains("buy") || l.contains("sell") || l.contains("price") || l.contains("cost")
-                    || l.contains("purchase") || l.contains("$")) {
+            if (l.contains("click") && (l.contains("buy") || l.contains("sell") || l.contains("purchase"))) {
                 return true;
             }
         }
