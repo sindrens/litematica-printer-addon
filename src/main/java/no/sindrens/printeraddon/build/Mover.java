@@ -605,6 +605,14 @@ public class Mover {
                 }
             }
             if (nearest != null) {
+                // Water for a waterlogged block needs the player close (a bucket reaches less than the printer and
+                // needs a clear view): straight above that block instead of the spot
+                if (BlockCheck.check(mc.level, schematic, nearest) == BlockCheck.Result.BUCKET
+                        && eye.distanceToSqr(Vec3.atCenterOf(nearest)) > 3.0 * 3.0) {
+                    planIndex = i;
+                    spotFor = nearest;
+                    return nearest;
+                }
                 if (i != planIndex) {
                     PrinterAddon.debug("Next spot in area {}: {} of {}", areaName(area), i + 1, plan.size());
                 }
@@ -808,6 +816,7 @@ public class Mover {
     @Nullable
     private BlockPos lastGoal;
     private int samePlans;
+    private int lastPlanPlaced = -1;
 
     private void plan(Minecraft mc, LocalPlayer player, BlockPos goalBlock, MoveMode mode, double reach) {
         path = null;
@@ -815,7 +824,13 @@ public class Mover {
         stuckTicks = 0;
         lastDistance = Double.MAX_VALUE;
 
-        // Got there over and over and still can't do it from there: leave it for later instead of looping
+        // Got there over and over and still can't do it from there: leave it for later instead of looping. Only
+        // when nothing was placed meanwhile: coming back to the same spot of the area plan is normal
+        int placedNow = AutoBuild.INSTANCE.stats.totalPlaced();
+        if (placedNow != lastPlanPlaced) {
+            lastPlanPlaced = placedNow;
+            samePlans = 0;
+        }
         if (goalBlock.equals(lastGoal)) {
             if (++samePlans > 4) {
                 // A hover spot to the side of the block it's for: skip that block
