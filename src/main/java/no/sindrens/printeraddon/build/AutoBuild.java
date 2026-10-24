@@ -235,7 +235,7 @@ public class AutoBuild {
         if (statusTicks % 10 == 0) {
             Chat.actionBar(layers.status() + "  |  Next: " + next + "  |  " + doing());
         }
-        if (statusTicks % 20 == 1) {
+        if (statusTicks % 5 == 1) {
             updateMissingWhole(mc, schematic);
         }
         if (statusTicks % 40 == 0 && Configs.Generic.STATUS_FILE.getBooleanValue()) {
@@ -243,25 +243,46 @@ public class AutoBuild {
         }
     }
 
-    /** What the whole schematic still needs, per Y level: one level is read again per call (no lag spike). */
+    /**
+     * What the whole schematic still needs, per Y level. Read again in small pieces (30 columns of one level per
+     * call), so it never makes a lag spike.
+     */
     private final java.util.Map<Integer, java.util.Map<net.minecraft.world.item.Item, Integer>> wholeByY = new java.util.HashMap<>();
+    private final java.util.Map<net.minecraft.world.item.Item, Integer> wholePartial = new java.util.HashMap<>();
     private int wholeNextY = Integer.MIN_VALUE;
+    private int wholeNextX = Integer.MIN_VALUE;
+    private static final int WHOLE_COLUMNS_PER_STEP = 30;
 
     private void updateMissingWhole(Minecraft mc, fi.dy.masa.litematica.world.WorldSchematic schematic) {
         java.util.List<SchematicHelper.Area> areas = SchematicHelper.areas();
         int minY = areas.stream().mapToInt(SchematicHelper.Area::minY).min().orElse(0);
         int maxY = areas.stream().mapToInt(SchematicHelper.Area::maxY).max().orElse(-1);
+        int minX = areas.stream().mapToInt(SchematicHelper.Area::minX).min().orElse(0);
+        int maxX = areas.stream().mapToInt(SchematicHelper.Area::maxX).max().orElse(-1);
         if (wholeByY.isEmpty()) {
             // The first time all at once
             for (int y = minY; y <= maxY; y++) {
-                wholeByY.put(y, needsAt(mc, schematic, areas, y));
+                wholeByY.put(y, needsAt(mc, schematic, areas, y, minX, maxX));
             }
             wholeNextY = minY;
+            wholeNextX = minX;
+            wholePartial.clear();
         } else {
-            if (wholeNextY < minY || wholeNextY > maxY) {
+            if (wholeNextY < minY || wholeNextY > maxY || wholeNextX < minX) {
                 wholeNextY = minY;
+                wholeNextX = minX;
+                wholePartial.clear();
             }
-            wholeByY.put(wholeNextY, needsAt(mc, schematic, areas, wholeNextY));
+            int toX = Math.min(maxX, wholeNextX + WHOLE_COLUMNS_PER_STEP - 1);
+            needsAt(mc, schematic, areas, wholeNextY, wholeNextX, toX).forEach((item, count) -> wholePartial.merge(item, count, Integer::sum));
+            wholeNextX = toX + 1;
+            if (wholeNextX <= maxX) {
+                return;
+            }
+            // This level is read through
+            wholeByY.put(wholeNextY, new java.util.HashMap<>(wholePartial));
+            wholePartial.clear();
+            wholeNextX = minX;
             wholeNextY++;
         }
         java.util.Map<net.minecraft.world.item.Item, Integer> needs = new java.util.LinkedHashMap<>();
@@ -276,7 +297,8 @@ public class AutoBuild {
     }
 
     private static java.util.Map<net.minecraft.world.item.Item, Integer> needsAt(Minecraft mc,
-            fi.dy.masa.litematica.world.WorldSchematic schematic, java.util.List<SchematicHelper.Area> areas, int y) {
+            fi.dy.masa.litematica.world.WorldSchematic schematic, java.util.List<SchematicHelper.Area> areas, int y,
+            int fromX, int toX) {
         java.util.Map<net.minecraft.world.item.Item, Integer> needs = new java.util.HashMap<>();
         net.minecraft.core.BlockPos.MutableBlockPos pos = new net.minecraft.core.BlockPos.MutableBlockPos();
         for (SchematicHelper.Area area : areas) {
@@ -284,7 +306,7 @@ public class AutoBuild {
                 continue;
             }
             {
-                for (int x = area.minX(); x <= area.maxX(); x++) {
+                for (int x = Math.max(fromX, area.minX()); x <= Math.min(toX, area.maxX()); x++) {
                     for (int z = area.minZ(); z <= area.maxZ(); z++) {
                         pos.set(x, y, z);
                         BlockCheck.Result result = BlockCheck.check(mc.level, schematic, pos);
@@ -500,6 +522,7 @@ public class AutoBuild {
         missingWhole.clear();
         neededWhole.clear();
         wholeByY.clear();
+        wholePartial.clear();
         couldntBuy.clear();
         buying = false;
         buyCooldown = 0;
