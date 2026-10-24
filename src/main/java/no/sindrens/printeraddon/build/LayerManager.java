@@ -34,6 +34,10 @@ public class LayerManager {
     private int minY;
     private int maxY;
     private int ticksUntilCheck;
+    /** The layers last looked through for dead-end rows (see DeadEnds). */
+    private int deadEndsLayer = Integer.MIN_VALUE;
+    private int deadEndsTop = Integer.MIN_VALUE;
+    private long deadEndsAt;
     private int completeChecks;
     private int lastRemaining = -1;
     private int ticksWithoutProgress;
@@ -89,6 +93,8 @@ public class LayerManager {
 
     /** Starts at the lowest unfinished layer. Returns false if there is no schematic placed. */
     public boolean start(Minecraft mc) {
+        deadEndsLayer = Integer.MIN_VALUE;
+        deadEndsTop = Integer.MIN_VALUE;
         List<SchematicHelper.Area> areas = SchematicHelper.areas();
         int[] range = SchematicHelper.yRange(areas);
         WorldSchematic schematic = SchematicHelper.world();
@@ -338,6 +344,18 @@ public class LayerManager {
             return finishDeferred(mc, schematic, areas, interval);
         }
         followHandChange(mc, schematic, areas);
+
+        // Rows of hoppers ending at an empty spot: left out once per layer, built as soon as the spot has something
+        // (again every 30 s: rows in chunks that weren't loaded yet)
+        if (layer != deadEndsLayer || layerTop != deadEndsTop || AutoBuild.clientTicks - deadEndsAt > 20 * 30) {
+            deadEndsLayer = layer;
+            deadEndsTop = layerTop;
+            deadEndsAt = AutoBuild.clientTicks;
+            long started = System.nanoTime();
+            DeadEnds.findInLayers(mc.level, schematic, areas, layer, layerTop);
+            PrinterAddon.debug("Dead-end rows looked for in {} ms", (System.nanoTime() - started) / 1_000_000);
+        }
+        DeadEnds.tick(mc.level);
 
         Findings findings = new Findings();
         int remaining = scanLayers(mc.level, schematic, areas, null, findings);

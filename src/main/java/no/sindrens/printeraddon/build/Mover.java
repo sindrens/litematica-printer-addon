@@ -772,6 +772,18 @@ public class Mover {
             // Searched every area a moment ago and nothing could be placed: don't search the whole layer every tick
             return null;
         }
+        // Placed something a moment ago: the area isn't finished just because nothing in it can be placed this very
+        // tick. A row of hoppers goes in one by one, each as soon as the server has the one before it; flying off then
+        // meant flying back for the rest (90 to 115 blocks each way, 55% of a build spent flying)
+        int placedNow = AutoBuild.INSTANCE.stats.totalPlaced();
+        if (placedNow != areaPlacedCount) {
+            areaPlacedCount = placedNow;
+            areaProgressTick = tick;
+        }
+        if (area != null && workByArea.get(area) != null && !workByArea.get(area).isEmpty()
+                && tick - areaProgressTick < stayTicks() && !anyDoable(mc, schematic, workByArea.get(area), spotExclude)) {
+            return null;
+        }
         if (area == null || !anyDoable(mc, schematic, workByArea.get(area), spotExclude)) {
             java.util.Set<Long> keys = new java.util.HashSet<>(workByArea.keySet());
             keys.addAll(unloadedAreas.keySet());
@@ -1045,6 +1057,15 @@ public class Mover {
         if (work.remove(pos)) {
             workVersion++;
         }
+    }
+
+    /** Placements counted so far, and when the count last went up (the area is still being worked on). */
+    private int areaPlacedCount = -1;
+    private long areaProgressTick;
+
+    /** How long an area with work left is kept after the last block placed: 2 s, longer with a high ping. */
+    private static int stayTicks() {
+        return Math.max(40, 3 * ServerLag.pingTicks(Minecraft.getInstance()) + 20);
     }
 
     /** How far the player is from an area's square, plus the extra cost for going back against the usual order. */

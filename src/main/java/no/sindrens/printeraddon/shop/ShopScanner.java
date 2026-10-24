@@ -129,6 +129,7 @@ public class ShopScanner {
             case FAILED -> {
                 result.notes.add(failReason);
                 PrinterAddon.LOGGER.info("Shop scan: {}", failReason);
+                no.sindrens.printeraddon.build.BuildLog.lineOrKeep("SHOPSCAN", "failed: " + failReason + " (the rest of this category is skipped)");
                 // Skip the rest of this category
                 Step removed;
                 do {
@@ -269,10 +270,12 @@ public class ShopScanner {
 
         if (!seenMenus.add(snapshot.contentSignature())) {
             // Opens a menu we've already read (for example a "back" button)
+            no.sindrens.printeraddon.build.BuildLog.lineOrKeep("SHOPSCAN", "'" + ShopText.plain(category.name) + "' opens a menu already read: skipped");
             return;
         }
 
         result.categories.add(category);
+        no.sindrens.printeraddon.build.BuildLog.lineOrKeep("SHOPSCAN", "opened '" + ShopText.plain(category.name) + "' (slots " + category.path + ")");
         readPage(category, 0, snapshot, new ArrayList<>());
     }
 
@@ -286,6 +289,9 @@ public class ShopScanner {
         page.index = index;
         page.title = snapshot.title();
         category.pages.add(page);
+        no.sindrens.printeraddon.build.BuildLog.lineOrKeep("SHOPSCAN", "read '" + ShopText.plain(category.name) + "' page " + (index + 1)
+                + ": " + snapshot.realItems().size() + " buttons, " + snapshot.realItems().stream().filter(i -> i.nav() == ShopText.Nav.NONE && i.isShopItem()).count()
+                + " items for sale" + (snapshot.findNav(ShopText.Nav.NEXT) != null ? ", has a next page" : ""));
 
         for (ScreenSnapshot.Item item : snapshot.realItems()) {
             if (item.nav() != ShopText.Nav.NONE) {
@@ -384,6 +390,8 @@ public class ShopScanner {
 
         int pages = result.categories.stream().mapToInt(c -> c.pages.size()).sum();
         Path file = save();
+        no.sindrens.printeraddon.build.BuildLog.lineOrKeep("SHOPSCAN", "done: " + result.categories.size() + " categories, " + pages
+                + " pages, " + result.items.size() + " different items" + (result.notes.isEmpty() ? "" : " | notes: " + String.join(" / ", result.notes)));
 
         Chat.info("§aShop scan done:§r " + result.categories.size() + " categories, " + pages + " pages, "
                 + result.items.size() + " different items with a buy price.");

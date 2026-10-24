@@ -943,6 +943,7 @@ public class AutoBuild {
         schematicBlocks.clear();
         deferred.clear();
         couldNotPlace.clear();
+        DeadEnds.reset();
         shoppingList.clear();
         missingWhole.clear();
         neededWhole.clear();
