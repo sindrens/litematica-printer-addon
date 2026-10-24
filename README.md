@@ -5,18 +5,22 @@ Litematica Printer does the placing; the add-on builds whole schematics in survi
 
 - **One layer at a time** from the bottom, never skipping a block. Wrong blocks (wrong block, or facing the
   wrong way) are broken so the printer can place the right one.
-- **Flies** above the layer, along the rows, to where the most blocks can be placed at once.
+- **Flies** above the layer area by area (16x16, from the north-west corner, back and forth inside each area, no
+  area skipped), always to where the most blocks can be placed at once, and moves on as soon as nothing in reach
+  is left to place.
 - **Automatic speed:** starts at your printer interval, goes faster while every block comes out right (down to interval 1) and slows
-  down at the first wrong one. Remembers the speed per server for the next build.
+  down at the first wrong one. Remembers the speed per server, and per kind of block, for the next build.
 - **Gets the items:** takes them from the chests, barrels and shulker boxes you linked (no other chest is ever
   opened), then buys the rest in `/shop` (ShopGUI+), and crafts rails, powered rails and pumpkin seeds from
-  iron and gold blocks, logs, redstone and pumpkins.
+  iron and gold blocks, logs, redstone and pumpkins. Only what the current layer needs is bought; leftovers go
+  back into the linked chests when the inventory gets full.
 - **Litematica Printer places everything.** The add-on moves, breaks wrong blocks, gets the items and sets the
   printer's own settings (it starts at your interval, keeps your range). It doesn't place blocks itself; the
-  optional "Add-on places blocks itself" (buckets, rails, minecarts) and quick place are off by default.
+  optional "Add-on places blocks itself" (buckets, rails, minecarts) is off by default.
   Hopper chains are built from the hopper they end in, and your camera stays free.
 - Keeps the layer's blocks on the hotbar, eats when hungry, waits when the server lags, picks up again after
-  logging out, and shows the build on screen (layer, blocks left, time to go, speed, what's missing).
+  logging out, and shows the build on screen (layer, blocks left, time to go, speed, how busy the printer is and
+  why not, what's missing).
 - Safety: stops when you take damage or another player comes close, and never uses a nearly broken tool.
 
 ## Install

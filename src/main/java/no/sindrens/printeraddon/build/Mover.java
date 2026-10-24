@@ -769,10 +769,10 @@ public class Mover {
         return null;
     }
 
-    /** A free spot above the block, high enough to reach it and not in the way of the layer. */
     /**
      * Where to hover for a block: right above the layers being built (so nothing is ever over the player's head
-     * and the reach goes furthest sideways), or above the block itself if it's lower (a block placed later).
+     * and the reach goes furthest sideways: with range 5, about 4.5 blocks at hover height 1 against 3.9 at 2),
+     * or above the block itself if it's lower (a block placed later).
      */
     private Vec3 hoverPoint(Minecraft mc, BlockPos goalBlock) {
         LayerManager layers = AutoBuild.INSTANCE.layers;
