@@ -598,7 +598,8 @@ public class Mover {
             double nearestDistance = Double.MAX_VALUE;
             for (BlockPos pos : here) {
                 double d = eye.distanceToSqr(Vec3.atCenterOf(pos));
-                if (d < nearestDistance && reachable(mc, schematic, eye, pos, reach)) {
+                // Planned with a margin: the printer doesn't always manage at its full range
+                if (d < nearestDistance && reachable(mc, schematic, eye, pos, reach - PLAN_MARGIN)) {
                     nearestDistance = d;
                     nearest = pos;
                 }
@@ -697,6 +698,9 @@ public class Mover {
         return d <= bucket * bucket || BlockCheck.check(mc.level, schematic, pos) != BlockCheck.Result.BUCKET;
     }
 
+    /** Spots are chosen with blocks this much closer than the printer's range. */
+    private static final double PLAN_MARGIN = 0.5;
+
     /** Extra cost (blocks) for going back to an area behind in the usual order. */
     private static final double BEHIND_AREA_COST = 12;
 
@@ -746,7 +750,7 @@ public class Mover {
      * Fewest ticks to wait for the printer to pick something in reach before moving on: longer than the 20 ticks a
      * block that was just tried is held back while the server answers.
      */
-    private static final int MIN_IDLE_TICKS = 25;
+    private static final int MIN_IDLE_TICKS = 14;
     /** Keep moving: leave for the next spot when this few placeable blocks are left in reach. */
     private static final int KEEP_MOVING_LEFT = 3;
     /** Blocks per tick while flying past blocks the printer is placing (about 2 blocks a second). */
@@ -754,7 +758,7 @@ public class Mover {
     private boolean gliding;
     private long lastEarlyLeave = -100;
     /** Ticks on top of two printer turns to wait for the next block of a chain (a server round trip). */
-    private static final int GRACE_EXTRA_TICKS = 8;
+    private static final int GRACE_EXTRA_TICKS = 4;
 
     /** Waits while the printer and breaker work; skips the blocks in reach if nothing happens for a while. */
     private int lastPlacedCount = -1;
@@ -779,7 +783,9 @@ public class Mover {
 
         // The printer looks for a block every interval: when it found nothing for two of its turns (and nothing
         // else is busy), the blocks here aren't going to happen now. Move on instead of hovering.
-        int idleLimit = Math.max(MIN_IDLE_TICKS, 2 * AutoBuild.INSTANCE.speed.interval() + 4);
+        // (longer than a just-tried block is held back while the server answers: 2x ping + 6)
+        int idleLimit = Math.max(Math.max(MIN_IDLE_TICKS, 2 * AutoBuild.INSTANCE.speed.interval() + 4),
+                2 * ServerLag.pingTicks(Minecraft.getInstance()) + 10);
         int limit = Math.min(idleLimit, Configs.Movement.WORK_WAIT_SECONDS.getIntegerValue() * 20);
         if (workTicksWithoutProgress > limit) {
             PrinterAddon.debug("Nothing happened to {} blocks in reach for {} ticks, skipping them for now", inReach.size(), limit);
