@@ -76,31 +76,58 @@ public class HotbarPrep {
 
     /**
      * Puts a small stack onto another stack of the same item (the refill before the last item leaves a single one
-     * behind every stack). Never the stack in hand.
+     * behind every stack). Only in the main inventory (never the hotbar, which the printer changes all the time),
+     * at most every 10 seconds, and never again in this build if a merge didn't do what was expected (on a server
+     * the client's view can be behind: then the clicks swap two different items back and forth).
      */
-    private static boolean mergeSmallStacks(Minecraft mc, LocalPlayer player, Inventory inventory) {
-        int selected = inventory.getSelectedSlot();
-        for (int a = 0; a < Inventory.INVENTORY_SIZE; a++) {
+    private static long lastMerge;
+    private static boolean mergeBroken;
+    private static int mergeCheckSlot = -1;
+    private static net.minecraft.world.item.Item mergeCheckItem;
+
+    public static void resetMerging() {
+        mergeBroken = false;
+        mergeCheckSlot = -1;
+        lastMerge = 0;
+    }
+
+    private boolean mergeSmallStacks(Minecraft mc, LocalPlayer player, Inventory inventory) {
+        if (mergeCheckSlot >= 0) {
+            // The slot merged onto must still hold the same item
+            if (!inventory.getItem(mergeCheckSlot).is(mergeCheckItem)) {
+                mergeBroken = true;
+                PrinterAddon.debug("Merging stacks went wrong (slot {} now holds {}): not merging any more in this build",
+                        mergeCheckSlot, inventory.getItem(mergeCheckSlot).getItem());
+            }
+            mergeCheckSlot = -1;
+        }
+        if (mergeBroken || AutoBuild.clientTicks - lastMerge < 200) {
+            return false;
+        }
+        for (int a = Inventory.getSelectionSize(); a < Inventory.INVENTORY_SIZE; a++) {
             ItemStack small = inventory.getItem(a);
-            if (a == selected || small.isEmpty() || small.getCount() >= small.getMaxStackSize() || small.isDamageableItem()) {
+            if (small.isEmpty() || small.getCount() >= small.getMaxStackSize() || small.isDamageableItem()) {
                 continue;
             }
-            for (int b = 0; b < Inventory.INVENTORY_SIZE; b++) {
+            for (int b = Inventory.getSelectionSize(); b < Inventory.INVENTORY_SIZE; b++) {
                 ItemStack other = inventory.getItem(b);
                 if (b == a || other.getCount() >= other.getMaxStackSize() || other.getCount() < small.getCount()
                         || !ItemStack.isSameItemSameComponents(small, other)) {
                     continue;
                 }
+                int count = small.getCount();
+                net.minecraft.world.item.Item item = small.getItem();
                 int id = player.inventoryMenu.containerId;
-                int from = a < 9 ? 36 + a : a;
-                int to = b < 9 ? 36 + b : b;
-                mc.gameMode.handleContainerInput(id, from, 0, ContainerInput.PICKUP, player);
-                mc.gameMode.handleContainerInput(id, to, 0, ContainerInput.PICKUP, player);
+                mc.gameMode.handleContainerInput(id, a, 0, ContainerInput.PICKUP, player);
+                mc.gameMode.handleContainerInput(id, b, 0, ContainerInput.PICKUP, player);
                 if (!player.inventoryMenu.getCarried().isEmpty()) {
-                    mc.gameMode.handleContainerInput(id, from, 0, ContainerInput.PICKUP, player);
+                    mc.gameMode.handleContainerInput(id, a, 0, ContainerInput.PICKUP, player);
                 }
                 AutoBuild.INSTANCE.inventory.moved();
-                PrinterAddon.trace("Merged {} {} from slot {} onto slot {}", small.getCount(), small.getItem(), a, b);
+                lastMerge = AutoBuild.clientTicks;
+                mergeCheckSlot = b;
+                mergeCheckItem = item;
+                PrinterAddon.trace("Merged {} {} from slot {} onto slot {}", count, item, a, b);
                 return true;
             }
         }

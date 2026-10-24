@@ -267,13 +267,16 @@ public class SpeedTuner {
         switch (result) {
             case OK, BUCKET, PRINTER_FIXES -> {
                 good++;
-                if (++goodInARow >= Configs.Speed.AUTO_SPEED_STEP_BLOCKS.getIntegerValue() && tick > calmUntil) {
+                int min = Math.max(Math.max(fastestSafe, floorForLayer()), Configs.Speed.AUTO_SPEED_MIN_INTERVAL.getIntegerValue());
+                // Far from the fastest known safe speed: fewer blocks per step and big steps (half the way at once);
+                // close to it: the set number of blocks and one tick at a time
+                int needed = interval() - min > 2 ? Math.min(8, Configs.Speed.AUTO_SPEED_STEP_BLOCKS.getIntegerValue())
+                        : Configs.Speed.AUTO_SPEED_STEP_BLOCKS.getIntegerValue();
+                if (++goodInARow >= needed && tick > calmUntil) {
                     goodInARow = 0;
-                    int min = Math.max(Math.max(fastestSafe, floorForLayer()), Configs.Speed.AUTO_SPEED_MIN_INTERVAL.getIntegerValue());
                     if (interval() > min) {
-                        interval--;
-                        Chat.info("Speed: printer interval " + interval + " (the last "
-                                + Configs.Speed.AUTO_SPEED_STEP_BLOCKS.getIntegerValue() + " blocks were all right)");
+                        interval -= Math.max(1, (interval() - min) / 2);
+                        Chat.info("Speed: printer interval " + interval + " (the last " + needed + " blocks were all right)");
                     }
                 }
             }

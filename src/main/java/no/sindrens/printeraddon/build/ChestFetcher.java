@@ -53,6 +53,8 @@ public class ChestFetcher {
     }
 
     private final Map<Spot, Known> known = new HashMap<>();
+    /** Vaults that didn't open, until when they're left alone. */
+    private static final Map<Integer, Long> vaultDown = new HashMap<>();
     private final Map<Item, Integer> wanted = new LinkedHashMap<>();
     private final List<Spot> toVisit = new ArrayList<>();
     /** Items being put away (instead of taken), with how many stacks of each stay in the inventory. */
@@ -235,6 +237,10 @@ public class ChestFetcher {
                 if (!(mc.gui.screen() instanceof AbstractContainerScreen<?>) || player.containerMenu == player.inventoryMenu) {
                     if (waited > OPEN_TIMEOUT + 2 * ServerLag.pingTicks(mc)) {
                         PrinterAddon.debug("The {} didn't open", current.name());
+                        if (current.pos() == null) {
+                            // No such vault (or no /pv here): not again for a while
+                            vaultDown.put(current.vault(), AutoBuild.clientTicks + 20L * 60 * 10);
+                        }
                         current = null;
                     }
                     return true;
@@ -303,7 +309,10 @@ public class ChestFetcher {
     private static List<Spot> spots(Minecraft mc) {
         List<Spot> found = new ArrayList<>();
         for (int vault : vaults()) {
-            found.add(new Spot(null, vault));
+            Long down = vaultDown.get(vault);
+            if (down == null || down < AutoBuild.clientTicks) {
+                found.add(new Spot(null, vault));
+            }
         }
         if (mc.level != null) {
             for (BlockPos pos : ChestLinks.list(mc)) {

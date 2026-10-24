@@ -130,6 +130,10 @@ public class FarmTest implements FabricClientGameTest {
                 context.waitTicks(40);
             }
 
+            // A building standing in the middle of the farm (like on the player's server): it has to fly around it
+            if (System.getenv("PRINTER_ADDON_OBSTACLE") != null) {
+                server.runCommand("fill 60 -58 8 63 -41 11 stone_bricks");
+            }
             restock(context, server);
             context.waitTicks(20);
 
@@ -139,8 +143,10 @@ public class FarmTest implements FabricClientGameTest {
                 Configs.Generic.DEBUG_LOG.setBooleanValue(true);
                 Configs.Generic.DETAILED_CHAT.setBooleanValue(true);
                 Configs.Generic.STATUS_FILE.setBooleanValue(true);
-                // The player's own Litematica Printer settings: range 5, interval 12
-                me.aleksilassila.litematica.printer.config.Configs.PRINTING_RANGE.setDoubleValue(5.0);
+                // The player's own Litematica Printer settings on their server: range 4.5, interval 12
+                me.aleksilassila.litematica.printer.config.Configs.PRINTING_RANGE.setDoubleValue(4.5);
+                // No /pv in singleplayer
+                Configs.Shop.VAULTS.setValueFromString("");
                 me.aleksilassila.litematica.printer.config.Configs.PRINTING_INTERVAL.setIntegerValue(12);
                 String keepMoving = System.getenv("PRINTER_ADDON_KEEP_MOVING");
                 if (keepMoving != null) {
@@ -158,7 +164,10 @@ public class FarmTest implements FabricClientGameTest {
             int lastLayer = Integer.MIN_VALUE;
             int ticksOnLayer = 0;
             boolean stuck = false;
-            while (ticks < MAX_TICKS && context.computeOnClient(mc -> AutoBuild.INSTANCE.isRunning())) {
+            // Short test rounds: PRINTER_ADDON_TEST_MINUTES=5 stops after that many minutes of building
+            String minutesEnv = System.getenv("PRINTER_ADDON_TEST_MINUTES");
+            int maxTicks = minutesEnv == null || minutesEnv.isBlank() ? MAX_TICKS : Integer.parseInt(minutesEnv.trim()) * 20 * 60;
+            while (ticks < maxTicks && context.computeOnClient(mc -> AutoBuild.INSTANCE.isRunning())) {
                 context.waitTicks(SCREENSHOT_EVERY);
                 ticks += SCREENSHOT_EVERY;
                 // A picture every 3 seconds is plenty for the live view, and each one costs the slow test machine time
@@ -179,6 +188,13 @@ public class FarmTest implements FabricClientGameTest {
                 }
             }
             String diagnosis = stuck ? context.computeOnClient(FarmTest::diagnose) : "";
+            if (!stuck) {
+                context.runOnClient(mc -> {
+                    if (AutoBuild.INSTANCE.isRunning()) {
+                        AutoBuild.INSTANCE.stop(mc, "test time is up");
+                    }
+                });
+            }
             if (stuck) {
                 context.runOnClient(mc -> AutoBuild.INSTANCE.stop(mc, "test: stuck on one layer"));
             }

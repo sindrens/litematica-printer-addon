@@ -163,7 +163,7 @@ public class Configs implements IConfigHandler {
                 "Flying: when only a few blocks are left to place where you are, already fly on to the next spot (the printer\n"
                         + "places the last ones on the way) instead of stopping until everything around is done.",
                 "Keep moving");
-        public static final ConfigInteger HOVER_HEIGHT = new ConfigInteger("hoverHeight", 1, 1, 4,
+        public static final ConfigInteger HOVER_HEIGHT = new ConfigInteger("hoverHeightAbove", 1, 1, 4,
                 "When flying, hover this many blocks above the layer being built (1 = right above it, the most reach).",
                 "Hover height");
         public static final ConfigInteger WORK_WAIT_SECONDS = new ConfigInteger("workWaitSeconds", 4, 1, 60,
@@ -213,7 +213,7 @@ public class Configs implements IConfigHandler {
                 "Before buying, take missing items from the chests, barrels and shulker boxes you linked (J+B, Build tab:\n"
                         + "look at one and press 'Link chest'). No other chest is ever opened. They have to be loaded (in view distance).",
                 "Take from linked chests first");
-        public static final ConfigString VAULTS = new ConfigString("playerVaults", "",
+        public static final ConfigString VAULTS = new ConfigString("playerVaultNumbers", "1,2",
                 "Your player vaults to use as storage, like chests: items are taken from them before buying (pumpkins to\n"
                         + "craft seeds from, for example) and leftovers are put in them. Numbers, e.g. 1-6 or 1,2,3. Empty = none.",
                 "Player vaults (/pv)");

@@ -36,6 +36,11 @@ public class BuildStats {
         layerPlaced = totalPlaced = 0;
         recent.clear();
         layerTickCount = totalTickCount = 0;
+        minuteStart = -1;
+        minutePlaced = 0;
+        java.util.Arrays.fill(minuteTurns, 0);
+        java.util.Arrays.fill(recentTurns, 0);
+        minutePauses.clear();
     }
 
     /** Times of recent placements, for the blocks-per-minute on screen. */

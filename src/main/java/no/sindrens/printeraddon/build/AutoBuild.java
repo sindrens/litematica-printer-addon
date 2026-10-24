@@ -63,6 +63,7 @@ public class AutoBuild {
             } else if (tries.count() + 1 >= MAX_TRIES) {
                 triesAt.remove(pos);
                 givenUp.put(pos.immutable(), clientTicks + GIVE_UP_TICKS);
+                Mover.missedAt(Math.sqrt(mc.player.getEyePosition().distanceToSqr(net.minecraft.world.phys.Vec3.atCenterOf(pos))));
                 PrinterAddon.debug("The printer tried {} {} times and nothing changed (is {}): leaving it for 30 s",
                         pos.toShortString(), MAX_TRIES, now.getBlock().getName().getString());
             } else {
@@ -416,7 +417,7 @@ public class AutoBuild {
         // Farmland is dirt tilled with a hoe
         if (needs.containsKey(net.minecraft.world.item.Items.DIRT)
                 && !mc.player.getInventory().contains(net.minecraft.tags.ItemTags.HOES)) {
-            needs.put(net.minecraft.world.item.Items.IRON_HOE, 1);
+            needs.put(net.minecraft.world.item.Items.DIAMOND_HOE, 1);
         }
         neededWhole.clear();
         neededWhole.putAll(needs);
@@ -611,6 +612,7 @@ public class AutoBuild {
         buying = false;
         buyCooldown = 0;
         cleaner.reset();
+        HotbarPrep.resetMerging();
         crafter.reset();
         fetcher.reset();
         eater.reset(mc);

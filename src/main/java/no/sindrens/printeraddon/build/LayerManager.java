@@ -221,7 +221,7 @@ public class LayerManager {
         waterPending = findings.water;
         waterCells = findings.waterCells;
         if (findings.needsHoe && mc.player != null && !mc.player.getInventory().contains(net.minecraft.tags.ItemTags.HOES)) {
-            findings.needs.put(net.minecraft.world.item.Items.IRON_HOE, 1);
+            findings.needs.put(net.minecraft.world.item.Items.DIAMOND_HOE, 1);
         }
         updateShoppingList(mc, findings.needs);
         layerNeeds = findings.needs;

@@ -31,7 +31,45 @@ public class InventoryCleaner {
     /** Ticks since leftovers were last put in chests: if the inventory is still full soon after, they're full. */
     private int sinceStored = Integer.MAX_VALUE;
 
+    /** Leftovers of crafting (what hoes, rails and seeds are made of) are put away too, unless needed now. */
+    private static final Set<Item> CRAFTING_LEFTOVERS = Set.of(Items.DIAMOND, Items.DIAMOND_BLOCK, Items.STICK,
+            Items.IRON_INGOT, Items.IRON_BLOCK, Items.GOLD_INGOT, Items.GOLD_BLOCK, Items.REDSTONE_BLOCK, Items.OAK_LOG,
+            Items.OAK_PLANKS, Items.PUMPKIN);
+    private int lastLayer = Integer.MIN_VALUE;
+    private boolean storeOffLayer;
+
+    /**
+     * Building materials and crafting leftovers in the inventory that the current layer doesn't need (also not to
+     * craft something it needs). Never tools, food or anything else.
+     */
+    private Set<Item> offLayer(Inventory inventory) {
+        Map<Item, Integer> layerNeeds = AutoBuild.INSTANCE.layers.layerNeeds();
+        Set<Item> keep = new HashSet<>(layerNeeds.keySet());
+        if (layerNeeds.containsKey(Items.PUMPKIN_SEEDS)) {
+            keep.add(Items.PUMPKIN);
+        }
+        if (layerNeeds.containsKey(Items.DIAMOND_HOE) || !inventory.contains(net.minecraft.tags.ItemTags.HOES)) {
+            keep.addAll(Set.of(Items.DIAMOND, Items.DIAMOND_BLOCK, Items.STICK, Items.OAK_PLANKS, Items.OAK_LOG));
+        }
+        if (layerNeeds.containsKey(Items.RAIL) || layerNeeds.containsKey(Items.POWERED_RAIL)) {
+            keep.addAll(Set.of(Items.IRON_INGOT, Items.IRON_BLOCK, Items.GOLD_INGOT, Items.GOLD_BLOCK, Items.STICK,
+                    Items.REDSTONE, Items.REDSTONE_BLOCK, Items.OAK_PLANKS, Items.OAK_LOG));
+        }
+        Set<Item> off = new HashSet<>();
+        for (int slot = 0; slot < Inventory.INVENTORY_SIZE; slot++) {
+            ItemStack stack = inventory.getItem(slot);
+            Item item = stack.getItem();
+            if (!stack.isEmpty() && !stack.isDamageableItem() && !keep.contains(item)
+                    && (materials.contains(item) || CRAFTING_LEFTOVERS.contains(item))) {
+                off.add(item);
+            }
+        }
+        return off;
+    }
+
     public void reset() {
+        lastLayer = Integer.MIN_VALUE;
+        storeOffLayer = false;
         materials.clear();
         cooldown = 0;
         sinceStored = Integer.MAX_VALUE;
@@ -56,8 +94,35 @@ public class InventoryCleaner {
             sinceStored++;
         }
         Inventory inventory = player.getInventory();
+        // A new layer: what it doesn't need goes into storage (vaults, linked chests), so the inventory holds this
+        // layer's blocks. Fetched back from there when a later layer needs it
+        int layer = AutoBuild.INSTANCE.layers.getLayer();
+        if (layer != lastLayer) {
+            lastLayer = layer;
+            storeOffLayer = AutoBuild.INSTANCE.layers.isActive();
+        }
+        if (storeOffLayer && !AutoBuild.INSTANCE.layers.layerNeeds().isEmpty()) {
+            storeOffLayer = false;
+            Set<Item> offLayer = offLayer(inventory);
+            if (!offLayer.isEmpty() && ChestFetcher.hasStorage(mc) && fetcher.startStore(mc, offLayer)) {
+                PrinterAddon.debug("New layer: putting what it doesn't need in storage: {}", offLayer);
+                sinceStored = 0;
+                return true;
+            }
+        }
         if (freeSlots(inventory) >= MIN_FREE_SLOTS) {
             return false;
+        }
+        // Full: with storage, everything this layer doesn't need goes there first
+        if (sinceStored > 20 * 60 && ChestFetcher.hasStorage(mc)) {
+            Set<Item> offLayer = offLayer(inventory);
+            if (!offLayer.isEmpty()) {
+                sinceStored = 0;
+                if (fetcher.startStore(mc, offLayer)) {
+                    PrinterAddon.debug("Inventory full: putting what this layer doesn't need in storage: {}", offLayer);
+                    return true;
+                }
+            }
         }
 
         Set<Item> leftovers = new HashSet<>();

@@ -38,7 +38,7 @@ public final class CraftPlan {
 
     /** True for items this plans (everything else is simply bought). */
     public static boolean crafted(Item item) {
-        return item == Items.RAIL || item == Items.POWERED_RAIL || item == Items.PUMPKIN_SEEDS;
+        return item == Items.RAIL || item == Items.POWERED_RAIL || item == Items.PUMPKIN_SEEDS || item == Items.DIAMOND_HOE;
     }
 
     /**
@@ -61,7 +61,7 @@ public final class CraftPlan {
         // Before the first step that needs it (rails), after what it's made of
         for (int i = 0; i < craft.size(); i++) {
             Item item = craft.get(i).item();
-            if (item == Items.RAIL || item == Items.POWERED_RAIL) {
+            if (item == Items.RAIL || item == Items.POWERED_RAIL || item == Items.DIAMOND_HOE) {
                 return i;
             }
         }
@@ -70,8 +70,14 @@ public final class CraftPlan {
 
     private void add(Item item, int count) {
         // Always the shop first: crafted only when the shop doesn't sell it (seeds: own pumpkins first, see below)
-        if ((item == Items.RAIL || item == Items.POWERED_RAIL) && sold.test(item)) {
+        if ((item == Items.RAIL || item == Items.POWERED_RAIL || item == Items.DIAMOND_HOE) && sold.test(item)) {
             buy.merge(item, count, Integer::sum);
+        } else if (item == Items.DIAMOND_HOE) {
+            // Hoe for tilling farmland: 2 diamonds (own, bought, or from a bought diamond block) and 2 sticks
+            ingot(Items.DIAMOND, Items.DIAMOND_BLOCK, 2 * count);
+            sticks(2 * count);
+            needsTable = true;
+            craft.add(new Step(Items.DIAMOND_HOE, count));
         } else if (item == Items.RAIL) {
             int crafts = ceil(count, 16);
             ingot(Items.IRON_INGOT, Items.IRON_BLOCK, 6 * crafts);
