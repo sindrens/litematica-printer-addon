@@ -137,6 +137,10 @@ public class FarmTest implements FabricClientGameTest {
                 Configs.Generic.DEBUG_LOG.setBooleanValue(true);
                 Configs.Generic.DETAILED_CHAT.setBooleanValue(true);
                 Configs.Generic.STATUS_FILE.setBooleanValue(true);
+                String keepMoving = System.getenv("PRINTER_ADDON_KEEP_MOVING");
+                if (keepMoving != null) {
+                    Configs.Movement.KEEP_MOVING.setBooleanValue(!keepMoving.equals("0"));
+                }
                 String minInterval = System.getenv("PRINTER_ADDON_MIN_INTERVAL");
                 if (minInterval != null) {
                     Configs.Speed.AUTO_SPEED_MIN_INTERVAL.setIntegerValue(Integer.parseInt(minInterval));

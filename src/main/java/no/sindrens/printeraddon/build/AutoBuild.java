@@ -419,6 +419,7 @@ public class AutoBuild {
         nextBlock = null;
         breaker.reset();
         mover.reset();
+        mover.takeOff(mc.player);
         PrinterBridge.saveSettings();
         PrinterBridge.applySettings(mc.player);
         printerWasOn = PrinterBridge.isPrinting();
@@ -584,6 +585,7 @@ public class AutoBuild {
 
         PrinterBridge.applySettings(mc.player);
         stats.tick(activity());
+        stats.printerTick(PrinterBridge.isIdle(), shouldPausePrinter());
         speed.tick(mc);
 
         // Eating: nothing else happens meanwhile (only between other jobs, never in the middle of one)

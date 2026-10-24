@@ -38,10 +38,17 @@ public class InteractActionMixin {
     @Unique
     private static boolean printer_addon$sneaked;
 
-    @Inject(method = "interact", at = @At("HEAD"))
+    @Inject(method = "interact", at = @At("HEAD"), cancellable = true)
     private void printer_addon$faceForClick(Minecraft client, LocalPlayer player, InteractionHand hand, BlockHitResult hit, CallbackInfo ci) {
         printer_addon$turned = false;
         printer_addon$sneaked = false;
+        // The stack ran out between the printer's prepare and this click: an empty hand places nothing and opens a
+        // hopper or chest it clicks on (sneaking doesn't help with empty hands). Skip it; the printer tries again
+        if (Configs.enabled() && player.getItemInHand(hand).isEmpty()) {
+            no.sindrens.printeraddon.PrinterAddon.trace("Skipped a printer click with an empty hand at {}", hit.getBlockPos().toShortString());
+            ci.cancel();
+            return;
+        }
         // Placing against a hopper, chest, door...: the server must see the player sneaking at the moment of the
         // click, or it opens the hopper instead (and nothing is placed). The printer doesn't always sneak, and its
         // sneak can be overtaken by the click. Sneak right before the click, in the same packet order a player would

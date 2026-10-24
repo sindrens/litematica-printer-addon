@@ -58,6 +58,28 @@ public class BuildStats {
         totalPlaced++;
     }
 
+    private int minuteTicks;
+    private int minuteIdle;
+    private int minutePlaced;
+
+    /**
+     * Once a minute in the log: blocks placed, and how often the printer had nothing queued. Rarely idle means the
+     * printer is the limit; often idle means it waits for the player to get somewhere.
+     */
+    public void printerTick(boolean idle, boolean paused) {
+        minuteTicks++;
+        if (idle && !paused) {
+            minuteIdle++;
+        }
+        if (minuteTicks >= 20 * 60) {
+            PrinterAddon.debug("[rate] last minute: {} placed, printer idle {}% of ticks, {}", totalPlaced - minutePlaced,
+                    minuteIdle * 100 / minuteTicks, AutoBuild.INSTANCE.speed.describe());
+            minutePlaced = totalPlaced;
+            minuteTicks = 0;
+            minuteIdle = 0;
+        }
+    }
+
     public void tick(Activity activity) {
         layerTicks.merge(activity, 1, Integer::sum);
         totalTicks.merge(activity, 1, Integer::sum);

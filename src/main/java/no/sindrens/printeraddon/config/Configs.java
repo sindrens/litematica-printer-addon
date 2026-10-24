@@ -141,9 +141,10 @@ public class Configs implements IConfigHandler {
                         + "right after tilling. Farmland without a crop and without water dries back to dirt.",
                 "Plant right after tilling");
 
-        public static final ConfigBoolean USE_AIR_PLACE = new ConfigBoolean("useAirPlace", true,
+        public static final ConfigBoolean USE_AIR_PLACE = new ConfigBoolean("useAirPlace", false,
                 "When every missing block within reach floats (nothing next to it to place it against), turn on the\n"
-                        + "printer's 'printInAir' for exactly one block, then off again. Blocks it puts in the wrong spot are broken.",
+                        + "printer's 'printInAir' for exactly one block, then off again. Off by default: placing against air is what\n"
+                        + "anticheats look for, and they cancel those blocks.",
                 "Use printer's air place");
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
@@ -169,6 +170,10 @@ public class Configs implements IConfigHandler {
         public static final ConfigString FLY_COMMAND = new ConfigString("flyCommand", "fly",
                 "Command (without the slash) sent once if flying is needed but not allowed yet. Empty: never send one.",
                 "Fly command");
+        public static final ConfigBoolean KEEP_MOVING = new ConfigBoolean("keepMoving", true,
+                "Flying: when only a few blocks are left to place where you are, already fly on to the next spot (the printer\n"
+                        + "places the last ones on the way) instead of stopping until everything around is done.",
+                "Keep moving");
         public static final ConfigInteger HOVER_HEIGHT = new ConfigInteger("hoverHeight", 1, 1, 4,
                 "When flying, hover this many blocks above the layer being built (1 = right above it, the most reach).",
                 "Hover height");
@@ -181,7 +186,7 @@ public class Configs implements IConfigHandler {
                 "Max walk distance");
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                MOVE_MODE, FLY_COMMAND, HOVER_HEIGHT, WORK_WAIT_SECONDS, MAX_WALK_DISTANCE);
+                MOVE_MODE, FLY_COMMAND, KEEP_MOVING, HOVER_HEIGHT, WORK_WAIT_SECONDS, MAX_WALK_DISTANCE);
 
         public static MoveMode mode() {
             return (MoveMode) MOVE_MODE.getOptionListValue();

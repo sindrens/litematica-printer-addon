@@ -201,11 +201,14 @@ public class Mover {
             }
         }
 
-        // On the way to a chosen spot, keep going (the printer places what's in reach meanwhile)
+        // On the way to a chosen spot, keep going (the printer places what's in reach meanwhile): slowly while there
+        // is something to place in reach, so the printer gets to all of it on the way; at full speed otherwise
         if (state == State.FLYING && flyTarget != null && mode.canFly()) {
+            gliding = !inReach.isEmpty() && Configs.Movement.KEEP_MOVING.getBooleanValue();
             move(mc, player, mode);
             return;
         }
+        gliding = false;
 
         // All that's left here is right under the player, where the printer never places: step aside to it now
         // instead of waiting and leaving it behind
@@ -232,6 +235,21 @@ public class Mover {
                 player.setDeltaMovement(Vec3.ZERO);
             }
             return;
+        }
+
+        // Keep moving: with only a few placeable blocks left here, fly on to the next spot already; the printer
+        // places these on the way (it places whatever is in reach while flying)
+        if (!inReach.isEmpty() && inReach.size() <= KEEP_MOVING_LEFT && Configs.Movement.KEEP_MOVING.getBooleanValue()
+                && mode.canFly() && flying(player) && tick - lastEarlyLeave > 10) {
+            BlockPos next = bestSpot(mc, player, schematic, reach);
+            if (next != null && hoverPoint(mc, next).distanceToSqr(player.position()) > 4) {
+                lastEarlyLeave = tick;
+                target = next;
+                replans = 0;
+                plan(mc, player, next, mode, reach);
+                move(mc, player, mode);
+                return;
+            }
         }
 
         if (!inReach.isEmpty()) {
@@ -482,6 +500,12 @@ public class Mover {
      * block that was just tried is held back while the server answers.
      */
     private static final int MIN_IDLE_TICKS = 25;
+    /** Keep moving: leave for the next spot when this few placeable blocks are left in reach. */
+    private static final int KEEP_MOVING_LEFT = 3;
+    /** Blocks per tick while flying past blocks the printer is placing (about 2 blocks a second). */
+    private static final double GLIDE_SPEED = 0.1;
+    private boolean gliding;
+    private long lastEarlyLeave = -100;
     /** Ticks on top of two printer turns to wait for the next block of a chain (a server round trip). */
     private static final int GRACE_EXTRA_TICKS = 8;
 
@@ -766,7 +790,7 @@ public class Mover {
             return;
         }
 
-        double speed = Math.min(Configs.Speed.flySpeed(), distance);
+        double speed = Math.min(gliding ? GLIDE_SPEED : Configs.Speed.flySpeed(), distance);
         Vec3 motion = to.normalize().scale(speed);
         if (player.horizontalCollision) {
             motion = new Vec3(motion.x, Math.max(motion.y, 0.3), motion.z);
@@ -802,6 +826,13 @@ public class Mover {
         Chat.warn("Can't fly here" + (command.isEmpty() ? "" : " (/" + command + " didn't allow flying)")
                 + ". Walking only from now on.");
         return false;
+    }
+
+    /** At the start of auto build: up into the air right away when flying is allowed (or after /fly). */
+    public void takeOff(LocalPlayer player) {
+        if (Configs.Movement.mode().canFly()) {
+            ensureFlying(player);
+        }
     }
 
     private static void setFlying(LocalPlayer player, boolean on) {
