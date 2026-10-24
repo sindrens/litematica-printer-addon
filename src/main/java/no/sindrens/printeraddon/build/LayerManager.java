@@ -189,26 +189,15 @@ public class LayerManager {
         ticksUntilCheck = Math.min(ticksUntilCheck, 1);
     }
 
-    /**
-     * True while water still has to go in near this block of the current layer (waterlogged blocks, water, within
-     * 8 to 16 blocks): the water blocks come first, everything around them after (farmland is wet from the start,
-     * no water flows over placed blocks). Water far away doesn't hold anything up here.
-     */
-    public boolean waterFirst(BlockPos pos) {
-        if (!active || pos.getY() < layer || pos.getY() > layerTop) {
-            return false;
-        }
-        return waterPending < 0 || waterCells.contains(waterCell(pos.getX() >> 3, pos.getZ() >> 3));
-    }
+    /** Farmland of the current layers still to till (as last checked). */
+    private int tillingLeft;
 
-    private static long waterCell(int cx, int cz) {
-        return ((long) cx << 32) | (cz & 0xFFFFFFFFL);
+    public int tillingLeft() {
+        return active ? tillingLeft : 0;
     }
 
     /** -1 until the layer was checked once; else the unfinished water blocks of the layer. */
     private int waterPending;
-    /** 8x8 cells with unfinished water in or next to them. */
-    private java.util.Set<Long> waterCells = java.util.Set.of();
 
     public boolean stalledFor(int ticks) {
         return active && ticksWithoutProgress >= ticks;
@@ -360,15 +349,16 @@ public class LayerManager {
         Findings findings = new Findings();
         int remaining = scanLayers(mc.level, schematic, areas, null, findings);
         if (waterPending > 0 && findings.water == 0 && remaining > 0) {
-            Chat.info("The water on " + describeLayers() + " is in: now the rest of the layer.");
+            BuildLog.line("LAYER", "the water on " + describeLayers() + " is all in");
         }
         waterPending = findings.water;
-        waterCells = findings.waterCells;
         BuildLog.line("LAYER", describeLayers() + ": " + remaining + " unfinished (" + findings.waiting.size()
                 + " waiting for something above, " + findings.water + " water still to go in) | conflicts "
                 + AutoBuild.INSTANCE.conflicts.size() + " | still needs " + findings.needs);
-        if (findings.needsHoe && mc.player != null && !StateRules.hasUsableHoe(mc.player.getInventory())) {
-            findings.needs.put(net.minecraft.world.item.Items.DIAMOND_HOE, mc.player.getInventory().countItem(net.minecraft.world.item.Items.DIAMOND_HOE) + 1);
+        tillingLeft = findings.tilling;
+        // Tilling needs a hoe: one from storage, else crafted (see Tools); enough for the tilling left
+        if (findings.tilling > 0 && mc.player != null && !Tools.hasUsableHoe(mc.player.getInventory())) {
+            findings.needs.put(Tools.HOE, Tools.hoesFor(findings.tilling - Tools.hoeUses(mc.player.getInventory())));
         }
         updateShoppingList(mc, findings.needs);
         layerNeeds = findings.needs;
@@ -846,11 +836,10 @@ public class LayerManager {
         final List<BlockPos> waiting = new ArrayList<>();
         /** Items the missing blocks need. */
         final java.util.Map<net.minecraft.world.item.Item, Integer> needs = new java.util.LinkedHashMap<>();
-        /** Farmland is placed as dirt and tilled: that needs a hoe. */
-        boolean needsHoe;
-        /** Unfinished blocks that hold water (waterlogged or water): they go first. */
+        /** Farmland still to till (placed as dirt and tilled): that needs a hoe. */
+        int tilling;
+        /** Unfinished blocks that hold water (waterlogged or water), for the build log. */
         int water;
-        final java.util.Set<Long> waterCells = new java.util.HashSet<>();
     }
 
     /**
@@ -882,13 +871,6 @@ public class LayerManager {
                         remaining++;
                         if (findings != null && PlacementOrder.holdsWater(schematic.getBlockState(pos))) {
                             findings.water++;
-                            if (result != BlockCheck.Result.UNLOADED) {
-                                for (int dx = -1; dx <= 1; dx++) {
-                                    for (int dz = -1; dz <= 1; dz++) {
-                                        findings.waterCells.add(waterCell((x >> 3) + dx, (z >> 3) + dz));
-                                    }
-                                }
-                            }
                         }
                         if (examples != null && examples.size() < MAX_REPORTED) {
                             examples.add(pos.immutable());
@@ -901,17 +883,17 @@ public class LayerManager {
                             BlockState target = schematic.getBlockState(pos);
                             // Blocks waiting for the layer's water aren't waiting for something above
                             if (!PlacementOrder.isReady(level, schematic, pos, target)
-                                    && PlacementOrder.waterFirst(level, schematic, pos, target) == null
-                                    && !AutoBuild.INSTANCE.layers.waterFirst(pos)) {
+                                    && PlacementOrder.waterFirst(level, schematic, pos, target) == null) {
                                 findings.waiting.add(pos.immutable());
                             }
                             ItemStack item = StateRules.itemFor(target);
                             if (!item.isEmpty()) {
                                 findings.needs.merge(item.getItem(), 1, Integer::sum);
                             }
-                            if (target.getBlock() == Blocks.FARMLAND) {
-                                findings.needsHoe = true;
-                            }
+                        }
+                        if (findings != null && (result == BlockCheck.Result.MISSING || result == BlockCheck.Result.PRINTER_FIXES)
+                                && schematic.getBlockState(pos).getBlock() == Blocks.FARMLAND) {
+                            findings.tilling++;
                         }
                     }
                 }

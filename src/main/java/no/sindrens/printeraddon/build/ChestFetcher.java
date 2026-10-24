@@ -12,6 +12,7 @@ import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import no.sindrens.printeraddon.PrinterAddon;
@@ -69,6 +70,9 @@ public class ChestFetcher {
     private boolean seenOpen;
     /** Opened again after it was closed, or after it didn't open: once per spot. */
     private boolean retried;
+    /** Small stacks were put together in this spot's menu already; ticks left to wait for the server's answer. */
+    private boolean mergedHere;
+    private int mergeWait;
 
     /** A job (fetching or storing) runs, until its end is written down (see tick). */
     private boolean active;
@@ -84,10 +88,52 @@ public class ChestFetcher {
         toVisit.clear();
         current = null;
         active = false;
+        nearOnly = false;
+        storeWorn = false;
+    }
+
+    /** True if storage had a hoe when last looked in (within the last few minutes). */
+    public boolean knownHoe() {
+        for (Known k : known.values()) {
+            if (AutoBuild.clientTicks - k.at() <= KNOWN_FOR
+                    && k.contents().keySet().stream().anyMatch(item -> Tools.isHoe(new ItemStack(item)))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** How many of this item storage had when last looked in (within the last few minutes). */
+    public int knownCount(Item item) {
+        int count = 0;
+        for (Known k : known.values()) {
+            if (AutoBuild.clientTicks - k.at() <= KNOWN_FOR) {
+                count += k.contents().getOrDefault(item, 0);
+            }
+        }
+        return count;
+    }
+
+    /** What's being done, for the status line. */
+    public String describe() {
+        String where = current != null ? current.name() : "storage";
+        return storing.isEmpty() ? "taking " + describe(wanted) + " from " + where : "putting items away in " + where;
     }
 
     /** The last time leftovers were put away, some didn't fit anywhere. */
     private boolean storageFull;
+    /** Storing without flying anywhere (vaults, and linked chests within reach): when auto build has stopped. */
+    private boolean nearOnly;
+    /** Special tools about to break (an enchanted hoe) are put away too. */
+    private boolean storeWorn;
+
+    /** How full each storage spot was when last open (slots used, slots in all). */
+    private record Fill(int used, int total) {
+    }
+
+    private static final Map<Spot, Fill> fill = new HashMap<>();
+    private static long fullWarnedAt = -100000;
+    private static int fullWarnedPercent;
 
     public boolean storageFull() {
         return storageFull;
@@ -106,6 +152,31 @@ public class ChestFetcher {
     }
 
     /**
+     * When auto build stops: every stack of these items into the vaults (and linked chests within reach, no flying).
+     * Returns false if there's nowhere to put them.
+     */
+    public boolean startPutAway(Minecraft mc, java.util.Set<Item> items) {
+        Map<Item, Integer> keep = new HashMap<>();
+        items.forEach(item -> keep.put(item, 0));
+        nearOnly = true;
+        if (!startStore(mc, keep)) {
+            nearOnly = false;
+            return false;
+        }
+        return true;
+    }
+
+    /** Special tools about to break (an enchanted hoe the printer would use up) into storage. */
+    public boolean startStoreWorn(Minecraft mc) {
+        storeWorn = true;
+        if (!startStore(mc, Map.of(Items.AIR, 0))) {
+            storeWorn = false;
+            return false;
+        }
+        return true;
+    }
+
+    /**
      * Puts stacks of these items into storage (vaults first, then the nearest linked containers) until only the
      * given number of stacks of each is left in the inventory. Returns false if there is no storage.
      */
@@ -114,7 +185,7 @@ public class ChestFetcher {
             return false;
         }
         toVisit.clear();
-        toVisit.addAll(spots(mc));
+        toVisit.addAll(nearOnly ? nearSpots(mc) : spots(mc));
         sort(mc, toVisit);
         if (toVisit.isEmpty()) {
             return false;
@@ -129,14 +200,22 @@ public class ChestFetcher {
 
     private boolean anyLeftToStore(Inventory inventory) {
         Map<Item, Integer> stacks = stacks(inventory);
+        if (storeWorn) {
+            for (int slot = 0; slot < Inventory.INVENTORY_SIZE; slot++) {
+                if (Tools.wornSpecial(inventory.getItem(slot))) {
+                    return true;
+                }
+            }
+        }
         return storing.entrySet().stream().anyMatch(e -> stacks.getOrDefault(e.getKey(), 0) > e.getValue());
     }
 
+    /** Stacks per item that may be put away (ordinary ones, never buckets). */
     private static Map<Item, Integer> stacks(Inventory inventory) {
         Map<Item, Integer> stacks = new HashMap<>();
         for (int slot = 0; slot < Inventory.INVENTORY_SIZE; slot++) {
             ItemStack stack = inventory.getItem(slot);
-            if (!stack.isEmpty()) {
+            if (!stack.isEmpty() && InventoryCleaner.ordinary(stack) && !InventoryCleaner.isBucket(stack.getItem())) {
                 stacks.merge(stack.getItem(), 1, Integer::sum);
             }
         }
@@ -200,21 +279,30 @@ public class ChestFetcher {
             if (!anyLeftToStore(player.getInventory()) || toVisit.isEmpty()) {
                 // Everywhere visited and some still here: storage is full (they're sold or kept, see InventoryCleaner)
                 storageFull = anyLeftToStore(player.getInventory());
-                Chat.info("Put " + taken + " leftover items in storage." + (storageFull ? " The rest didn't fit: storage is full." : ""));
                 if (storageFull) {
-                    BuildLog.line("STORAGE", "full: put " + taken + " items away, the rest didn't fit");
+                    BuildLog.lineOrKeep("STORAGE", "full: put " + taken + " items away, the rest didn't fit");
+                    Chat.warn("Put " + taken + " items in storage; the rest didn't fit: " + storageNames(mc) + " "
+                            + (vaults().size() + ChestLinks.list(mc).size() == 1 ? "is" : "are") + " full. Link a chest for the"
+                            + " rest: look at a chest, press J+B and click 'Link the chest' (then 'Put building items away').");
+                } else if (taken > 0) {
+                    Chat.info("Put " + taken + " items in storage.");
                 }
+                warnIfFilling(mc);
                 storing.clear();
                 toVisit.clear();
                 active = false;
+                nearOnly = false;
+                storeWorn = false;
                 mover.goTo(null);
                 return false;
             }
             current = toVisit.removeFirst();
-            phase = current.pos() == null ? Phase.OPEN : Phase.GO;
+            phase = current.pos() == null || nearOnly ? Phase.OPEN : Phase.GO;
             waited = 0;
             seenOpen = false;
             retried = false;
+            mergedHere = false;
+            mergeWait = 0;
         } else if (current == null) {
             wanted.values().removeIf(count -> count <= 0);
             if (wanted.isEmpty() || toVisit.isEmpty()) {
@@ -231,6 +319,8 @@ public class ChestFetcher {
             waited = 0;
             seenOpen = false;
             retried = false;
+            mergedHere = false;
+            mergeWait = 0;
         }
         waited++;
 
@@ -307,14 +397,34 @@ public class ChestFetcher {
                     return true;
                 }
                 AbstractContainerMenu menu = player.containerMenu;
+                // Small stacks put together while it's open (clicks with a menu open are an ordinary player's), and
+                // checked against the server's answer before anything else changes the inventory
+                if (!mergedHere) {
+                    mergedHere = true;
+                    if (StackMerge.inMenu(mc, player, menu, 8) > 0) {
+                        mergeWait = 3 + 2 * ServerLag.pingTicks(mc);
+                        return true;
+                    }
+                }
+                if (mergeWait > 0) {
+                    if (--mergeWait > 0) {
+                        return true;
+                    }
+                    StackMerge.checkNow(player.getInventory());
+                }
                 if (!storing.isEmpty()) {
                     Map<Item, Integer> stacks = stacks(player.getInventory());
                     for (Slot slot : menu.slots) {
                         ItemStack stack = slot.getItem();
-                        Integer keep = stack.isEmpty() ? null : storing.get(stack.getItem());
-                        // Never a bucket, nor anything renamed, enchanted or otherwise special (an infinite water bucket)
-                        if (slot.container instanceof Inventory && keep != null && stacks.getOrDefault(stack.getItem(), 0) > keep
-                                && InventoryCleaner.plain(stack) && !InventoryCleaner.isBucket(stack.getItem())) {
+                        if (!(slot.container instanceof Inventory) || stack.isEmpty()) {
+                            continue;
+                        }
+                        Integer keep = storing.get(stack.getItem());
+                        // Never a bucket, nor anything renamed, enchanted or otherwise special (an infinite water bucket);
+                        // a worn tool may be (an ordinary hoe the add-on made). Special tools about to break are put away
+                        boolean store = keep != null && stacks.getOrDefault(stack.getItem(), 0) > keep
+                                && InventoryCleaner.ordinary(stack) && !InventoryCleaner.isBucket(stack.getItem());
+                        if (store || storeWorn && Tools.wornSpecial(stack)) {
                             taken += stack.getCount();
                             stacks.merge(stack.getItem(), -1, Integer::sum);
                             mc.gameMode.handleContainerInput(menu.containerId, slot.index, 0, ContainerInput.QUICK_MOVE, player);
@@ -322,9 +432,21 @@ public class ChestFetcher {
                     }
                     // Read again the next time it's opened
                     known.remove(current);
-                    BuildLog.line("STORAGE", current.name() + ": put away, " + taken + " items so far");
+                    noteFill(menu);
+                    BuildLog.lineOrKeep("STORAGE", current.name() + ": put away, " + taken + " items so far" + fillText(current));
                     phase = Phase.CLOSE;
                     return true;
+                }
+                // A hoe is a hoe: the one with the most uses left, if one is wanted
+                int bestHoe = -1;
+                if (wanted.getOrDefault(Tools.HOE, 0) > 0) {
+                    for (Slot slot : menu.slots) {
+                        ItemStack stack = slot.getItem();
+                        if (!(slot.container instanceof Inventory) && Tools.usableHoe(stack)
+                                && (bestHoe < 0 || Tools.left(stack) > Tools.left(menu.slots.get(bestHoe).getItem()))) {
+                            bestHoe = slot.index;
+                        }
+                    }
                 }
                 Map<Item, Integer> contents = new HashMap<>();
                 for (Slot slot : menu.slots) {
@@ -339,21 +461,25 @@ public class ChestFetcher {
                     Item item = stack.getItem();
                     int count = stack.getCount();
                     contents.merge(item, count, Integer::sum);
-                    Integer want = wanted.get(item);
+                    // What it's wanted as: a hoe as "a hoe" (only the best one here), anything else as itself
+                    boolean hoe = Tools.isHoe(stack);
+                    Item key = hoe ? Tools.HOE : item;
+                    Integer want = hoe && slot.index != bestHoe ? null : wanted.get(key);
                     // Never into the last few free slots (see InventoryBudget), unless it tops up a stack
                     boolean fits = InventoryCleaner.freeSlots(player.getInventory()) > InventoryBudget.KEEP_FREE
                             || InventoryBudget.topUpRoom(player.getInventory(), item) >= count;
                     if (want != null && want > 0 && fits && ShopBuyer.room(mc, item) > 0) {
                         mc.gameMode.handleContainerInput(menu.containerId, slot.index, 0, ContainerInput.QUICK_MOVE, player);
-                        wanted.put(item, want - count);
+                        wanted.put(key, want - count);
                         contents.merge(item, -count, Integer::sum);
                         taken += count;
                     }
                 }
                 known.put(current, new Known(contents, AutoBuild.clientTicks));
+                noteFill(menu);
                 PrinterAddon.debug("{}: took what was wanted, {} left wanted", current.name(), wanted);
                 BuildLog.line("STORAGE", current.name() + ": " + taken + " taken so far | still wanted " + describe(wanted)
-                        + " | left in it " + describe(contents));
+                        + " | left in it " + describe(contents) + fillText(current));
                 phase = Phase.CLOSE;
             }
             case CLOSE -> {
@@ -365,6 +491,86 @@ public class ChestFetcher {
             }
         }
         return true;
+    }
+
+    /** How full the open vault or chest is now (after the clicks: the client shows them at once). */
+    private void noteFill(AbstractContainerMenu menu) {
+        int used = 0;
+        int total = 0;
+        for (Slot slot : menu.slots) {
+            if (!(slot.container instanceof Inventory)) {
+                total++;
+                if (!slot.getItem().isEmpty()) {
+                    used++;
+                }
+            }
+        }
+        if (total > 0 && current != null) {
+            fill.put(current, new Fill(used, total));
+        }
+    }
+
+    private static String fillText(@Nullable Spot spot) {
+        Fill f = spot == null ? null : fill.get(spot);
+        return f == null ? "" : " | " + f.used() + " of " + f.total() + " slots used";
+    }
+
+    /** Slots used and slots in all, over the storage looked in so far (null if none yet). */
+    @Nullable
+    public static int[] fillLevel() {
+        int used = 0;
+        int total = 0;
+        for (Fill f : fill.values()) {
+            used += f.used();
+            total += f.total();
+        }
+        return total == 0 ? null : new int[]{used, total};
+    }
+
+    /** The player's storage getting full (80%, then 95%, then full): said, at most every 10 minutes for the same level. */
+    private static void warnIfFilling(Minecraft mc) {
+        int[] level = fillLevel();
+        if (level == null) {
+            return;
+        }
+        int percent = level[0] * 100 / level[1];
+        int step = percent >= 100 ? 100 : percent >= 95 ? 95 : percent >= 80 ? 80 : 0;
+        if (step == 0) {
+            fullWarnedPercent = 0;
+            return;
+        }
+        if (step > fullWarnedPercent || AutoBuild.clientTicks - fullWarnedAt > 20L * 60 * 10) {
+            fullWarnedPercent = step;
+            fullWarnedAt = AutoBuild.clientTicks;
+            Chat.warn("Your storage is " + (step == 100 ? "full" : "getting full") + ": " + level[0] + " of " + level[1]
+                    + " slots used (" + storageNames(mc) + "). Empty some, or link a chest (look at it, J+B, 'Link the chest').");
+            BuildLog.lineOrKeep("STORAGE", "getting full: " + level[0] + " of " + level[1] + " slots used");
+        }
+    }
+
+    /** "/pv 1, /pv 2 and 1 linked chest" for messages. */
+    private static String storageNames(Minecraft mc) {
+        List<String> names = new ArrayList<>();
+        for (int vault : vaults()) {
+            names.add("/" + Configs.Shop.VAULT_COMMAND.getStringValue() + " " + vault);
+        }
+        int chests = mc.player == null ? 0 : ChestLinks.list(mc).size();
+        if (chests > 0) {
+            names.add(chests + " linked chest" + (chests == 1 ? "" : "s"));
+        }
+        return names.isEmpty() ? "your storage" : String.join(", ", names);
+    }
+
+    /** Vaults, and linked containers within reach (nothing to fly to). */
+    private static List<Spot> nearSpots(Minecraft mc) {
+        List<Spot> near = new ArrayList<>();
+        for (Spot spot : spots(mc)) {
+            if (spot.pos() == null || mc.player != null
+                    && mc.player.getEyePosition().distanceToSqr(Vec3.atCenterOf(spot.pos())) <= 4.5 * 4.5) {
+                near.add(spot);
+            }
+        }
+        return near;
     }
 
     /** Vaults first (no flying), then the containers nearest first. */

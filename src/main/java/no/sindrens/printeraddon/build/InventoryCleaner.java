@@ -37,7 +37,7 @@ public class InventoryCleaner {
     /** Leftovers of crafting (what hoes, rails and seeds are made of) are put away too, unless needed now. */
     private static final Set<Item> CRAFTING_LEFTOVERS = Set.of(Items.DIAMOND, Items.DIAMOND_BLOCK, Items.STICK,
             Items.IRON_INGOT, Items.IRON_BLOCK, Items.GOLD_INGOT, Items.GOLD_BLOCK, Items.REDSTONE_BLOCK, Items.OAK_LOG,
-            Items.OAK_PLANKS, Items.PUMPKIN);
+            Items.OAK_PLANKS, Items.PUMPKIN, Items.COBBLESTONE);
 
     /**
      * Building materials and crafting leftovers in the inventory that the current layer doesn't need (also not to
@@ -59,9 +59,8 @@ public class InventoryCleaner {
         if (layerNeeds.containsKey(Items.PUMPKIN_SEEDS)) {
             keep.add(Items.PUMPKIN);
         }
-        if (layerNeeds.containsKey(Items.DIAMOND_HOE) || !StateRules.hasUsableHoe(inventory)) {
-            keep.addAll(Set.of(Items.DIAMOND, Items.DIAMOND_BLOCK, Items.STICK, Items.OAK_PLANKS, Items.OAK_LOG));
-        }
+        // What a hoe is made of stays while one is needed (this layer, or the build without a usable hoe)
+        boolean hoeNeeded = layerNeeds.containsKey(Tools.HOE) || AutoBuild.INSTANCE.wholeNeeds(Tools.HOE);
         if (layerNeeds.containsKey(Items.RAIL) || layerNeeds.containsKey(Items.POWERED_RAIL)) {
             keep.addAll(Set.of(Items.IRON_INGOT, Items.IRON_BLOCK, Items.GOLD_INGOT, Items.GOLD_BLOCK, Items.STICK,
                     Items.REDSTONE, Items.REDSTONE_BLOCK, Items.OAK_PLANKS, Items.OAK_LOG));
@@ -78,6 +77,9 @@ public class InventoryCleaner {
             // nor anything renamed, enchanted or otherwise special: such an item and every stack of its kind stay
             if (isBucket(item) || !plain(stack)) {
                 special.add(item);
+                continue;
+            }
+            if (hoeNeeded && Tools.hoeMaterial(item)) {
                 continue;
             }
             if (!stack.isDamageableItem() && !keep.contains(item)
@@ -98,6 +100,37 @@ public class InventoryCleaner {
     /** An ordinary item, as it comes from the shop: not renamed, enchanted or otherwise changed. */
     public static boolean plain(ItemStack stack) {
         return stack.getComponents().equals(new ItemStack(stack.getItem()).getComponents());
+    }
+
+    /** As plain, but a tool may be worn (a hoe the add-on made and used): only renamed, enchanted or otherwise changed isn't. */
+    public static boolean ordinary(ItemStack stack) {
+        for (var entry : stack.getComponentsPatch().entrySet()) {
+            if (entry.getKey() != net.minecraft.core.component.DataComponents.DAMAGE) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * When auto build stops (by the player, or the build is done): what goes into storage. The building materials of
+     * this schematic, what the add-on crafts with, and ordinary hoes; never buckets, food, armor, weapons, nor anything
+     * renamed or enchanted (those stacks stay, see ChestFetcher).
+     */
+    public Set<Item> putAway(Inventory inventory) {
+        Set<Item> items = new HashSet<>();
+        for (int slot = 0; slot < Inventory.INVENTORY_SIZE; slot++) {
+            ItemStack stack = inventory.getItem(slot);
+            Item item = stack.getItem();
+            if (stack.isEmpty() || isBucket(item) || !ordinary(stack)) {
+                continue;
+            }
+            if (Tools.isHoe(stack) || !stack.isDamageableItem() && (materials.contains(item)
+                    || CRAFTING_LEFTOVERS.contains(item) || isSchematicBlock(item) || Tools.hoeMaterial(item))) {
+                items.add(item);
+            }
+        }
+        return items;
     }
 
     private static boolean isSchematicBlock(Item item) {
@@ -134,6 +167,9 @@ public class InventoryCleaner {
             sinceSold++;
         }
         Inventory inventory = player.getInventory();
+        if (protectWornTools(mc, inventory, fetcher)) {
+            return true;
+        }
         // A new layer doesn't empty the inventory by itself: what the layer doesn't need stays (the next layer may
         // need it) until the layer's own items need the room, then it goes into storage (see InventoryBudget)
         if (freeSlots(inventory) >= MIN_FREE_SLOTS) {
@@ -224,6 +260,42 @@ public class InventoryCleaner {
                 return true;
             }
             // No linked chest: they're dropped on the next ticks
+        }
+        return false;
+    }
+
+    /** When a worn special tool was last put away, and when its wear was last said. */
+    private long wornStoredAt = -100000;
+    private long wornWarnedAt = -100000;
+
+    /**
+     * A special hoe of the player's (enchanted, renamed) that's nearly worn out: put into storage before the printer
+     * uses it up (an ordinary one is used until it breaks; the add-on makes a new one, see Tools). Without storage, said.
+     */
+    private boolean protectWornTools(Minecraft mc, Inventory inventory, ChestFetcher fetcher) {
+        ItemStack worn = ItemStack.EMPTY;
+        for (int slot = 0; slot < Inventory.INVENTORY_SIZE && worn.isEmpty(); slot++) {
+            if (Tools.wornSpecial(inventory.getItem(slot))) {
+                worn = inventory.getItem(slot);
+            }
+        }
+        if (worn.isEmpty()) {
+            return false;
+        }
+        String name = worn.getHoverName().getString();
+        if (ChestFetcher.hasStorage(mc) && AutoBuild.clientTicks - wornStoredAt > 20 * 60) {
+            wornStoredAt = AutoBuild.clientTicks;
+            if (fetcher.startStoreWorn(mc)) {
+                no.sindrens.printeraddon.util.Chat.info("Putting your " + name + " in storage before it breaks (" + Tools.left(worn)
+                        + " uses left); the add-on uses a hoe of its own.");
+                BuildLog.line("TOOLS", name + " has " + Tools.left(worn) + " uses left: put in storage before it breaks");
+                return true;
+            }
+        }
+        if (AutoBuild.clientTicks - wornWarnedAt > 20 * 60 * 10) {
+            wornWarnedAt = AutoBuild.clientTicks;
+            no.sindrens.printeraddon.util.Chat.warn("Your " + name + " has " + Tools.left(worn) + " uses left and the printer may use it"
+                    + " up: take it out of your inventory (the add-on gets a hoe of its own).");
         }
         return false;
     }

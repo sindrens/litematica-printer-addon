@@ -88,6 +88,12 @@ public class Crafter {
         return job != null || !jobs.isEmpty();
     }
 
+    /** What's being crafted, for the status line. */
+    public String describe() {
+        Job now = job != null ? job : jobs.peekFirst();
+        return now == null ? "crafting" : "crafting " + now.count() + " " + new ItemStack(now.item()).getHoverName().getString();
+    }
+
     public void reset() {
         jobs.clear();
         job = null;

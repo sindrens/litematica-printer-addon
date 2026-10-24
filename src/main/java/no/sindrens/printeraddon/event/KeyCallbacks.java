@@ -67,6 +67,7 @@ public class KeyCallbacks {
                 ShopScanner.INSTANCE.cancel("stopped");
                 no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.cancel("stopped");
                 build.stopEverything(mc);
+                build.cancelPutAway();
                 // Also no going back to the build later
                 no.sindrens.printeraddon.build.Resume.cancel();
                 no.sindrens.printeraddon.build.Reconnect.cancel();

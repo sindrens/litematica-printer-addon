@@ -68,6 +68,10 @@ public final class InventoryBudget {
         if (layerNeeds.containsKey(net.minecraft.world.item.Items.WATER_BUCKET)) {
             counts.merge(net.minecraft.world.item.Items.WATER_BUCKET, counts.getOrDefault(net.minecraft.world.item.Items.BUCKET, 0), Integer::sum);
         }
+        // "A hoe" is only asked for while there's no usable one (a worn one doesn't count)
+        if (layerNeeds.containsKey(Tools.HOE)) {
+            counts.put(Tools.HOE, 0);
+        }
         Map<Item, Integer> targets = new LinkedHashMap<>();
         Map<Item, Integer> wants = new LinkedHashMap<>();
         Map<Item, Integer> excess = new LinkedHashMap<>();

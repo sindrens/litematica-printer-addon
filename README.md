@@ -25,11 +25,13 @@ Put these in your `mods` folder:
 
 It builds layer by layer from the bottom. If you're kicked or the server restarts, it joins again, runs your "Commands back to the build" (for example `/server skyblock`, `/is go`) and carries on.
 
+Your inventory can start empty. It takes what it needs from your vaults, buys the rest and crafts its own tools, such as a hoe. When you stop it, or the build is done, it puts the building items back in your vaults. It warns you when they're getting full; link a chest for more room. You can clear out your vaults at any time, because it buys whatever is missing.
+
 ## Keys
 
 | Key | What it does |
 |---|---|
-| `J`+`B` | Build menu: start/stop, add-on on/off, link chests, logs |
+| `J`+`B` | Build menu: start/stop, put items away, add-on on/off, link chests, logs |
 | `J`+`C` | Settings |
 | `J`+`S` | Scan the shop |
 | `J`+`Q` | Stop everything |

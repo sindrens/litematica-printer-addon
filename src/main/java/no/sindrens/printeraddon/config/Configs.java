@@ -237,6 +237,12 @@ public class Configs implements IConfigHandler {
                 "Your player vaults to use as storage, like chests: items are taken from them before buying (pumpkins to\n"
                         + "craft seeds from, for example) and leftovers are put in them. Numbers, e.g. 1-6 or 1,2,3. Empty = none.",
                 "Your vaults (/pv numbers)");
+        public static final ConfigBoolean PUT_AWAY_ON_STOP = new ConfigBoolean("putAwayOnStop", true,
+                "When auto build stops (you stop it, or the build is done): the building materials, what the add-on crafts\n"
+                        + "with and its hoes go into your vaults (and linked chests within reach). The next start takes what it needs\n"
+                        + "again (or buys it). Never buckets, food, armor, weapons, nor anything renamed or enchanted. If it doesn't\n"
+                        + "all fit, it says so: link a chest for the rest (J+B).",
+                "Put items away when stopping");
         public static final ConfigString VAULT_COMMAND = new ConfigString("vaultCommand", "pv",
                 "Command that opens a player vault, without the slash (the vault number is added).",
                 "Vault command");
@@ -283,7 +289,7 @@ public class Configs implements IConfigHandler {
                 "Craft command");
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                FETCH_FROM_CHESTS, VAULTS, VAULT_COMMAND, AUTO_BUY, SELL_LEFTOVERS, BUY_WHEN_LEFT, PREFER_BLOCKS, USE_CRAFT_COMMAND, CRAFT_COMMAND,
+                FETCH_FROM_CHESTS, VAULTS, PUT_AWAY_ON_STOP, VAULT_COMMAND, AUTO_BUY, SELL_LEFTOVERS, BUY_WHEN_LEFT, PREFER_BLOCKS, USE_CRAFT_COMMAND, CRAFT_COMMAND,
                 SHOP_COMMAND, SHOP_SECTION, PROBE_BUY_SCREEN, MAX_PAGES, WAIT_TIMEOUT_TICKS);
     }
 
@@ -291,7 +297,7 @@ public class Configs implements IConfigHandler {
     public static java.util.List<IConfigBase> important() {
         return java.util.List.of(
                 Generic.ADDON_ENABLED,
-                Shop.VAULTS, Shop.FETCH_FROM_CHESTS, Shop.AUTO_BUY, Shop.SELL_LEFTOVERS, Shop.PREFER_BLOCKS,
+                Shop.VAULTS, Shop.FETCH_FROM_CHESTS, Shop.PUT_AWAY_ON_STOP, Shop.AUTO_BUY, Shop.SELL_LEFTOVERS, Shop.PREFER_BLOCKS,
                 Shop.USE_CRAFT_COMMAND, Safety.USE_FEED_COMMAND, Safety.AUTO_EAT,
                 Movement.MOVE_MODE,
                 Safety.STOP_ON_DAMAGE, Safety.STOP_NEAR_PLAYERS,

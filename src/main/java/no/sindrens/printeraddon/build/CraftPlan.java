@@ -38,7 +38,7 @@ public final class CraftPlan {
 
     /** True for items this plans (everything else is simply bought). */
     public static boolean crafted(Item item) {
-        return item == Items.RAIL || item == Items.POWERED_RAIL || item == Items.PUMPKIN_SEEDS || item == Items.DIAMOND_HOE
+        return item == Items.RAIL || item == Items.POWERED_RAIL || item == Items.PUMPKIN_SEEDS || item == Tools.HOE
                 || item == Items.REDSTONE;
     }
 
@@ -79,7 +79,7 @@ public final class CraftPlan {
         // Before the first step that needs it (rails), after what it's made of
         for (int i = 0; i < craft.size(); i++) {
             Item item = craft.get(i).item();
-            if (item == Items.RAIL || item == Items.POWERED_RAIL || item == Items.DIAMOND_HOE) {
+            if (item == Items.RAIL || item == Items.POWERED_RAIL || Tools.isHoe(new ItemStack(item))) {
                 return i;
             }
         }
@@ -88,14 +88,10 @@ public final class CraftPlan {
 
     private void add(Item item, int count) {
         // Always the shop first: crafted only when the shop doesn't sell it (seeds: own pumpkins first, see below)
-        if ((item == Items.RAIL || item == Items.POWERED_RAIL || item == Items.DIAMOND_HOE) && sold.test(item)) {
+        if ((item == Items.RAIL || item == Items.POWERED_RAIL) && sold.test(item)) {
             buy.merge(item, count, Integer::sum);
-        } else if (item == Items.DIAMOND_HOE) {
-            // Hoe for tilling farmland: 2 diamonds (own, bought, or from a bought diamond block) and 2 sticks
-            ingot(Items.DIAMOND, Items.DIAMOND_BLOCK, 2 * count);
-            sticks(2 * count);
-            needsTable = true;
-            craft.add(new Step(Items.DIAMOND_HOE, count));
+        } else if (item == Tools.HOE) {
+            hoes(count);
         } else if (item == Items.RAIL) {
             int crafts = ceil(count, 16);
             ingot(Items.IRON_INGOT, Items.IRON_BLOCK, 6 * crafts);
@@ -143,6 +139,54 @@ public final class CraftPlan {
         } else {
             buy.merge(item, count, Integer::sum);
         }
+    }
+
+    /**
+     * Hoes for tilling: one diamond or iron hoe from what's at hand (2 diamonds or ingots, own or from storage), else
+     * stone hoes from stone the shop sells for very little (cobblestone, blackstone or cobbled deepslate, own first),
+     * else wooden ones from planks. Never a block of diamond or iron bought for a hoe. Stone for a few more is bought
+     * at once, so the next ones need no shop.
+     */
+    private void hoes(int count) {
+        if (takeAll(Items.DIAMOND, 2)) {
+            sticks(2);
+            needsTable = true;
+            craft.add(new Step(Items.DIAMOND_HOE, 1));
+            return;
+        }
+        if (takeAll(Items.IRON_INGOT, 2)) {
+            sticks(2);
+            needsTable = true;
+            craft.add(new Step(Items.IRON_HOE, 1));
+            return;
+        }
+        int stone = takeTag(ItemTags.STONE_TOOL_MATERIALS, 2 * count);
+        if (stone < 2 * count && sold.test(Items.COBBLESTONE)) {
+            buy.merge(Items.COBBLESTONE, Math.max(2 * count - stone, 16), Integer::sum);
+            stone = 2 * count;
+        }
+        int stoneHoes = stone / 2;
+        if (stoneHoes > 0) {
+            sticks(2 * stoneHoes);
+            needsTable = true;
+            craft.add(new Step(Items.STONE_HOE, stoneHoes));
+        }
+        int wooden = count - stoneHoes;
+        if (wooden > 0) {
+            planks(2 * wooden);
+            sticks(2 * wooden);
+            needsTable = true;
+            craft.add(new Step(Items.WOODEN_HOE, wooden));
+        }
+    }
+
+    /** Takes exactly {@code count} from the inventory, or nothing if there's less. */
+    private boolean takeAll(Item item, int count) {
+        if (inventory.countItem(item) - have.getOrDefault(item, 0) < count) {
+            return false;
+        }
+        have.merge(item, count, Integer::sum);
+        return true;
     }
 
     /** Ingots: from the inventory, else from blocks (9 each) in the inventory, else bought (blocks if sold). */
@@ -195,6 +239,7 @@ public final class CraftPlan {
     /** Sticks: from the inventory, else crafted from planks (2 planks make 4). */
     private void sticks(int count) {
         int missing = count - take(Items.STICK, count);
+        missing -= spare(Items.STICK, missing);
         if (missing <= 0) {
             return;
         }
@@ -205,11 +250,13 @@ public final class CraftPlan {
         int crafts = ceil(missing, 4);
         planks(crafts * 2);
         craft.add(new Step(Items.STICK, crafts * 4));
+        spares.merge(Items.STICK, crafts * 4 - missing, Integer::sum);
     }
 
     /** Planks of any wood: from the inventory, else from logs (4 each), else bought. */
     private void planks(int count) {
         int missing = count - takeTag(ItemTags.PLANKS, count);
+        missing -= spare(Items.OAK_PLANKS, missing);
         if (missing <= 0) {
             return;
         }
@@ -223,6 +270,17 @@ public final class CraftPlan {
             buy.merge(Items.OAK_LOG, logs - ownLogs, Integer::sum);
         }
         craft.add(0, new Step(Items.OAK_PLANKS, logs * 4));
+        spares.merge(Items.OAK_PLANKS, logs * 4 - missing, Integer::sum);
+    }
+
+    /** Made beyond what a step needed (a log makes 4 planks, 2 were needed): later steps take that first. */
+    private final Map<Item, Integer> spares = new java.util.HashMap<>();
+
+    private int spare(Item item, int count) {
+        int spare = spares.getOrDefault(item, 0);
+        int used = Math.max(0, Math.min(spare, count));
+        spares.put(item, spare - used);
+        return used;
     }
 
     /** Takes up to {@code count} from what the inventory has (not counting what other steps already took). */

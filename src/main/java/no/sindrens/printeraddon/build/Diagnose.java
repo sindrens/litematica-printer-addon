@@ -73,6 +73,50 @@ public final class Diagnose {
         return sb.toString();
     }
 
+    /**
+     * Why a block can't be placed right now, in a few words without coordinates (the same for many blocks, so they
+     * can be counted, see Mover#waitReason).
+     */
+    public static String shortReason(Minecraft mc, WorldSchematic schematic, BlockPos pos) {
+        AutoBuild build = AutoBuild.INSTANCE;
+        if (build.givenUp(pos)) {
+            return "tried without luck, again in a moment";
+        }
+        BlockCheck.Result result = BlockCheck.check(mc.level, schematic, pos);
+        BlockState target = schematic.getBlockState(pos);
+        switch (result) {
+            case UNLOADED -> {
+                return "not loaded yet";
+            }
+            case BUCKET -> {
+                net.minecraft.world.item.Item bucket = Fluids.bucketFor(target);
+                return bucket != null && mc.player.getInventory().countItem(bucket) == 0
+                        ? "no " + new ItemStack(bucket).getHoverName().getString() + " in the inventory" : "water to go in";
+            }
+            case PROTECTED -> {
+                return "a container is in the way (fix it by hand)";
+            }
+            default -> {
+            }
+        }
+        ItemStack item = StateRules.itemFor(target);
+        if (result == BlockCheck.Result.MISSING && !item.isEmpty() && mc.player.getInventory().countItem(item.getItem()) == 0) {
+            return "no " + item.getHoverName().getString() + " in the inventory";
+        }
+        if (result == BlockCheck.Result.PRINTER_FIXES && target.getBlock() == net.minecraft.world.level.block.Blocks.FARMLAND
+                && Tools.hoeUses(mc.player.getInventory()) == 0) {
+            return "no hoe for tilling";
+        }
+        String waiting = PlacementOrder.whyNotReady(mc.level, schematic, pos, target);
+        if (waiting != null) {
+            return waiting.replaceAll(",? (at )?\\[.*$", "").replaceAll(",? (at )?-?\\d+, -?\\d+, -?\\d+$", "");
+        }
+        if (result.needsBreaking()) {
+            return "a wrong block to break first";
+        }
+        return "the printer can't place them from where it can stand";
+    }
+
     /** Short text for a block state: "hopper[facing=north]" instead of "Block{minecraft:hopper}[...]". */
     static final class BlockText {
         private BlockText() {

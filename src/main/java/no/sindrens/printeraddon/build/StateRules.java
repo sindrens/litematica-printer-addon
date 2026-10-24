@@ -61,15 +61,4 @@ public final class StateRules {
                 || (a == Blocks.MELON_STEM && b == Blocks.ATTACHED_MELON_STEM);
     }
 
-    /** A hoe with at least 50 uses left (a new one is got before the old one breaks in the middle of a layer). */
-    public static boolean hasUsableHoe(net.minecraft.world.entity.player.Inventory inventory) {
-        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
-            net.minecraft.world.item.ItemStack stack = inventory.getItem(slot);
-            if (stack.is(net.minecraft.tags.ItemTags.HOES)
-                    && (!stack.isDamageableItem() || stack.getMaxDamage() - stack.getDamageValue() >= 50)) {
-                return true;
-            }
-        }
-        return false;
-    }
 }

@@ -180,6 +180,10 @@ public class AutoBuild {
     /** When storage was last looked through for a water bucket, and when its lack was last said. */
     private long bucketLookedFor = -100000;
     private long bucketWarned = -100000;
+    /** Since when the inventory has only empty buckets (-1: not so). */
+    private long emptyBucketsSince = -1;
+    /** When the pause between shopping rounds was last cut short because the layer was stuck on a used up item. */
+    private long stallShopAt = -100000;
     private int shoppingLayer = Integer.MIN_VALUE;
     private final Safety safety = new Safety();
 
@@ -372,6 +376,16 @@ public class AutoBuild {
         return ordered;
     }
 
+    /** Counts farmland still to till in the per-level needs (never an item that's bought). */
+    private static final net.minecraft.world.item.Item TILLING = net.minecraft.world.item.Items.STRUCTURE_VOID;
+    /** Farmland still to till in the whole schematic (as last counted): a hoe is needed while there is. */
+    private int wholeTilling;
+
+    /** True if the whole schematic still needs this (as last counted). */
+    public boolean wholeNeeds(net.minecraft.world.item.Item item) {
+        return neededWhole.getOrDefault(item, 0) > 0;
+    }
+
     /** Blocks still to place in the whole schematic (as last counted). */
     public int blocksLeft() {
         int left = 0;
@@ -383,6 +397,21 @@ public class AutoBuild {
 
     /** What auto build is doing right now, in words. */
     public String doing() {
+        if (no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.isRunning()) {
+            return "buying from /" + Configs.Shop.SHOP_COMMAND.getStringValue();
+        }
+        if (no.sindrens.printeraddon.shop.ShopScanner.INSTANCE.isRunning()) {
+            return "reading the shop";
+        }
+        if (fetcher.isBusy()) {
+            return fetcher.describe();
+        }
+        if (crafter.isBusy()) {
+            return crafter.describe();
+        }
+        if (eater.isBusy()) {
+            return "eating";
+        }
         if (breaker.isBusy()) {
             return "breaking a wrong block";
         }
@@ -505,13 +534,19 @@ public class AutoBuild {
             return;
         }
         java.util.Map<net.minecraft.world.item.Item, Integer> needs = new java.util.LinkedHashMap<>();
-        wholeByY.values().forEach(level -> level.forEach((item, count) -> {
-            if (Fluids.isBucket(item)) {
-                needs.put(item, 1);
-            } else {
-                needs.merge(item, count, Integer::sum);
+        int tilling = 0;
+        for (java.util.Map<net.minecraft.world.item.Item, Integer> level : wholeByY.values()) {
+            for (java.util.Map.Entry<net.minecraft.world.item.Item, Integer> entry : level.entrySet()) {
+                if (entry.getKey() == TILLING) {
+                    tilling += entry.getValue();
+                } else if (Fluids.isBucket(entry.getKey())) {
+                    needs.put(entry.getKey(), 1);
+                } else {
+                    needs.merge(entry.getKey(), entry.getValue(), Integer::sum);
+                }
             }
-        }));
+        }
+        wholeTilling = tilling;
         publishWholeNeeds(mc, schematic, needs);
     }
 
@@ -555,6 +590,10 @@ public class AutoBuild {
                         if (item != null) {
                             needs.merge(item, 1, Integer::sum);
                         }
+                        if (target.getBlock() == net.minecraft.world.level.block.Blocks.FARMLAND
+                                && (result == BlockCheck.Result.MISSING || result.needsBreaking() || result == BlockCheck.Result.PRINTER_FIXES)) {
+                            needs.merge(TILLING, 1, Integer::sum);
+                        }
                     }
                 }
             }
@@ -565,10 +604,9 @@ public class AutoBuild {
     private void publishWholeNeeds(Minecraft mc, fi.dy.masa.litematica.world.WorldSchematic schematic,
                                    java.util.Map<net.minecraft.world.item.Item, Integer> needs) {
         EntityPlacer.missing(mc, schematic).forEach((item, count) -> needs.merge(item, count, Integer::sum));
-        // Farmland is dirt tilled with a hoe
-        if (needs.containsKey(net.minecraft.world.item.Items.DIRT)
-                && !StateRules.hasUsableHoe(mc.player.getInventory())) {
-            needs.put(net.minecraft.world.item.Items.DIAMOND_HOE, mc.player.getInventory().countItem(net.minecraft.world.item.Items.DIAMOND_HOE) + 1);
+        // Farmland is dirt tilled with a hoe (see Tools: from storage, else crafted)
+        if (wholeTilling > 0 && !Tools.hasUsableHoe(mc.player.getInventory())) {
+            needs.put(Tools.HOE, 1);
         }
         neededWhole.clear();
         neededWhole.putAll(needs);
@@ -727,19 +765,31 @@ public class AutoBuild {
                 due = true;
             }
         }
-        // The layer's water needs a bucket and there's none at all (not even an empty one): looked for in storage
-        // (once a minute), and said (once in two minutes); the layer waited minutes for water without it once
-        boolean noBucket = layerNeeds.containsKey(net.minecraft.world.item.Items.WATER_BUCKET)
-                && inventory.countItem(net.minecraft.world.item.Items.WATER_BUCKET) + inventory.countItem(net.minecraft.world.item.Items.BUCKET) == 0;
-        if (noBucket && storage && clientTicks - bucketLookedFor > 20 * 60) {
+        // The layer's water needs a bucket and there's none at all (not even an empty one), or only empty ones for
+        // minutes (no water nearby to fill them): looked for in storage, then bought (once a minute at most), and
+        // said (once in two minutes); the layer waited minutes for water without one once
+        int waterBuckets = inventory.countItem(net.minecraft.world.item.Items.WATER_BUCKET);
+        int emptyBuckets = inventory.countItem(net.minecraft.world.item.Items.BUCKET);
+        if (waterBuckets > 0 || emptyBuckets == 0) {
+            emptyBucketsSince = -1;
+        } else if (emptyBucketsSince < 0) {
+            emptyBucketsSince = clientTicks;
+        }
+        boolean noBucket = layerNeeds.containsKey(net.minecraft.world.item.Items.WATER_BUCKET) && waterBuckets == 0
+                && (emptyBuckets == 0 || emptyBucketsSince >= 0 && clientTicks - emptyBucketsSince > 20 * 60 * 3);
+        boolean canBuyBucket = autoBuy && no.sindrens.printeraddon.shop.ShopBuyer.sells(mc, net.minecraft.world.item.Items.WATER_BUCKET)
+                && !cantGet(net.minecraft.world.item.Items.WATER_BUCKET);
+        if (noBucket && (storage || canBuyBucket) && clientTicks - bucketLookedFor > 20 * 60) {
             bucketLookedFor = clientTicks;
             due = true;
         }
         if (noBucket && clientTicks - bucketWarned > 20 * 60 * 2) {
             bucketWarned = clientTicks;
-            Chat.warn("No water bucket in your inventory: the water on this layer can't go in"
-                    + (storage ? " (looking in your vaults and chests for one)." : ". Put one in your inventory."));
-            BuildLog.line("PLAN", "no water bucket in the inventory, the layer's water waits for one" + (storage ? ": looking in storage" : ""));
+            Chat.warn("No water bucket" + (emptyBuckets > 0 ? " with water" : "") + " in your inventory: the water on this layer can't go in"
+                    + (storage || canBuyBucket ? " (" + (storage ? "looking in your vaults and chests" : "") + (storage && canBuyBucket ? ", then " : "")
+                    + (canBuyBucket ? "buying one" : "") + ")." : ". Put one in your inventory."));
+            BuildLog.line("PLAN", "no water bucket in the inventory, the layer's water waits for one" + (storage ? ": looking in storage" : "")
+                    + (canBuyBucket ? ", else buying one" : ""));
         }
         boolean goesOn = tripGoesOn;
         tripGoesOn = false;
@@ -770,6 +820,16 @@ public class AutoBuild {
                 wants.put(item, count);
             }
         });
+        // The hoe won't last the layer: another one on this trip, instead of a trip of its own when it breaks
+        int tilling = layers.tillingLeft();
+        int hoeUses = Tools.hoeUses(inventory);
+        if (tilling > hoeUses && hoeUses < 150 && !wants.containsKey(Tools.HOE)) {
+            wants.put(Tools.HOE, Tools.hoesFor(tilling - hoeUses));
+        }
+        // Only empty buckets for minutes: a water bucket is got as if there were none
+        if (noBucket && !wants.containsKey(net.minecraft.world.item.Items.WATER_BUCKET)) {
+            wants.put(net.minecraft.world.item.Items.WATER_BUCKET, 1);
+        }
         java.util.Map<net.minecraft.world.item.Item, Integer> list = InventoryBudget.fitNow(inventory, wants);
         String planLine = "inventory for " + layers.describeLayers() + ": " + plan.describe(inventory) + " | "
                 + plan.pool() + " building slots" + (plan.shortSlots() > 0 ? ", " + plan.shortSlots() + " short" : "")
@@ -797,6 +857,18 @@ public class AutoBuild {
                 fromStorage.merge(from, CraftPlan.madeFromCount(item, count), Integer::sum);
             }
         });
+        // A hoe: any one in storage; if storage is known to have none but has what one is made of (diamonds the
+        // add-on put there, say), that, so it isn't bought
+        if (list.containsKey(Tools.HOE) && !fetcher.knownHoe()) {
+            for (net.minecraft.world.item.Item material : java.util.List.of(net.minecraft.world.item.Items.DIAMOND,
+                    net.minecraft.world.item.Items.IRON_INGOT, net.minecraft.world.item.Items.COBBLESTONE, net.minecraft.world.item.Items.STICK)) {
+                int per = material == net.minecraft.world.item.Items.COBBLESTONE || material == net.minecraft.world.item.Items.STICK
+                        ? 2 * list.get(Tools.HOE) : 2;
+                if (fetcher.knownCount(material) >= 2) {
+                    fromStorage.merge(material, per, Integer::sum);
+                }
+            }
+        }
         if (!fetchedThisTrip && fetcher.start(mc, fromStorage)) {
             fetchedThisTrip = true;
             mover.stop(mc);
@@ -819,7 +891,9 @@ public class AutoBuild {
             int want = entry.getValue();
             int stack = item.getDefaultMaxStackSize();
             int have = inventory.countItem(item);
-            if (!gettable(mc, item) || InventoryCleaner.isBucket(item)) {
+            // Buckets only when there's none with water at all (storage was looked in above, or had none)
+            boolean bucketNeeded = item == net.minecraft.world.item.Items.WATER_BUCKET && noBucket && canBuyBucket;
+            if (!gettable(mc, item) || InventoryCleaner.isBucket(item) && !bucketNeeded) {
                 continue;
             }
             // Not running low: only a stack or more is worth a purchase (it bought 1 cherry leaf at 127 of 128,
@@ -902,6 +976,18 @@ public class AutoBuild {
         return false;
     }
 
+    /** An item the layer needs (not a bucket) is used up and can be got. */
+    private boolean layerItemOut(Minecraft mc) {
+        for (var entry : layers.layerNeeds().entrySet()) {
+            net.minecraft.world.item.Item item = entry.getKey();
+            if (entry.getValue() > 0 && !InventoryCleaner.isBucket(item) && item != Tools.HOE
+                    && mc.player.getInventory().countItem(item) == 0 && gettable(mc, item)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** Pause only when something is used up that can't be got, and the layer can't go on without it. */
     private void pauseIfOut(Minecraft mc, boolean outOfSomething) {
         if (outOfSomething && layers.stalledFor(20 * 20)) {
@@ -921,9 +1007,92 @@ public class AutoBuild {
         return sb.isEmpty() ? "-" : sb.substring(0, sb.length() - 2);
     }
 
+    /** Building items are being put into storage after auto build stopped (see putAway). */
+    private boolean puttingAway;
+    /** The add-on was switched off during auto build: off once the items are put away. */
+    private boolean offAfterPutAway;
+
+    public boolean isPuttingAway() {
+        return puttingAway;
+    }
+
+    /**
+     * After auto build stops (by the player, or with the build done), or from the J+B menu: the building materials,
+     * what the add-on crafts with and its hoes go into the vaults (and linked chests within reach), so the inventory
+     * is free and the next start takes what it needs again. Returns true if it started.
+     */
+    public boolean putAway(Minecraft mc, boolean byHand) {
+        if (running || puttingAway || mc.player == null || mc.gameMode == null || mc.player.getAbilities().instabuild) {
+            return false;
+        }
+        if (!ChestFetcher.hasStorage(mc)) {
+            if (byHand) {
+                Chat.warn("Nowhere to put them: set your vaults (/pv numbers) in the settings, or link a chest (J+B).");
+            }
+            return false;
+        }
+        java.util.Set<net.minecraft.world.item.Item> items = cleaner.putAway(mc.player.getInventory());
+        if (items.isEmpty()) {
+            if (byHand) {
+                Chat.info("No building items to put away.");
+            }
+            return false;
+        }
+        fetcher.reset();
+        if (!fetcher.startPutAway(mc, items)) {
+            if (byHand) {
+                Chat.warn("No vault and no linked chest within reach to put them in.");
+            }
+            return false;
+        }
+        puttingAway = true;
+        BuildLog.lineOrKeep("STORAGE", "putting away after the build: " + items);
+        Chat.info("Putting the building items away in your storage (J+Q stops it).");
+        return true;
+    }
+
+    /** Stops putting items away (J+Q, or auto build starting again). */
+    public void cancelPutAway() {
+        if (puttingAway) {
+            puttingAway = false;
+            fetcher.reset();
+            Minecraft mc = Minecraft.getInstance();
+            if (mc.player != null && mc.player.containerMenu != mc.player.inventoryMenu) {
+                mc.player.closeContainer();
+            }
+        }
+        if (offAfterPutAway) {
+            offAfterPutAway = false;
+            switchOff(Minecraft.getInstance());
+        }
+    }
+
+    private void tickPutAway(Minecraft mc) {
+        if (running || mc.player == null || mc.gameMode == null || mc.level == null) {
+            puttingAway = false;
+            return;
+        }
+        if (!fetcher.tick(mc, mover)) {
+            puttingAway = false;
+            if (offAfterPutAway) {
+                offAfterPutAway = false;
+                switchOff(mc);
+            }
+        }
+    }
+
     public void start(Minecraft mc) {
         if (running) {
             return;
+        }
+        if (puttingAway) {
+            // Starting again while the items go into storage: they stay (the trip takes what it needs anyway)
+            puttingAway = false;
+            offAfterPutAway = false;
+            fetcher.reset();
+            if (mc.player != null && mc.player.containerMenu != mc.player.inventoryMenu) {
+                mc.player.closeContainer();
+            }
         }
         if (!Configs.enabled()) {
             Chat.warn("The add-on is switched off (J+A to switch it on).");
@@ -982,7 +1151,7 @@ public class AutoBuild {
         buying = false;
         buyCooldown = 0;
         cleaner.reset();
-        HotbarPrep.resetMerging();
+        StackMerge.reset();
         crafter.reset();
         fetcher.reset();
         eater.reset(mc);
@@ -1026,6 +1195,11 @@ public class AutoBuild {
 
     /** Stops auto build. {@code reason} is shown as a warning when it isn't the player's own choice. */
     public void stop(Minecraft mc, String reason) {
+        stop(mc, reason, true);
+    }
+
+    /** {@code mayPutAway}: stopped by the player or done, the building items go into storage (see putAway). */
+    private void stop(Minecraft mc, String reason, boolean mayPutAway) {
         boolean wasRunning = running;
         if (wasRunning) {
             speed.remember();
@@ -1069,6 +1243,11 @@ public class AutoBuild {
             }
         }
         BuildLog.close();
+        // Stopped by the player or done (not a disconnect, an error or a safety stop): the building items go into
+        // storage; the next start takes what it needs again
+        if (wasRunning && mayPutAway && reason == null && !resumeLater && Configs.Shop.PUT_AWAY_ON_STOP.getBooleanValue()) {
+            putAway(mc, false);
+        }
     }
 
     /** At the end of the build: every block that was left out, and why. */
@@ -1103,9 +1282,10 @@ public class AutoBuild {
         }
     }
 
+    /** Stops everything at once (J+Q, the shop scan, the add-on switched off): nothing is put away. */
     public void stopEverything(Minecraft mc) {
         manualTask = ManualTask.NONE;
-        stop(mc, null);
+        stop(mc, null, false);
     }
 
     /** Disconnected: stop without forgetting what was being built (see Resume). */
@@ -1156,6 +1336,9 @@ public class AutoBuild {
     }
 
     public void stopForDisconnect(Minecraft mc) {
+        // Putting away ends with the connection (a vault command on the next server would go nowhere)
+        puttingAway = false;
+        offAfterPutAway = false;
         if (!running && manualTask == ManualTask.NONE) {
             return;
         }
@@ -1219,13 +1402,40 @@ public class AutoBuild {
      * into Litematica Printer passes straight through, so the printer works exactly as without the add-on.
      */
     public void setAddonEnabled(Minecraft mc, boolean on) {
-        Configs.Generic.ADDON_ENABLED.setBooleanValue(on);
-        if (!on) {
-            stopEverything(mc);
+        if (!on && running && !puttingAway) {
+            // Off during auto build: the building items are put away first, then it's off
+            manualTask = ManualTask.NONE;
+            stop(mc, null);
             no.sindrens.printeraddon.shop.ShopScanner.INSTANCE.cancel(null);
             no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.cancel(null);
+            if (puttingAway) {
+                offAfterPutAway = true;
+                Chat.info("Printer Addon switches off once the building items are in storage (J+A again: off right away).");
+                return;
+            }
         }
-        Chat.info("Printer Addon " + (on ? "\u00a7aon" : "\u00a7coff\u00a7r: Litematica Printer works on its own (J+A or J+B to switch it on again)") + ".");
+        if (!on && puttingAway) {
+            puttingAway = false;
+            offAfterPutAway = false;
+            fetcher.reset();
+            if (mc.player != null && mc.player.containerMenu != mc.player.inventoryMenu) {
+                mc.player.closeContainer();
+            }
+        }
+        if (!on) {
+            switchOff(mc);
+            return;
+        }
+        Configs.Generic.ADDON_ENABLED.setBooleanValue(true);
+        Chat.info("Printer Addon \u00a7aon.");
+    }
+
+    private void switchOff(Minecraft mc) {
+        Configs.Generic.ADDON_ENABLED.setBooleanValue(false);
+        stopEverything(mc);
+        no.sindrens.printeraddon.shop.ShopScanner.INSTANCE.cancel(null);
+        no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.cancel(null);
+        Chat.info("Printer Addon \u00a7coff\u00a7r: Litematica Printer works on its own (J+A or J+B to switch it on again).");
     }
 
     public void toggle(Minecraft mc) {
@@ -1290,6 +1500,12 @@ public class AutoBuild {
             builtIn = mc.level;
         } else if (!running) {
             builtIn = null;
+        }
+        if (mc.player != null && mc.player.containerMenu != mc.player.inventoryMenu) {
+            StackMerge.containerOpen();
+        }
+        if (puttingAway) {
+            tickPutAway(mc);
         }
         long started = Perf.start();
         tickParts(mc);
@@ -1373,6 +1589,12 @@ public class AutoBuild {
         // a new layer then waited out the rest: 28 s in a log); a new layer may shop at once
         if (buyCooldown > 0) {
             buyCooldown--;
+            // Nothing placed for a few seconds and an item of the layer is used up: get it now, not when the pause
+            // between shopping rounds is over (at most every 10 s)
+            if (buyCooldown > 0 && layers.stalledFor(20 * 3) && clientTicks - stallShopAt > 20 * 10 && layerItemOut(mc)) {
+                stallShopAt = clientTicks;
+                buyCooldown = 0;
+            }
         }
         if (layers.getLayer() != shoppingLayer) {
             shoppingLayer = layers.getLayer();
@@ -1436,7 +1658,8 @@ public class AutoBuild {
             }
         } else if (!craftingFor.isEmpty()) {
             for (net.minecraft.world.item.Item item : craftingFor) {
-                if (shoppingList.containsKey(item) && mc.player.getInventory().countItem(item) == 0) {
+                boolean got = item == Tools.HOE ? Tools.hasUsableHoe(mc.player.getInventory()) : mc.player.getInventory().countItem(item) > 0;
+                if (shoppingList.containsKey(item) && !got) {
                     // Crafting it didn't work: not again from the same ingredients for a while either
                     cantBuy(java.util.List.of(item));
                     if (CraftPlan.madeFrom(item) != null) {
@@ -1480,7 +1703,7 @@ public class AutoBuild {
         }
         if (!breaker.isBusy() && !airPlace.isActive() && !fluids.isBusy() && !rails.isBusy() && !entities.isBusy()
                 && PrinterBridge.isIdle()) {
-            hotbar.tick(mc, layers.layerNeeds());
+            hotbar.tick(mc, layers.layerNeeds(), !mover.isTravelling(mc.player) && mc.player.getDeltaMovement().lengthSqr() < 0.0004);
         }
 
         long layersStarted = Perf.start();

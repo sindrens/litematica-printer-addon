@@ -79,6 +79,15 @@ public class ConfigGui extends GuiConfigsBase {
                     GuiBase.openGui(null);
                     AutoBuild.INSTANCE.toggle(mc);
                 });
+        if (!running) {
+            // The building items into the vaults now (also done by itself when auto build stops)
+            ButtonGeneric putAway = new ButtonGeneric(x + 210, y, 170, 20, "Put building items away");
+            putAway.setEnabled(!AutoBuild.INSTANCE.isPuttingAway());
+            this.addButton(putAway, (button, mouse) -> {
+                GuiBase.openGui(null);
+                AutoBuild.INSTANCE.putAway(mc, true);
+            });
+        }
         y += 30;
 
         // The chest the crosshair was on when the menu opened

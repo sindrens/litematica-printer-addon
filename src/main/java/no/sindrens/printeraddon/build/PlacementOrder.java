@@ -59,10 +59,8 @@ public final class PlacementOrder {
         if (needsSupport(target) && !target.canSurvive(level, pos)) {
             return "needs the block it stands on or hangs from first";
         }
-        // On a layer with water (waterlogged leaves next to farmland), the water goes in before anything else
-        if (!holdsWater(target) && AutoBuild.INSTANCE.layers.waterFirst(pos)) {
-            return "the water on this layer goes in first";
-        }
+        // Only tilling waits for water (its own, within 4 blocks): everything else goes in meanwhile. A rule that held
+        // up every block within 8 to 16 blocks of water still to go in once had a whole layer of 9725 blocks wait
         BlockPos water = waterFirst(level, schematic, pos, target);
         if (water != null) {
             return "tilling waits for the water at " + water.toShortString();
@@ -176,8 +174,10 @@ public final class PlacementOrder {
             ready.add(pos);
         }
 
+        // Blocks that hold water first (waterlogged leaves): the bucket can follow at once, and the tilling around it
+        // is done in the same visit instead of on a second round
         ready.sort(Comparator
-                .comparingInt((BlockPos pos) -> tier(schematic, pos, schematic.getBlockState(pos)))
+                .comparingInt((BlockPos pos) -> holdsWater(schematic.getBlockState(pos)) ? -1 : tier(schematic, pos, schematic.getBlockState(pos)))
                 .thenComparingInt(pos -> inHand != null && StateRules.itemFor(schematic.getBlockState(pos)).is(inHand) ? 0 : 1)
                 .thenComparingDouble(pos -> from.distanceToSqr(Vec3.atCenterOf(pos))));
         return ready;

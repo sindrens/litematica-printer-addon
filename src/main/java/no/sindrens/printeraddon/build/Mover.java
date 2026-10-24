@@ -99,8 +99,36 @@ public class Mover {
                     + (target != null ? target.toShortString() : "the next spot");
             case WORKING -> "placing " + lastPrinterReach + " block" + (lastPrinterReach == 1 ? "" : "s") + " within reach";
             case IDLE -> work.isEmpty() ? (skipped.isEmpty() ? "waiting" : "waiting, " + skipped.size() + " left for later")
+                    : tick - lastNothingDoable < 40 && !waitReason.isEmpty() ? "waiting: " + waitReason
                     : "looking for the next block";
         };
+    }
+
+    /** Why nothing could be placed at the last look: the most common reason among the unfinished blocks. */
+    private String waitReason = "";
+    private long waitReasonAt = -1000;
+
+    /** For the status line: why the unfinished blocks can't be placed now (at most every 2 s, from up to 600 of them). */
+    private void explainWait(Minecraft mc, WorldSchematic schematic) {
+        if (tick - waitReasonAt < 40 || work.isEmpty()) {
+            return;
+        }
+        waitReasonAt = tick;
+        Map<String, Integer> reasons = new HashMap<>();
+        int looked = 0;
+        for (BlockPos pos : work) {
+            if (looked++ >= 600) {
+                break;
+            }
+            reasons.merge(Diagnose.shortReason(mc, schematic, pos), 1, Integer::sum);
+        }
+        Map.Entry<String, Integer> top = reasons.entrySet().stream().max(Map.Entry.comparingByValue()).orElse(null);
+        waitReason = top == null ? "" : top.getKey() + (looked > 1 ? " (" + top.getValue() * 100 / Math.min(looked, work.size()) + "% of the blocks left)" : "");
+    }
+
+    /** The main reason nothing can be placed now, or "" while something can. */
+    public String waitReason() {
+        return tick - lastNothingDoable < 40 ? waitReason : "";
     }
 
     /** Placeable blocks in the printer's reach at the last tick (the printer's own test, see inPrinterReach). */
@@ -832,9 +860,11 @@ public class Mover {
             }
             if (next == null) {
                 lastNothingDoable = tick;
+                explainWait(mc, schematic);
                 if (tick - lastNothingDoableReport > 20 * 30 && !work.isEmpty()) {
                     lastNothingDoableReport = tick;
-                    BuildLog.line("WAIT", "nothing of the " + work.size() + " unfinished blocks can be placed now; nearest: "
+                    BuildLog.line("WAIT", "nothing of the " + work.size() + " unfinished blocks can be placed now: mostly "
+                            + waitReason + "; nearest: "
                             + Diagnose.explain(mc, schematic, nearest(player, work)));
                 }
                 area = null;

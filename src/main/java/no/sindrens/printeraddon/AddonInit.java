@@ -26,8 +26,16 @@ public class AddonInit implements IInitializationHandler {
         // Switched off in the settings list: everything stops, like with J+A
         no.sindrens.printeraddon.config.Configs.Generic.ADDON_ENABLED.setValueChangeCallback(config -> {
             net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+            no.sindrens.printeraddon.build.AutoBuild build = no.sindrens.printeraddon.build.AutoBuild.INSTANCE;
             if (!config.getBooleanValue() && mc.player != null) {
-                no.sindrens.printeraddon.build.AutoBuild.INSTANCE.stopEverything(mc);
+                if (build.isRunning()) {
+                    // Off during auto build: like J+A, the building items are put away first, then it's off
+                    config.setBooleanValue(true);
+                    build.setAddonEnabled(mc, false);
+                } else {
+                    build.cancelPutAway();
+                    build.stopEverything(mc);
+                }
             }
         });
 
