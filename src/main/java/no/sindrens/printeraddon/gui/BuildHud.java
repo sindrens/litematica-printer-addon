@@ -28,7 +28,13 @@ public final class BuildHud {
     }
 
     public static void register() {
-        HudElementRegistry.addLast(Identifier.fromNamespaceAndPath(PrinterAddon.MOD_ID, "build_status"), BuildHud::render);
+        HudElementRegistry.addLast(Identifier.fromNamespaceAndPath(PrinterAddon.MOD_ID, "build_status"), (graphics, delta) -> {
+            try {
+                render(graphics, delta);
+            } catch (RuntimeException | LinkageError e) {
+                AutoBuild.INSTANCE.error("the on-screen display", e);
+            }
+        });
     }
 
     private static void render(GuiGraphicsExtractor graphics, DeltaTracker delta) {

@@ -41,6 +41,16 @@ public class InteractActionMixin {
     private static net.minecraft.world.entity.player.Input printer_addon$keys;
 
     @Inject(method = "interact", at = @At("HEAD"), cancellable = true)
+    private void printer_addon$beforeClick(Minecraft client, LocalPlayer player, InteractionHand hand, BlockHitResult hit, CallbackInfo ci) {
+        // An error in the add-on's part stops auto build and goes into the build log; the click and the game go on
+        try {
+            printer_addon$faceForClick(client, player, hand, hit, ci);
+        } catch (RuntimeException | LinkageError e) {
+            no.sindrens.printeraddon.build.AutoBuild.INSTANCE.error("the printer's click", e);
+        }
+    }
+
+    @Unique
     private void printer_addon$faceForClick(Minecraft client, LocalPlayer player, InteractionHand hand, BlockHitResult hit, CallbackInfo ci) {
         printer_addon$turned = false;
         printer_addon$sneaked = false;
@@ -153,6 +163,15 @@ public class InteractActionMixin {
     }
 
     @Inject(method = "interact", at = @At("RETURN"))
+    private void printer_addon$afterClick(Minecraft client, LocalPlayer player, InteractionHand hand, BlockHitResult hit, CallbackInfo ci) {
+        try {
+            printer_addon$lookBack(client, player, hand, hit, ci);
+        } catch (RuntimeException | LinkageError e) {
+            no.sindrens.printeraddon.build.AutoBuild.INSTANCE.error("after the printer's click", e);
+        }
+    }
+
+    @Unique
     private void printer_addon$lookBack(Minecraft client, LocalPlayer player, InteractionHand hand, BlockHitResult hit, CallbackInfo ci) {
         if (Configs.enabled() && client.level != null) {
             // The click went out with this sequence number: the server answers it when it's done (see ServerAcks)

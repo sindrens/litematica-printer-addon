@@ -993,7 +993,11 @@ public class AutoBuild {
             Resume.forget();
         }
         if (wasRunning) {
-            BuildLog.line("END", (reason != null ? "stopped: " + reason : "stopped") + " | " + stats.total());
+            String why = reason != null ? "stopped: " + reason
+                    : resumeLater ? "disconnected" + (disconnectReason.isEmpty() ? "" : ": " + disconnectReason) + " (picks up again after rejoining)"
+                    : "stopped by you";
+            BuildLog.line("END", why + " | " + stats.total());
+            disconnectReason = "";
             logIgnored(mc);
             BuildLog.line("PERF", Perf.report());
             PrinterBridge.setPrinting(printerWasOn);
@@ -1047,6 +1051,48 @@ public class AutoBuild {
     }
 
     /** Disconnected: stop without forgetting what was being built (see Resume). */
+    /** Why the connection last ended (shown in the END line). */
+    private String disconnectReason = "";
+
+    /** The connection ended (see ClientCommonPacketListenerMixin): the reason goes into the build log at once. */
+    public void disconnected(String reason) {
+        disconnectReason = reason;
+        if (running) {
+            BuildLog.line("DISCONNECT", "the connection ended: " + reason);
+        }
+    }
+
+    /** Errors already written, so one that repeats every tick isn't written every tick. */
+    private final java.util.Map<String, Long> errorsLogged = new java.util.HashMap<>();
+
+    /**
+     * Something in the add-on went wrong: written to the build log and the game log with where it happened, auto
+     * build stops, and the game goes on (it doesn't crash for the add-on).
+     */
+    public void error(String where, Throwable e) {
+        String key = where + "|" + e;
+        Long at = errorsLogged.get(key);
+        boolean first = at == null || clientTicks - at > 20 * 60;
+        if (first) {
+            errorsLogged.put(key, clientTicks);
+            PrinterAddon.LOGGER.error("Printer Addon error in {}", where, e);
+            java.io.StringWriter trace = new java.io.StringWriter();
+            e.printStackTrace(new java.io.PrintWriter(trace));
+            BuildLog.line("ERROR", "in " + where + ": " + trace.toString().replace(System.lineSeparator(), " | "));
+        }
+        if (running) {
+            Minecraft mc = Minecraft.getInstance();
+            try {
+                stop(mc, "an error in the add-on (" + e.getClass().getSimpleName() + " in " + where + "), it's in the build log");
+            } catch (RuntimeException again) {
+                running = false;
+                PrinterAddon.LOGGER.error("Printer Addon: stopping after an error failed too", again);
+            }
+        } else if (first) {
+            Chat.warn("Printer Addon error (" + e.getClass().getSimpleName() + " in " + where + "): the game log has the details.");
+        }
+    }
+
     public void stopForDisconnect(Minecraft mc) {
         if (!running && manualTask == ManualTask.NONE) {
             return;

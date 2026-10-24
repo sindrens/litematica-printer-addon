@@ -9,6 +9,15 @@ import no.sindrens.printeraddon.shop.ShopScanner;
 public class ClientTick implements IClientTickHandler {
     @Override
     public void onClientTick(Minecraft mc) {
+        // An error in the add-on stops auto build and goes into the build log; the game doesn't crash for it
+        try {
+            tick(mc);
+        } catch (RuntimeException | LinkageError e) {
+            AutoBuild.INSTANCE.error("the tick", e);
+        }
+    }
+
+    private void tick(Minecraft mc) {
         AutoBuild.clientTicks++;
         if (mc.player == null || mc.level == null) {
             ShopScanner.INSTANCE.cancel(null);

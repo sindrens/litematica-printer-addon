@@ -74,7 +74,11 @@ public class PrinterMixin {
                                                net.minecraft.client.player.LocalPlayer player) {
         List<?> actions = guide.execute(player);
         if (AutoBuild.INSTANCE.isRunning()) {
-            AutoBuild.INSTANCE.printerTried(((GuideExecuteMixin) guide).printer_addon$state().blockPos, printer_addon$item(actions));
+            try {
+                AutoBuild.INSTANCE.printerTried(((GuideExecuteMixin) guide).printer_addon$state().blockPos, printer_addon$item(actions));
+            } catch (RuntimeException | LinkageError e) {
+                AutoBuild.INSTANCE.error("noting the printer's click", e);
+            }
         }
         return actions;
     }
@@ -106,7 +110,11 @@ public class PrinterMixin {
     private void printer_addon$buildOrder(CallbackInfoReturnable<List<BlockPos>> cir) {
         // Add-on off: the printer's own list, untouched
         if (no.sindrens.printeraddon.config.Configs.enabled()) {
-            cir.setReturnValue(AutoBuild.INSTANCE.filterPrinterPositions(cir.getReturnValue()));
+            try {
+                cir.setReturnValue(AutoBuild.INSTANCE.filterPrinterPositions(cir.getReturnValue()));
+            } catch (RuntimeException | LinkageError e) {
+                AutoBuild.INSTANCE.error("the printer's block list", e);
+            }
         }
     }
 }
