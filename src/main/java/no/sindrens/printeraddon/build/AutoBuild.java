@@ -29,6 +29,11 @@ public class AutoBuild {
     public final Crafter crafter = new Crafter();
     public final ChestFetcher fetcher = new ChestFetcher();
     public final InventoryWatch inventory = new InventoryWatch();
+    /** What the printer was last offered (for the idle analysis in the debug log). */
+    public long lastOfferedTick;
+    public int lastOfferedCount;
+    public int lastRawCount;
+    public int lastExecutableCount;
     public final AutoEat eater = new AutoEat();
     private final HotbarPrep hotbar = new HotbarPrep();
     /** The player's render distance while a lower one is used for building (0 = not changed). */
@@ -146,10 +151,22 @@ public class AutoBuild {
                 forPrinter.add(pos);
             }
         }
+        lastOfferedTick = clientTicks;
+        lastRawCount = all.size();
         java.util.List<net.minecraft.core.BlockPos> ordered = PlacementOrder.order(mc.level, schematic, forPrinter, mc.player.position(),
                 mc.player.getMainHandItem().isEmpty() ? null : mc.player.getMainHandItem().getItem());
         if (!ordered.isEmpty()) {
             nextBlock = ordered.getFirst();
+        }
+        lastOfferedCount = ordered.size();
+        // For the idle analysis: how many of them a printer guide can actually do now
+        lastExecutableCount = 0;
+        if (Configs.Generic.DEBUG_LOG.getBooleanValue()) {
+            for (net.minecraft.core.BlockPos pos : ordered) {
+                if (QuickPlace.printerCan(mc, pos)) {
+                    lastExecutableCount++;
+                }
+            }
         }
         return ordered;
     }
@@ -585,7 +602,8 @@ public class AutoBuild {
 
         PrinterBridge.applySettings(mc.player);
         stats.tick(activity());
-        stats.printerTick(PrinterBridge.isIdle(), shouldPausePrinter());
+        stats.printerTick(PrinterBridge.isIdle(), shouldPausePrinter(), clientTicks - lastOfferedTick <= 1 ? lastOfferedCount : -1,
+                lastRawCount, lastExecutableCount);
         speed.tick(mc);
 
         // Eating: nothing else happens meanwhile (only between other jobs, never in the middle of one)

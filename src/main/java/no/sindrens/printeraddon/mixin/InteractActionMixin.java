@@ -37,6 +37,8 @@ public class InteractActionMixin {
 
     @Unique
     private static boolean printer_addon$sneaked;
+    @Unique
+    private static net.minecraft.world.entity.player.Input printer_addon$keys;
 
     @Inject(method = "interact", at = @At("HEAD"), cancellable = true)
     private void printer_addon$faceForClick(Minecraft client, LocalPlayer player, InteractionHand hand, BlockHitResult hit, CallbackInfo ci) {
@@ -53,10 +55,21 @@ public class InteractActionMixin {
         // click, or it opens the hopper instead (and nothing is placed). The printer doesn't always sneak, and its
         // sneak can be overtaken by the click. Sneak right before the click, in the same packet order a player would
         if (Configs.enabled() && client.level != null
+                && no.sindrens.printeraddon.build.QuickPlace.isInteractive(client.level.getBlockState(hit.getBlockPos()))
+                && printer_addon$refillFirst(client, player, hand)) {
+            ci.cancel();
+            return;
+        }
+        if (Configs.enabled() && client.level != null
                 && no.sindrens.printeraddon.build.QuickPlace.isInteractive(client.level.getBlockState(hit.getBlockPos()))) {
             net.minecraft.world.entity.player.Input keys = player.input.keyPresses;
-            player.connection.send(new net.minecraft.network.protocol.game.ServerboundPlayerInputPacket(new net.minecraft.world.entity.player.Input(
-                    keys.forward(), keys.backward(), keys.left(), keys.right(), keys.jump(), true, keys.sprint())));
+            net.minecraft.world.entity.player.Input sneaking = new net.minecraft.world.entity.player.Input(
+                    keys.forward(), keys.backward(), keys.left(), keys.right(), keys.jump(), true, keys.sprint());
+            player.connection.send(new net.minecraft.network.protocol.game.ServerboundPlayerInputPacket(sneaking));
+            // The client sneaks for the click too: otherwise it doesn't place (or count) the block while the server
+            // does, the stack runs out a click earlier on the server, and that click opens the hopper
+            printer_addon$keys = keys;
+            player.input.keyPresses = sneaking;
             printer_addon$sneaked = true;
         }
         if (!Configs.enabled() || !Configs.Generic.TURN_VIEW_FOR_PRINTER.getBooleanValue()
@@ -81,12 +94,39 @@ public class InteractActionMixin {
         printer_addon$turned = true;
     }
 
+    /**
+     * The last item of a stack, clicked against a hopper or chest: the server can already be at zero (it counts
+     * placements the client didn't see) and then opens the hopper. Swap a full stack of the same item into the hand
+     * first and skip this click; the printer clicks again after.
+     */
+    @Unique
+    private static boolean printer_addon$refillFirst(Minecraft client, LocalPlayer player, InteractionHand hand) {
+        net.minecraft.world.item.ItemStack held = player.getItemInHand(hand);
+        if (hand != InteractionHand.MAIN_HAND || held.getCount() > 1 || client.gameMode == null) {
+            return false;
+        }
+        net.minecraft.world.entity.player.Inventory inventory = player.getInventory();
+        int selected = inventory.getSelectedSlot();
+        for (int slot = net.minecraft.world.entity.player.Inventory.getSelectionSize(); slot < net.minecraft.world.entity.player.Inventory.INVENTORY_SIZE; slot++) {
+            net.minecraft.world.item.ItemStack stack = inventory.getItem(slot);
+            if (stack.getCount() > 1 && net.minecraft.world.item.ItemStack.isSameItemSameComponents(stack, held)) {
+                client.gameMode.handleContainerInput(player.inventoryMenu.containerId, slot, selected,
+                        net.minecraft.world.inventory.ContainerInput.SWAP, player);
+                no.sindrens.printeraddon.build.AutoBuild.INSTANCE.inventory.moved();
+                no.sindrens.printeraddon.PrinterAddon.trace("Last {} in hand: swapped in a full stack before clicking", held.getItem());
+                return true;
+            }
+        }
+        return false;
+    }
+
     @Inject(method = "interact", at = @At("RETURN"))
     private void printer_addon$lookBack(Minecraft client, LocalPlayer player, InteractionHand hand, BlockHitResult hit, CallbackInfo ci) {
         if (printer_addon$sneaked) {
             // Back to what the keyboard says
             printer_addon$sneaked = false;
-            player.connection.send(new net.minecraft.network.protocol.game.ServerboundPlayerInputPacket(player.input.keyPresses));
+            player.input.keyPresses = printer_addon$keys;
+            player.connection.send(new net.minecraft.network.protocol.game.ServerboundPlayerInputPacket(printer_addon$keys));
         }
         if (!printer_addon$turned) {
             return;

@@ -184,7 +184,7 @@ public class QuickPlace {
     private static final me.aleksilassila.litematica.printer.guides.Guides PRINTER_GUIDES = new me.aleksilassila.litematica.printer.guides.Guides();
 
     /** True if one of the printer's own placement guides can place the block now. */
-    private static boolean printerCan(Minecraft mc, BlockPos pos) {
+    static boolean printerCan(Minecraft mc, BlockPos pos) {
         WorldSchematic schematic = SchematicHelper.world();
         if (schematic == null) {
             return false;

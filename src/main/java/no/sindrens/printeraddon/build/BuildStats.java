@@ -66,17 +66,40 @@ public class BuildStats {
      * Once a minute in the log: blocks placed, and how often the printer had nothing queued. Rarely idle means the
      * printer is the limit; often idle means it waits for the player to get somewhere.
      */
-    public void printerTick(boolean idle, boolean paused) {
+    private int idleNothingInReach;
+    private int idleAllFiltered;
+    private int idleOffered;
+
+    private int idleExecutable;
+
+    public void printerTick(boolean idle, boolean paused, int offered, int raw, int executable) {
         minuteTicks++;
         if (idle && !paused) {
             minuteIdle++;
+            // Why: nothing unfinished in reach at all / some, but none ready / ready ones the printer didn't take
+            if (raw == 0) {
+                idleNothingInReach++;
+            } else if (offered <= 0) {
+                idleAllFiltered++;
+            } else if (executable == 0) {
+                idleOffered++;
+            } else {
+                idleExecutable++;
+            }
         }
         if (minuteTicks >= 20 * 60) {
-            PrinterAddon.debug("[rate] last minute: {} placed, printer idle {}% of ticks, {}", totalPlaced - minutePlaced,
-                    minuteIdle * 100 / minuteTicks, AutoBuild.INSTANCE.speed.describe());
+            PrinterAddon.debug("[rate] last minute: {} placed, printer idle {}% of ticks (nothing unfinished in reach {}%,"
+                            + " none ready {}%, ready but no guide can place them yet {}%, placeable but the printer skipped them {}%), {}",
+                    totalPlaced - minutePlaced, minuteIdle * 100 / minuteTicks, idleNothingInReach * 100 / minuteTicks,
+                    idleAllFiltered * 100 / minuteTicks, idleOffered * 100 / minuteTicks, idleExecutable * 100 / minuteTicks,
+                    AutoBuild.INSTANCE.speed.describe());
             minutePlaced = totalPlaced;
             minuteTicks = 0;
             minuteIdle = 0;
+            idleNothingInReach = 0;
+            idleAllFiltered = 0;
+            idleOffered = 0;
+            idleExecutable = 0;
         }
     }
 
