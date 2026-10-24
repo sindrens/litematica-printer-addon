@@ -152,7 +152,7 @@ public class Configs implements IConfigHandler {
     }
 
     public static class Movement {
-        public static final ConfigOptionList MOVE_MODE = new ConfigOptionList("moveMode", MoveMode.FLY,
+        public static final ConfigOptionList MOVE_MODE = new ConfigOptionList("movementMode", MoveMode.FLY,
                 "How auto build gets you to the next unfinished blocks: fly (fastest: always above the blocks being built),\n"
                         + "walk, walk and fly when needed, or not at all.",
                 "Movement");

@@ -39,6 +39,9 @@ public class Mover {
     private enum State { IDLE, WORKING, WALKING, FLYING }
 
     private State state = State.IDLE;
+    /** When and where the current flight started (for the build log), -1 when not flying. */
+    private long moveStartTick = -1;
+    private Vec3 moveFrom = Vec3.ZERO;
     private long tick;
     private int ticksUntilScan;
 
@@ -121,6 +124,12 @@ public class Mover {
         return motion.x * motion.x + motion.z * motion.z > 0.03 * 0.03 || Math.abs(motion.y) > 0.08;
     }
 
+    /** Mover state for the build log's snapshots. */
+    public String details() {
+        return state + (target != null ? " target " + target.toShortString() : "") + " area " + areaName(area)
+                + " work " + work.size() + (unloadedAreas.isEmpty() ? "" : " unloaded areas " + unloadedAreas.size());
+    }
+
     public BuildStats.Activity activity() {
         return switch (state) {
             case WORKING -> BuildStats.Activity.PLACING;
@@ -174,7 +183,9 @@ public class Mover {
 
         if (--ticksUntilScan <= 0) {
             ticksUntilScan = SCAN_INTERVAL;
+            long started = Perf.start();
             scan(mc, schematic);
+            Perf.end("movement: scan", started);
         }
 
         double reach = reach(player);
@@ -288,6 +299,13 @@ public class Mover {
         if (!inReach.isEmpty()) {
             if (state == State.WALKING || state == State.FLYING) {
                 halt(player);
+                if (moveStartTick >= 0) {
+                    BuildLog.line("MOVE", String.format("arrived at %s after %.1f s, %.1f blocks from %s; %d placeable in reach",
+                            player.blockPosition().toShortString(), (tick - moveStartTick) / 20.0,
+                            Math.sqrt(player.position().distanceToSqr(moveFrom)), BlockPos.containing(moveFrom).toShortString(),
+                            inReach.size()));
+                    moveStartTick = -1;
+                }
             }
             state = State.WORKING;
             path = null;
@@ -431,6 +449,14 @@ public class Mover {
      */
     @Nullable
     private BlockPos bestSpot(Minecraft mc, LocalPlayer player, WorldSchematic schematic, double reach) {
+        long started = Perf.start();
+        BlockPos best = bestSpotNow(mc, player, schematic, reach);
+        Perf.end("movement: next spot", started);
+        return best;
+    }
+
+    @Nullable
+    private BlockPos bestSpotNow(Minecraft mc, LocalPlayer player, WorldSchematic schematic, double reach) {
         Vec3 from = player.position();
         List<BlockPos> sorted = new ArrayList<>(work);
         sorted.sort(java.util.Comparator.comparingDouble(p -> from.distanceToSqr(Vec3.atCenterOf(p))));
@@ -731,6 +757,13 @@ public class Mover {
 
         if (mode.canFly() && !flyUnavailable) {
             flyTarget = hoverPoint(mc, goalBlock);
+            if (state != State.FLYING || moveStartTick < 0) {
+                moveStartTick = tick;
+                moveFrom = player.position();
+            }
+            BuildLog.line("MOVE", String.format("flying from %s to %.1f %.1f %.1f (%.1f blocks) for %s, area %s",
+                    player.blockPosition().toShortString(), flyTarget.x, flyTarget.y, flyTarget.z,
+                    Math.sqrt(player.position().distanceToSqr(flyTarget)), goalBlock.toShortString(), areaName(area)));
             state = State.FLYING;
             PrinterAddon.debug("Flying to {} for {}", flyTarget, goalBlock.toShortString());
             return;

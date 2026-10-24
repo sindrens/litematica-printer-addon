@@ -269,7 +269,10 @@ public class FarmTest implements FabricClientGameTest {
         if (needed.containsKey(Items.WATER_BUCKET)) {
             commands.add("clear @p minecraft:bucket");
         }
-        for (Map.Entry<Item, Integer> entry : needed.entrySet()) {
+        // Fewest first, so every item the layer needs gets a slot before the big ones fill the inventory
+        List<Map.Entry<Item, Integer>> byCount = new ArrayList<>(needed.entrySet());
+        byCount.sort(Map.Entry.comparingByValue());
+        for (Map.Entry<Item, Integer> entry : byCount) {
             int missing = entry.getValue();
             if (missing <= 0 || freeSlots <= 0) {
                 continue;

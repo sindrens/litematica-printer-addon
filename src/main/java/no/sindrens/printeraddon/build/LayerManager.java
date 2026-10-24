@@ -492,6 +492,7 @@ public class LayerManager {
         for (BlockPos pos : positions) {
             String why = Diagnose.explain(mc, schematic, pos);
             PrinterAddon.LOGGER.warn("[stuck]   {}", why);
+            BuildLog.line("STUCK", why);
             if (shown++ < 4) {
                 Chat.warn(" - " + why);
             }

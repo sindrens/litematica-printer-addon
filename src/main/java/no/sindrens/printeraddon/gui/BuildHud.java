@@ -38,6 +38,7 @@ public final class BuildHud {
             return;
         }
 
+        long started = no.sindrens.printeraddon.build.Perf.start();
         List<String> lines = new ArrayList<>();
         List<Integer> colors = new ArrayList<>();
         add(lines, colors, "Printer Addon - " + build.layers.status(), TEXT);
@@ -77,6 +78,7 @@ public final class BuildHud {
         for (int i = 0; i < lines.size(); i++) {
             graphics.text(font, lines.get(i), x, y + i * lineHeight, colors.get(i));
         }
+        no.sindrens.printeraddon.build.Perf.end("on-screen display", started);
     }
 
     private static void add(List<String> lines, List<Integer> colors, String text, int color) {

@@ -33,6 +33,7 @@ public class Chat {
     /** Status message, hidden when chat messages are turned off. */
     public static void info(String message) {
         remember(message);
+        no.sindrens.printeraddon.build.BuildLog.line("info", message);
         PrinterAddon.LOGGER.info(message);
         if (Configs.Generic.CHAT_MESSAGES.getBooleanValue()) {
             send(message);
@@ -42,6 +43,7 @@ public class Chat {
     /** Always shown: something stopped or needs the player's attention. */
     public static void warn(String message) {
         remember(message);
+        no.sindrens.printeraddon.build.BuildLog.line("WARN", message);
         PrinterAddon.LOGGER.warn(message);
         send("§e" + message);
     }

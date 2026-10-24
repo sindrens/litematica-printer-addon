@@ -12,8 +12,14 @@ public class PrinterAddon implements ClientModInitializer {
 
     /** Fine detail: only in the log (with "Debug log"), never in chat. */
     public static void trace(String message, Object... args) {
-        if (no.sindrens.printeraddon.config.Configs.Generic.DEBUG_LOG.getBooleanValue()) {
-            LOGGER.info("[debug] " + message, args);
+        boolean log = no.sindrens.printeraddon.config.Configs.Generic.DEBUG_LOG.getBooleanValue();
+        if (!log && !no.sindrens.printeraddon.build.BuildLog.isOpen()) {
+            return;
+        }
+        String text = org.apache.logging.log4j.message.ParameterizedMessage.format(message, args);
+        no.sindrens.printeraddon.build.BuildLog.line("detail", text);
+        if (log) {
+            LOGGER.info("[debug] {}", text);
         }
     }
 
@@ -21,10 +27,11 @@ public class PrinterAddon implements ClientModInitializer {
     public static void debug(String message, Object... args) {
         boolean log = no.sindrens.printeraddon.config.Configs.Generic.DEBUG_LOG.getBooleanValue();
         boolean chat = no.sindrens.printeraddon.config.Configs.Generic.DETAILED_CHAT.getBooleanValue();
-        if (!log && !chat) {
+        if (!log && !chat && !no.sindrens.printeraddon.build.BuildLog.isOpen()) {
             return;
         }
         String text = org.apache.logging.log4j.message.ParameterizedMessage.format(message, args);
+        no.sindrens.printeraddon.build.BuildLog.line("step", text);
         if (log) {
             LOGGER.info("[debug] {}", text);
         }

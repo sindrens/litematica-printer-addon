@@ -98,6 +98,9 @@ public class BuildStats {
             }
             PrinterAddon.debug("[rate] last minute: {} placed; printer's free turns{}; {}", totalPlaced - minutePlaced,
                     sb, AutoBuild.INSTANCE.speed.describe());
+            String perf = Perf.report();
+            BuildLog.line("PERF", "last minute, avg/max per tick: " + perf);
+            PrinterAddon.trace("[perf] {}", perf);
             java.util.Arrays.fill(minuteTurns, 0);
             minuteStart = AutoBuild.clientTicks;
             minutePlaced = totalPlaced;

@@ -124,6 +124,15 @@ public class AutoBuild {
      * blocks within reach that have become ready. During air place only the one block it's meant for.
      */
     public java.util.List<net.minecraft.core.BlockPos> filterPrinterPositions(java.util.List<net.minecraft.core.BlockPos> positions) {
+        long started = Perf.start();
+        java.util.List<net.minecraft.core.BlockPos> result = filterPositions(positions);
+        if (running) {
+            Perf.end("printer's block list", started);
+        }
+        return result;
+    }
+
+    private java.util.List<net.minecraft.core.BlockPos> filterPositions(java.util.List<net.minecraft.core.BlockPos> positions) {
         Minecraft mc = Minecraft.getInstance();
         fi.dy.masa.litematica.world.WorldSchematic schematic = SchematicHelper.world();
         if (!running || mc.player == null || mc.level == null || schematic == null) {
@@ -425,6 +434,18 @@ public class AutoBuild {
 
         running = true;
         Configs.Generic.AUTO_BUILD.setBooleanValue(true);
+        BuildLog.open();
+        Perf.report();
+        logTicks = 0;
+        placedAtSnapshot = 0;
+        BuildLog.line("START", "Printer Addon " + net.fabricmc.loader.api.FabricLoader.getInstance().getModContainer(no.sindrens.printeraddon.PrinterAddon.MOD_ID)
+                .map(m -> m.getMetadata().getVersion().getFriendlyString()).orElse("?")
+                + " | server " + no.sindrens.printeraddon.util.ServerName.current(mc)
+                + " | schematic areas " + SchematicHelper.areas()
+                + " | player at " + mc.player.blockPosition().toShortString()
+                + " | printer interval " + me.aleksilassila.litematica.printer.config.Configs.PRINTING_INTERVAL.getIntegerValue()
+                + ", range " + me.aleksilassila.litematica.printer.config.Configs.PRINTING_RANGE.getDoubleValue()
+                + " | movement " + Configs.Movement.mode() + " | fps " + mc.getFps());
         int renderDistance = Configs.Generic.BUILD_RENDER_DISTANCE.getIntegerValue();
         if (renderDistance > 0 && mc.options.renderDistance().get() != renderDistance) {
             savedRenderDistance = mc.options.renderDistance().get();
@@ -500,6 +521,8 @@ public class AutoBuild {
             Resume.forget();
         }
         if (wasRunning) {
+            BuildLog.line("END", (reason != null ? "stopped: " + reason : "stopped") + " | " + stats.total());
+            BuildLog.line("PERF", Perf.report());
             PrinterBridge.setPrinting(printerWasOn);
             PrinterBridge.setAirPlace(airPlaceWasOn);
             PrinterBridge.restoreSettings();
@@ -510,6 +533,7 @@ public class AutoBuild {
                 Chat.info("Auto build §cstopped§r.");
             }
         }
+        BuildLog.close();
     }
 
     public void stopEverything(Minecraft mc) {
@@ -577,6 +601,34 @@ public class AutoBuild {
     private static long lastUnwantedMenuWarning = -100000;
 
     public void tick(Minecraft mc) {
+        long started = Perf.start();
+        tickParts(mc);
+        if (running) {
+            Perf.end("add-on tick (all)", started);
+            Perf.tick();
+            if (++logTicks % 100 == 0) {
+                snapshot(mc);
+            }
+        }
+    }
+
+    private long logTicks;
+    private int placedAtSnapshot;
+
+    /** Every 5 seconds in the build log: where the player is and how it goes. */
+    private void snapshot(Minecraft mc) {
+        if (mc.player == null) {
+            return;
+        }
+        int placed = stats.totalPlaced();
+        BuildLog.line("SNAP", String.format("at %.1f %.1f %.1f | %s | placed %d in 5 s (%d total) | %s | mover %s | printer busy %d%% (%s) | interval %d | free slots %d | fps %d",
+                mc.player.getX(), mc.player.getY(), mc.player.getZ(), layers.status(), placed - placedAtSnapshot, placed,
+                doing(), mover.details(), stats.printerBusyPercent(), stats.printerIdleReason(), speed.interval(),
+                InventoryCleaner.freeSlots(mc.player.getInventory()), mc.getFps()));
+        placedAtSnapshot = placed;
+    }
+
+    private void tickParts(Minecraft mc) {
         // The settings screen (or a hotkey) can flip the switch too
         if (Configs.Generic.AUTO_BUILD.getBooleanValue() != running) {
             if (running) {
@@ -707,21 +759,28 @@ public class AutoBuild {
             hotbar.tick(mc, layers.layerNeeds());
         }
 
-        if (layers.isActive() && !layers.tick(mc)) {
+        long layersStarted = Perf.start();
+        boolean layersGoOn = !layers.isActive() || layers.tick(mc);
+        Perf.end("layer check", layersStarted);
+        if (!layersGoOn) {
             stop(mc, null);
             return;
         }
 
         if (PrinterBridge.isIdle() && !breaker.isBusy() && !fluids.isBusy() && !rails.isBusy() && !entities.isBusy()) {
-            if (cleaner.tick(mc, neededWhole, fetcher)) {
-                return;
-            }
-            if (buyMissing(mc)) {
+            long itemsStarted = Perf.start();
+            boolean busy = cleaner.tick(mc, neededWhole, fetcher) || buyMissing(mc);
+            Perf.end("inventory and buying", itemsStarted);
+            if (busy) {
                 return;
             }
         }
 
+        long moverStarted = Perf.start();
         mover.tick(mc);
+        Perf.end("movement", moverStarted);
+        long statusStarted = Perf.start();
         updateStatus(mc);
+        Perf.end("status and needs", statusStarted);
     }
 }
