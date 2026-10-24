@@ -29,6 +29,7 @@ public class CraftTest implements FabricClientGameTest {
             TestServerContext server = singleplayer.getServer();
             singleplayer.getClientLevel().waitForChunksRender();
             server.runCommand("recipe give @p *");
+            context.runOnClient(mc -> no.sindrens.printeraddon.config.Configs.Generic.DEBUG_LOG.setBooleanValue(true));
             server.runCommand("fill ~-3 ~-1 ~-3 ~3 ~-1 ~3 stone");
             server.runCommand("give @p iron_block 3");
             server.runCommand("give @p gold_block 2");
@@ -68,6 +69,99 @@ public class CraftTest implements FabricClientGameTest {
                     mc.player.getInventory().countItem(Items.POWERED_RAIL), mc.player.getInventory().countItem(Items.PUMPKIN_SEEDS)});
             if (counts[0] < 32 || counts[1] < 6 || counts[2] < 12) {
                 throw new AssertionError("Craft test: " + have);
+            }
+
+            // Tools for breaking wrong blocks, from cobblestone and a log: a stone pickaxe and a stone shovel
+            server.runCommand("clear @p");
+            server.runCommand("give @p cobblestone 4");
+            server.runCommand("give @p oak_log 2");
+            context.waitTicks(20);
+            Crafter tools = new Crafter();
+            String toolPlan = context.computeOnClient(mc -> {
+                Map<Item, Integer> missing = new LinkedHashMap<>();
+                missing.put(no.sindrens.printeraddon.build.Tools.PICKAXE, 1);
+                missing.put(no.sindrens.printeraddon.build.Tools.SHOVEL, 1);
+                CraftPlan p = CraftPlan.of(mc, missing, item -> false, false);
+                for (CraftPlan.Step step : p.craft) {
+                    tools.craft(step.item(), step.count());
+                }
+                return "buy " + p.buy + ", craft " + p.craft;
+            });
+            System.out.println("CRAFT TEST tools plan: " + toolPlan);
+            ticks = 0;
+            while (ticks < 20 * 90 && context.computeOnClient(mc -> tools.isBusy())) {
+                context.runOnClient(tools::tick);
+                context.waitTicks(1);
+                ticks++;
+            }
+            String toolsHave = context.computeOnClient(mc -> "pickaxe=" + mc.player.getInventory().countItem(Items.STONE_PICKAXE)
+                    + " shovel=" + mc.player.getInventory().countItem(Items.STONE_SHOVEL));
+            System.out.println("CRAFT TEST tools: " + toolsHave + " after " + ticks + " ticks; client menu "
+                    + context.computeOnClient(mc -> mc.player.containerMenu.getClass().getSimpleName() + " #" + mc.player.containerMenu.containerId)
+                    + ", server menu " + server.computeOnServer(s -> s.getPlayerList().getPlayers().getFirst().containerMenu.getClass().getSimpleName()
+                    + " #" + s.getPlayerList().getPlayers().getFirst().containerMenu.containerId));
+            boolean both = context.computeOnClient(mc -> mc.player.getInventory().countItem(Items.STONE_PICKAXE) >= 1
+                    && mc.player.getInventory().countItem(Items.STONE_SHOVEL) >= 1);
+            if (!both) {
+                throw new AssertionError("Craft test, tools: " + toolsHave + " (plan " + toolPlan + ")");
+            }
+
+            // A full inventory: crafting a hoe ends at once and asks for room (it crafted on and on, the server
+            // saying "Your inventory is full!"). First the server has to have the crafting table closed: changes made
+            // before that are sent for the table's menu, which the client no longer shows
+            for (int i = 0; i < 100 && !server.computeOnServer(s -> s.getPlayerList().getPlayers().getFirst().containerMenu
+                    == s.getPlayerList().getPlayers().getFirst().inventoryMenu); i++) {
+                context.waitTicks(1);
+            }
+            server.runCommand("clear @p");
+            server.runCommand("give @p cobblestone 2");
+            server.runCommand("give @p stick 2");
+            server.runCommand("give @p dirt " + 64 * 34);
+            // Until the client shows the full inventory (a moment after the commands)
+            int waitedFull = 0;
+            while (waitedFull < 20 * 10 && !context.computeOnClient(mc -> mc.player.getInventory().countItem(Items.DIRT) == 64 * 34
+                    && no.sindrens.printeraddon.build.InventoryCleaner.freeSlots(mc.player.getInventory()) == 0)) {
+                context.waitTicks(1);
+                waitedFull++;
+            }
+            System.out.println("CRAFT TEST full inventory: waited " + waitedFull + " ticks, menu "
+                    + context.computeOnClient(mc -> mc.player.containerMenu.getClass().getSimpleName() + ", screen " + mc.gui.screen()
+                    + ", client dirt " + mc.player.getInventory().countItem(Items.DIRT) + ", free " + no.sindrens.printeraddon.build.InventoryCleaner.freeSlots(mc.player.getInventory()))
+                    + ", server dirt " + server.computeOnServer(s -> s.getPlayerList().getPlayers().getFirst().getInventory().countItem(Items.DIRT))
+                    + ", server menu " + server.computeOnServer(s -> s.getPlayerList().getPlayers().getFirst().containerMenu.getClass().getSimpleName()
+                    + " #" + s.getPlayerList().getPlayers().getFirst().containerMenu.containerId)
+                    + ", server items " + server.computeOnServer(s -> {
+                        net.minecraft.world.entity.player.Inventory inv = s.getPlayerList().getPlayers().getFirst().getInventory();
+                        StringBuilder sb = new StringBuilder();
+                        for (int slot = 0; slot < 36; slot++) {
+                            if (!inv.getItem(slot).isEmpty()) {
+                                sb.append(slot).append('=').append(inv.getItem(slot).getCount()).append(inv.getItem(slot).getItem()).append(' ');
+                            }
+                        }
+                        return sb.toString();
+                    }));
+            String inventoryNow = context.computeOnClient(mc -> {
+                StringBuilder sb = new StringBuilder("free=" + no.sindrens.printeraddon.build.InventoryCleaner.freeSlots(mc.player.getInventory()) + ":");
+                for (int slot = 0; slot < 36; slot++) {
+                    sb.append(' ').append(slot).append('=').append(mc.player.getInventory().getItem(slot).getCount())
+                            .append(mc.player.getInventory().getItem(slot).getItem());
+                }
+                return sb.toString();
+            });
+            System.out.println("CRAFT TEST full inventory before: " + inventoryNow);
+            Crafter full = new Crafter();
+            context.runOnClient(mc -> full.craft(Items.STONE_HOE, 1));
+            ticks = 0;
+            while (ticks < 20 * 20 && context.computeOnClient(mc -> full.isBusy())) {
+                context.runOnClient(full::tick);
+                context.waitTicks(1);
+                ticks++;
+            }
+            boolean ended = !context.computeOnClient(mc -> full.isBusy());
+            boolean askedForRoom = context.computeOnClient(mc -> full.needsRoom());
+            System.out.println("CRAFT TEST full inventory: ended=" + ended + " askedForRoom=" + askedForRoom + " after " + ticks + " ticks");
+            if (!ended || !askedForRoom) {
+                throw new AssertionError("Craft test, full inventory: ended=" + ended + " askedForRoom=" + askedForRoom);
             }
         }
     }

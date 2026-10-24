@@ -14,7 +14,11 @@
       "no.sindrens.printeraddon.test.ResumeTest",
       "no.sindrens.printeraddon.test.BuildTest",
       "no.sindrens.printeraddon.test.ShopTest",
-      "no.sindrens.printeraddon.test.FarmTest"
+      "no.sindrens.printeraddon.test.FarmTest",
+      "no.sindrens.printeraddon.test.WideTest"
     ]
-  }
+  },
+  "mixins": [
+    "printer_addon_test.mixins.json"
+  ]
 }

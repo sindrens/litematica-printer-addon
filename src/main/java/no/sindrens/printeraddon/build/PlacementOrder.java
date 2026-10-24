@@ -26,6 +26,9 @@ public final class PlacementOrder {
     }
 
     /** Lower goes first. */
+    /** A block leaving the reach within this many ticks is placed first (see order). */
+    private static final double URGENT_TICKS = 10;
+
     public static int tier(WorldSchematic schematic, BlockPos pos, BlockState target) {
         if (needsSupport(target)) {
             return 2;
@@ -158,6 +161,17 @@ public final class PlacementOrder {
     /** Same, and among equally urgent blocks the ones placed with the item in hand come first (fewer item switches). */
     public static List<BlockPos> order(Level level, WorldSchematic schematic, List<BlockPos> positions, Vec3 from,
                                        @Nullable net.minecraft.world.item.Item inHand) {
+        return order(level, schematic, positions, from, inHand, null);
+    }
+
+    /**
+     * Same; while the player flies on placing (a lane, a glide), {@code ticksLeft} says how soon each block leaves the
+     * reach: the ones about to go come first, soonest first, whatever is in hand. Else a block of another item than
+     * the one in hand waited until it was out of reach (a piston among stone, left for a trip back at the end).
+     */
+    public static List<BlockPos> order(Level level, WorldSchematic schematic, List<BlockPos> positions, Vec3 from,
+                                       @Nullable net.minecraft.world.item.Item inHand,
+                                       @Nullable java.util.function.ToDoubleFunction<BlockPos> ticksLeft) {
         List<BlockPos> ready = new ArrayList<>(positions.size());
 
         for (BlockPos pos : positions) {
@@ -176,10 +190,21 @@ public final class PlacementOrder {
 
         // Blocks that hold water first (waterlogged leaves): the bucket can follow at once, and the tilling around it
         // is done in the same visit instead of on a second round
-        ready.sort(Comparator
+        Comparator<BlockPos> usual = Comparator
                 .comparingInt((BlockPos pos) -> holdsWater(schematic.getBlockState(pos)) ? -1 : tier(schematic, pos, schematic.getBlockState(pos)))
                 .thenComparingInt(pos -> inHand != null && StateRules.itemFor(schematic.getBlockState(pos)).is(inHand) ? 0 : 1)
-                .thenComparingDouble(pos -> from.distanceToSqr(Vec3.atCenterOf(pos))));
+                .thenComparingDouble(pos -> from.distanceToSqr(Vec3.atCenterOf(pos)));
+        if (ticksLeft == null) {
+            ready.sort(usual);
+            return ready;
+        }
+        java.util.Map<BlockPos, Double> left = new java.util.HashMap<>();
+        for (BlockPos pos : ready) {
+            left.put(pos, ticksLeft.applyAsDouble(pos));
+        }
+        ready.sort(Comparator.<BlockPos>comparingInt(pos -> left.get(pos) < URGENT_TICKS ? 0 : 1)
+                .thenComparingDouble(pos -> left.get(pos) < URGENT_TICKS ? left.get(pos) : 0)
+                .thenComparing(usual));
         return ready;
     }
 }

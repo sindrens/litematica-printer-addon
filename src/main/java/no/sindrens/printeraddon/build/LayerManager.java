@@ -40,6 +40,8 @@ public class LayerManager {
     private long deadEndsAt;
     private int completeChecks;
     private int lastRemaining = -1;
+    /** The fewest blocks left on these layers so far: only a new low (or a block placed) is progress, not a count going up and down. */
+    private int lowestRemaining = Integer.MAX_VALUE;
     private int ticksWithoutProgress;
     private int lastPlaced = -1;
     private int lastReportAt;
@@ -73,6 +75,40 @@ public class LayerManager {
 
     public boolean isActive() {
         return active;
+    }
+
+    /**
+     * Parts (chunks) of the current layers seen finished while they were loaded. A build wider than what's loaded
+     * around the player is never loaded all at once: a part that isn't loaded now counts as finished when it was seen
+     * so, else the layer was never done (a log had the player flying from one far corner to the other and back for
+     * two minutes, each corner unloading the other). The finished layers are checked again in the background anyway.
+     */
+    private final java.util.Set<Long> seenFinished = new java.util.HashSet<>();
+    private int seenFor = Integer.MIN_VALUE;
+    private int seenForTop = Integer.MIN_VALUE;
+
+    /** True for a block in a part of the current layers that isn't loaded, but was seen finished. */
+    public boolean seenFinished(BlockPos pos) {
+        return active && !finishingDeferred && seenFor == layer && seenForTop == layerTop
+                && seenFinished.contains(chunkKey(pos.getX(), pos.getZ()));
+    }
+
+    /** The same keys as the mover's areas: one per chunk. */
+    static long chunkKey(int x, int z) {
+        return ((long) (z >> 4) << 32) | ((x >> 4) & 0xFFFFFFFFL);
+    }
+
+    /** What one check found per part (chunk) of the layers. */
+    private static final class Parts {
+        final java.util.Set<Long> seenFinished;
+        final java.util.Set<Long> loaded = new java.util.HashSet<>();
+        final java.util.Set<Long> unfinished = new java.util.HashSet<>();
+        final java.util.Set<Long> unloaded = new java.util.HashSet<>();
+        int unloadedBlocks;
+
+        Parts(java.util.Set<Long> seenFinished) {
+            this.seenFinished = seenFinished;
+        }
     }
 
     /** Items the current layers still need (item -> count). */
@@ -111,6 +147,9 @@ public class LayerManager {
         doneLayers.clear();
         // Where this build was (finished layers, blocks left out): no need to read the finished layers again first
         long started = System.nanoTime();
+        retriedFromBefore = 0;
+        seenFinished.clear();
+        seenFor = Integer.MIN_VALUE;
         BuildProgress.Saved saved = BuildProgress.load(mc);
         if (saved != null) {
             for (int y : saved.done()) {
@@ -118,7 +157,10 @@ public class LayerManager {
                     doneLayers.add(y);
                 }
             }
-            AutoBuild.INSTANCE.couldNotPlace.addAll(saved.skipped());
+            // Blocks skipped last time are tried again (starting again is the time for that): in their own layer,
+            // or, on a layer that's done, when the player is near them. They used to stay left out until the
+            // very end, with nothing got for them (7 blocks never placed, no piston or seeds fetched for them).
+            retriedFromBefore = saved.skipped().size();
             AutoBuild.INSTANCE.deferred.addAll(saved.deferred());
             if (doneLayers.size() == maxY - minY + 1) {
                 // Saved as all done: read everything again (something may have been broken since)
@@ -154,10 +196,18 @@ public class LayerManager {
             }
             break;
         }
+        // The ones skipped last time on the layers done before this one: placed when the player is near them
+        if (saved != null) {
+            for (BlockPos pos : saved.skipped()) {
+                if (pos.getY() < layer) {
+                    AutoBuild.INSTANCE.deferred.add(pos);
+                }
+            }
+        }
         BuildLog.line("LAYER", String.format("start: %d layers known as done from the saved progress, %d read and done, %d gone past"
-                        + " (%d blocks left there wait until the end); going on at Y %d | %.1f ms | %d left out from before",
+                        + " (%d blocks left there wait until the end); going on at Y %d | %.1f ms | %d skipped last time, tried again",
                 fromSave, doneLayers.size() - fromSave - passed, passed, leftovers, layer, (System.nanoTime() - started) / 1e6,
-                AutoBuild.INSTANCE.couldNotPlace.size()));
+                retriedFromBefore));
 
         if (layer > maxY) {
             Chat.info("Every layer is already finished.");
@@ -347,18 +397,66 @@ public class LayerManager {
         DeadEnds.tick(mc.level);
 
         Findings findings = new Findings();
-        int remaining = scanLayers(mc.level, schematic, areas, null, findings);
+        if (seenFor != layer || seenForTop != layerTop) {
+            seenFinished.clear();
+            seenFor = layer;
+            seenForTop = layerTop;
+        }
+        Parts parts = new Parts(seenFinished);
+        List<BlockPos> left = new ArrayList<>();
+        int remaining = 0;
+        for (int y = layer; y <= layerTop; y++) {
+            remaining += scan(mc.level, schematic, areas, y, left, findings, parts);
+        }
+        for (long part : parts.loaded) {
+            if (parts.unfinished.contains(part)) {
+                seenFinished.remove(part);
+            } else {
+                seenFinished.add(part);
+            }
+        }
         if (waterPending > 0 && findings.water == 0 && remaining > 0) {
             BuildLog.line("LAYER", "the water on " + describeLayers() + " is all in");
         }
         waterPending = findings.water;
+        int notSeen = 0;
+        for (long part : parts.unloaded) {
+            if (!seenFinished.contains(part)) {
+                notSeen++;
+            }
+        }
+        StringBuilder leftText = new StringBuilder();
+        if (remaining > 0 && remaining <= MAX_REPORTED) {
+            // The last few, with what's there: says at once why a layer isn't done
+            for (BlockPos pos : left) {
+                if (leftText.length() > 0) {
+                    leftText.append("; ");
+                }
+                leftText.append(pos.toShortString()).append(' ').append(BlockCheck.check(mc.level, schematic, pos))
+                        .append(' ').append(blockName(mc.level.getBlockState(pos))).append(" (wants ")
+                        .append(blockName(schematic.getBlockState(pos))).append(')');
+            }
+        }
         BuildLog.line("LAYER", describeLayers() + ": " + remaining + " unfinished (" + findings.waiting.size()
                 + " waiting for something above, " + findings.water + " water still to go in) | conflicts "
-                + AutoBuild.INSTANCE.conflicts.size() + " | still needs " + findings.needs);
+                + AutoBuild.INSTANCE.conflicts.size() + " | still needs " + findings.needs
+                + (parts.unloaded.isEmpty() ? "" : " | not loaded: " + parts.unloaded.size() + " parts, "
+                + (parts.unloaded.size() - notSeen) + " of them seen finished, " + parts.unloadedBlocks + " blocks in the others")
+                + (leftText.length() > 0 ? " | left: " + leftText : ""));
+        if (!AutoBuild.INSTANCE.deferred.isEmpty()) {
+            deferredNeeds(mc.level, schematic, AutoBuild.INSTANCE.deferred, findings);
+        }
         tillingLeft = findings.tilling;
         // Tilling needs a hoe: one from storage, else crafted (see Tools); enough for the tilling left
         if (findings.tilling > 0 && mc.player != null && !Tools.hasUsableHoe(mc.player.getInventory())) {
-            findings.needs.put(Tools.HOE, Tools.hoesFor(findings.tilling - Tools.hoeUses(mc.player.getInventory())));
+            findings.needs.put(Tools.HOE, Tools.hoesFor(findings.tilling - Tools.hoeUses(mc.player.getInventory()), mc.player.getInventory()));
+        }
+        // A pickaxe and a shovel for breaking wrong blocks (a hopper or an observer drops nothing without a pickaxe),
+        // got like everything else: from storage, else crafted
+        if (mc.player != null && Configs.Breaking.BREAK_WRONG_BLOCKS.getBooleanValue()) {
+            for (net.minecraft.world.item.Item tool : Tools.breakingToolsMissing(AutoBuild.INSTANCE.schematicBlocks, mc.player.getInventory())) {
+                findings.needs.put(tool, 1);
+            }
         }
         updateShoppingList(mc, findings.needs);
         layerNeeds = findings.needs;
@@ -368,7 +466,7 @@ public class LayerManager {
         if (remaining > 0 && remaining == findings.waiting.size()) {
             if (++waitingChecks >= 3) {
                 AutoBuild.INSTANCE.deferred.addAll(findings.waiting);
-                Chat.info(remaining + " block" + (remaining == 1 ? "" : "s") + " in " + describeLayers()
+                Chat.quiet(remaining + " block" + (remaining == 1 ? "" : "s") + " in " + describeLayers()
                         + " wait for blocks above; placed as soon as those are there.");
                 remaining = 0;
                 completeChecks = 2;
@@ -377,6 +475,11 @@ public class LayerManager {
             waitingChecks = 0;
         }
 
+        if (forceDone) {
+            forceDone = false;
+            remaining = 0;
+            completeChecks = Math.max(completeChecks, 1);
+        }
         if (remaining == 0) {
             // Check twice in a row so a block the server hasn't confirmed yet doesn't count: the second time as
             // soon as the server's answer is surely there (not a whole check interval later: that was 2 s per layer)
@@ -437,7 +540,10 @@ public class LayerManager {
         }
 
         int placed = AutoBuild.INSTANCE.stats.totalPlaced();
-        if (remaining != lastRemaining || placed != lastPlaced) {
+        // A count going up and down (a farm at work, parts loading and unloading) isn't progress: that kept the
+        // "nothing placed" report from ever coming, while the player flew around for minutes
+        if (remaining < lowestRemaining || placed != lastPlaced) {
+            lowestRemaining = Math.min(lowestRemaining, remaining);
             lastRemaining = remaining;
             lastPlaced = placed;
             ticksWithoutProgress = 0;
@@ -456,12 +562,71 @@ public class LayerManager {
             reportStuck(mc, schematic, areas);
         }
 
-        // No skipping: a layer is finished before the next one starts. When nothing happens, say exactly why.
+        // A layer is finished before the next one starts. Only when nothing can be done here for long (no block
+        // the mover can go to, nothing being bought or fetched) do the last ones wait until the end, so the build
+        // never stands still or flies around for good.
+        int giveUpAfter = Math.max(20 * 30, Configs.Layers.SKIP_STUCK_SECONDS.getIntegerValue() * 20 * 3);
+        if (ticksWithoutProgress >= giveUpAfter && remaining <= Math.max(PASSED_LEFTOVERS, 1)
+                && AutoBuild.INSTANCE.mover.nothingToDo() && !AutoBuild.INSTANCE.isManualTaskRunning()) {
+            List<BlockPos> all = new ArrayList<>();
+            for (int y = layer; y <= layerTop; y++) {
+                collectUnfinished(mc.level, schematic, areas, y, all);
+            }
+            AutoBuild.INSTANCE.deferred.addAll(all);
+            BuildLog.line("LAYER", describeLayers() + ": nothing could be done here for " + ticksWithoutProgress / 20
+                    + " s; the last " + remaining + " (" + all.size() + " of them loaded) wait until the end | " + leftText);
+            Chat.warn(describeLayers() + ": the last " + remaining + " block" + (remaining == 1 ? "" : "s")
+                    + " can't be done now; tried again at the end, going on.");
+            completeChecks = 2;
+            ticksUntilCheck = 1;
+            lowestRemaining = 0;
+            forceDone = true;
+        }
         return true;
+    }
+
+    /** The next check finishes the layer (its leftovers wait until the end, see above). */
+    private boolean forceDone;
+    private int retriedFromBefore;
+
+    /**
+     * What the blocks waiting for later (deferred: from layers done before, placed when the player is near them and
+     * at the end) still need: their items and, for farmland, a hoe. They were never counted, so nothing was fetched or
+     * bought for them, and at the end they were listed as "couldn't finish" with 0 of their item in the inventory.
+     */
+    private static void deferredNeeds(Level level, WorldSchematic schematic, Iterable<BlockPos> positions, Findings findings) {
+        for (BlockPos pos : positions) {
+            BlockCheck.Result result = BlockCheck.check(level, schematic, pos);
+            BlockState target = schematic.getBlockState(pos);
+            if (result == BlockCheck.Result.MISSING) {
+                ItemStack item = StateRules.itemFor(target);
+                if (!item.isEmpty()) {
+                    findings.needs.merge(item.getItem(), 1, Integer::sum);
+                }
+            }
+            if ((result == BlockCheck.Result.MISSING || result == BlockCheck.Result.PRINTER_FIXES) && target.getBlock() == Blocks.FARMLAND) {
+                findings.tilling++;
+            }
+            if (result == BlockCheck.Result.BUCKET && Fluids.bucketFor(target) != null) {
+                findings.needs.put(Fluids.bucketFor(target), 1);
+            }
+        }
+    }
+
+    private static String blockName(BlockState state) {
+        return net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(state.getBlock()).getPath();
     }
 
     private boolean finishDeferred(Minecraft mc, WorldSchematic schematic, List<SchematicHelper.Area> areas, int interval) {
         List<BlockPos> left = unfinishedDeferred(mc.level, schematic);
+        Findings findings = new Findings();
+        deferredNeeds(mc.level, schematic, left, findings);
+        tillingLeft = findings.tilling;
+        if (findings.tilling > 0 && mc.player != null && !Tools.hasUsableHoe(mc.player.getInventory())) {
+            findings.needs.put(Tools.HOE, Tools.hoesFor(findings.tilling - Tools.hoeUses(mc.player.getInventory()), mc.player.getInventory()));
+        }
+        updateShoppingList(mc, findings.needs);
+        layerNeeds = findings.needs;
         if (left.isEmpty()) {
             Chat.info("\u00a7aBuild finished!");
             Chat.announce("Build finished", "everything in the schematic is placed", true);
@@ -597,7 +762,7 @@ public class LayerManager {
                 for (int z = area.minZ(); z <= area.maxZ(); z++) {
                     pos.set(x, y, z);
                     BlockCheck.Result result = BlockCheck.check(level, schematic, pos);
-                    if (result != BlockCheck.Result.UNLOADED && unfinished(level, pos, result, extraCounts)) {
+                    if (result != BlockCheck.Result.UNLOADED && unfinished(level, schematic, pos, result, extraCounts)) {
                         out.add(pos.immutable());
                     }
                 }
@@ -606,10 +771,12 @@ public class LayerManager {
     }
 
     /** Whether a block with this check result still has to be done for the layer to be finished. */
-    private static boolean unfinished(Level level, BlockPos pos, BlockCheck.Result result, boolean extraCounts) {
+    private static boolean unfinished(Level level, WorldSchematic schematic, BlockPos pos, BlockCheck.Result result, boolean extraCounts) {
         return switch (result) {
             case OK -> false;
             case EXTRA -> extraCounts;
+            // Something that mustn't be broken where the schematic has air: one block too many, like EXTRA
+            case PROTECTED -> (extraCounts || !schematic.getBlockState(pos).isAir()) && !AutoBuild.INSTANCE.couldNotPlace.contains(pos);
             case WRONG_BLOCK -> !AutoBuild.INSTANCE.isConflict(pos, result, level.getBlockState(pos))
                     && !AutoBuild.INSTANCE.couldNotPlace.contains(pos);
             default -> !AutoBuild.INSTANCE.couldNotPlace.contains(pos);
@@ -702,7 +869,14 @@ public class LayerManager {
                 StringBuilder sb = new StringBuilder(describeLayers() + " still needs: ");
                 missing.forEach((item, count) -> sb.append(count).append(' ')
                         .append(new ItemStack(item).getHoverName().getString()).append(", "));
-                Chat.warn(sb.substring(0, sb.length() - 2));
+                // The on-screen display shows what's missing, and it's fetched or bought: in chat only when the player
+                // has to bring it (a water bucket or tools coming and going said it again every few seconds)
+                boolean getsItself = Configs.Shop.AUTO_BUY.getBooleanValue() || ChestFetcher.hasStorage(mc);
+                if (getsItself) {
+                    BuildLog.line("NEEDS", sb.substring(0, sb.length() - 2));
+                } else {
+                    Chat.warnEvery("needs", 5 * 60_000L, sb.substring(0, sb.length() - 2));
+                }
             }
         }
     }
@@ -738,6 +912,8 @@ public class LayerManager {
         completeChecks = 0;
         waitingChecks = 0;
         lastRemaining = -1;
+        lowestRemaining = Integer.MAX_VALUE;
+        forceDone = false;
         ticksWithoutProgress = 0;
         reportedStuck = false;
         ticksUntilCheck = 0;
@@ -786,7 +962,7 @@ public class LayerManager {
                     for (int z = area.minZ(); z <= area.maxZ(); z++) {
                         pos.set(x, y, z);
                         BlockCheck.Result result = BlockCheck.check(mc.level, schematic, pos);
-                        if (!unfinished(mc.level, pos, result, extraCounts)) {
+                        if (!unfinished(mc.level, schematic, pos, result, extraCounts)) {
                             continue;
                         }
                         if (result == BlockCheck.Result.UNLOADED) {
@@ -853,6 +1029,11 @@ public class LayerManager {
 
     private static int scan(Level level, WorldSchematic schematic, List<SchematicHelper.Area> areas, int y,
                             @Nullable List<BlockPos> examples, @Nullable Findings findings) {
+        return scan(level, schematic, areas, y, examples, findings, null);
+    }
+
+    private static int scan(Level level, WorldSchematic schematic, List<SchematicHelper.Area> areas, int y,
+                            @Nullable List<BlockPos> examples, @Nullable Findings findings, @Nullable Parts parts) {
         boolean extraCounts = Configs.Layers.EXTRA_BLOCKS_BLOCK_LAYER.getBooleanValue();
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
         int remaining = 0;
@@ -866,9 +1047,24 @@ public class LayerManager {
                 for (int z = area.minZ(); z <= area.maxZ(); z++) {
                     pos.set(x, y, z);
                     BlockCheck.Result result = BlockCheck.check(level, schematic, pos);
+                    long part = parts == null ? 0 : chunkKey(x, z);
+                    if (parts != null) {
+                        if (result == BlockCheck.Result.UNLOADED) {
+                            parts.unloaded.add(part);
+                            if (parts.seenFinished.contains(part)) {
+                                continue;
+                            }
+                            parts.unloadedBlocks++;
+                        } else {
+                            parts.loaded.add(part);
+                        }
+                    }
 
-                    if (unfinished(level, pos, result, extraCounts)) {
+                    if (unfinished(level, schematic, pos, result, extraCounts)) {
                         remaining++;
+                        if (parts != null && result != BlockCheck.Result.UNLOADED) {
+                            parts.unfinished.add(part);
+                        }
                         if (findings != null && PlacementOrder.holdsWater(schematic.getBlockState(pos))) {
                             findings.water++;
                         }
@@ -932,7 +1128,7 @@ public class LayerManager {
                         if (block) {
                             scan.blocks++;
                         }
-                        if (unfinished(level, pos, result, extraCounts)) {
+                        if (unfinished(level, schematic, pos, result, extraCounts)) {
                             scan.unfinished++;
                             if (scan.positions.size() < keep) {
                                 scan.positions.add(pos.immutable());

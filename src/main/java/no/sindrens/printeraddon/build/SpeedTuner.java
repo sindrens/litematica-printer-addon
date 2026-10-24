@@ -137,7 +137,7 @@ public class SpeedTuner {
             Integer remembered = remembered();
             if (remembered != null && remembered < start) {
                 interval = Math.max(minInterval(), remembered);
-                Chat.info("Speed: new kinds of blocks start at interval " + interval + " (the last build here got to " + remembered + ")");
+                Chat.quiet("Speed: new kinds of blocks start at interval " + interval + " (the last build here got to " + remembered + ")");
             }
         }
         return interval;
@@ -355,7 +355,7 @@ public class SpeedTuner {
                     int slower = Math.max(s.floor, Math.min(slowest(), pick.interval() + 1));
                     if (slower != s.interval) {
                         s.interval = slower;
-                        Chat.warn("Speed: " + name(pick.item()) + " at interval " + s.interval + " (a block came out wrong at "
+                        Chat.quiet("Speed: " + name(pick.item()) + " at interval " + s.interval + " (a block came out wrong at "
                                 + pick.pos().toShortString() + (switched ? " right after switching from " + name(pick.before()) : "")
                                 + "; not below " + s.floor + " for it for the next " + FORGIVE_AFTER + " right ones)");
                     }
@@ -377,7 +377,7 @@ public class SpeedTuner {
                     s.interval = Math.min(slowest(), s.interval + 1);
                     s.calmUntil = AutoBuild.clientTicks + CALM_AFTER_MISTAKE;
                     java.util.Arrays.fill(s.recent, true);
-                    Chat.warn("Speed: " + name(pick.item()) + " at interval " + s.interval + " (" + missed + " of its last " + RECENT
+                    Chat.quiet("Speed: " + name(pick.item()) + " at interval " + s.interval + " (" + missed + " of its last " + RECENT
                             + " clicks placed nothing)");
                 }
             }
@@ -399,7 +399,7 @@ public class SpeedTuner {
             int before = s.interval;
             s.interval -= Math.max(1, (s.interval - min) / 2);
             BuildLog.line("SPEED", name(item) + ": interval " + before + " -> " + s.interval + " (the last " + needed + " were all right)");
-            Chat.info("Speed: " + name(item) + " at interval " + s.interval + " (the last " + needed + " were all right)");
+            Chat.quiet("Speed: " + name(item) + " at interval " + s.interval + " (the last " + needed + " were all right)");
         }
     }
 

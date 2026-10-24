@@ -59,7 +59,9 @@ public class BuildTest implements FabricClientGameTest {
             context.waitTicks(20);
 
             // Break it on purpose
-            server.runCommand("setblock 1 -60 -1 dirt");                       // wrong block
+            // A wrong block of a kind the schematic uses (a block of another kind that was already there is the
+            // player's own building: left alone, see AutoBuild#isConflict)
+            server.runCommand("setblock 1 -60 -1 cobblestone");                // wrong block
             server.runCommand("setblock 2 -60 0 air");                         // missing
             server.runCommand("setblock 1 -59 -1 observer[facing=south]");     // wrong direction
             server.runCommand("setblock 2 -59 0 oak_stairs[facing=west]");     // wrong direction
@@ -137,7 +139,7 @@ public class BuildTest implements FabricClientGameTest {
         }
 
         if (mc.level.getBlockState(new BlockPos(1, -60, -1)).getBlock() != Blocks.STONE) {
-            problems.add("dirt at 1 -60 -1 wasn't replaced with stone");
+            problems.add("cobblestone at 1 -60 -1 wasn't replaced with stone");
         }
         return problems;
     }

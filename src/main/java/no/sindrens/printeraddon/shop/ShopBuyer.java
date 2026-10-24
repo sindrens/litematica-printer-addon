@@ -479,6 +479,20 @@ public class ShopBuyer {
         }
     }
 
+    /**
+     * On the stacks screen, whole stacks only: when more than half a stack would be left to buy on the normal screen
+     * afterwards, one stack more, if there's room and the whole build still needs that many.
+     */
+    private static boolean wantedOneStackMore(Minecraft mc, Order order, int want, int room, int most) {
+        int stack = order.item.getDefaultMaxStackSize();
+        int rest = Math.min(order.left, room) - want;
+        if (order.sell || rest < stack / 2 || want + stack > Math.min(room, most)) {
+            return false;
+        }
+        int have = mc.player == null ? 0 : mc.player.getInventory().countItem(order.item);
+        return no.sindrens.printeraddon.build.AutoBuild.INSTANCE.wholeCount(order.item) >= have + want + stack;
+    }
+
     public void tick(Minecraft mc) {
         if (!running || mc.player == null || mc.gameMode == null) {
             return;
@@ -541,6 +555,7 @@ public class ShopBuyer {
                         markCantBuy(mc, order);
                         fail(order, "clicking it opens no buy screen (it can only be sold there)");
                     } else if (order.retries++ < 1) {
+                        clickLost();
                         // A slow server (or a lost click): once more from the start before giving up on it
                         logScreen("no change after a click, buying " + order.location.name + " (trying again from the start)", ScreenSnapshot.capture(mc));
                         if (mc.gui.screen() instanceof AbstractContainerScreen<?>) {
@@ -641,6 +656,11 @@ public class ShopBuyer {
                 int most = Math.min(order.below - 1, stacksScreen ? Integer.MAX_VALUE : 64);
                 int want = stacksScreen ? Math.min(Math.min(order.left, room), most) / stack * stack
                         : Math.max(1, Math.min(most, Math.min(order.left, room)));
+                if (stacksScreen && wantedOneStackMore(mc, order, want, room, most)) {
+                    // Most of a stack would be left over: one stack more now (the build uses them later) instead
+                    // of another purchase for the rest (a log had 6 stacks, then 33, then 27: two trips more, 12 s)
+                    want += stack;
+                }
                 if (stacksScreen && want < stack) {
                     // Less than a stack left to buy (or room for): the rest on the normal buy screen
                     order.noStacks = true;
@@ -655,8 +675,9 @@ public class ShopBuyer {
                 minusSeen.addAll(buttonSteps(snapshot, MINUS).keySet());
                 AmountStep next = amountStep(snapshot, amount, want, unit, most, minusSeen);
                 Integer button = next == null ? null : next.slot();
-                // Many clicks for the last few aren't worth it: buy what's set, the rest next time
-                if (!stacksScreen && next != null && amount < want && amount >= 16 && next.clicks() > 4) {
+                // Many clicks for the last few aren't worth it: buy what's set, the rest next time. A click is a
+                // fraction of a second, another purchase several seconds: only when it's really many
+                if (!stacksScreen && next != null && amount < want && amount >= 16 && next.clicks() > 12) {
                     button = null;
                 }
                 if (order.probing && amount < want) {
@@ -859,6 +880,7 @@ public class ShopBuyer {
                         spent += got * order.location.buyPrice / Math.max(1, order.location.amountShown);
                     }
                     PrinterAddon.debug("Bought {} {}{}", got, order.location.name, stacksPurchase ? " (by the stack)" : "");
+                    purchaseWentThrough(order.retries == 0 && order.unchanged == 0);
                     boolean byStack = stacksPurchase;
                     stacksPurchase = false;
                     // The last few after a big purchase aren't worth another one (setting the amount took 10 s for 7)
@@ -1309,9 +1331,36 @@ public class ShopBuyer {
         return Configs.Shop.WAIT_TIMEOUT_TICKS.getIntegerValue();
     }
 
-    /** Between clicks: never faster than 8 ticks, plus half the ping (servers drop clicks that come too fast). */
+    /**
+     * Between clicks: 8 ticks at first, plus half the ping (servers drop clicks that come too fast). Learned: after
+     * purchases that went through without a lost click, a tick less each time, down to 4 (a click took close to a
+     * second, a purchase 6 s); the first lost click puts it back to 8 for the rest of the session.
+     */
+    private static int learnedDelay = 8;
+    private static boolean delaySettled;
+    private static int cleanPurchases;
+
+    private static void purchaseWentThrough(boolean clean) {
+        if (!clean || delaySettled || learnedDelay <= 4 || ++cleanPurchases < 2) {
+            return;
+        }
+        cleanPurchases = 0;
+        learnedDelay--;
+        no.sindrens.printeraddon.build.BuildLog.line("SHOP", "the shop keeps up: a click every " + learnedDelay + " ticks now");
+    }
+
+    private static void clickLost() {
+        cleanPurchases = 0;
+        if (learnedDelay < 8) {
+            no.sindrens.printeraddon.build.BuildLog.line("SHOP", "a click got no answer at " + learnedDelay
+                    + " ticks between clicks: back to 8 for this session");
+        }
+        learnedDelay = 8;
+        delaySettled = true;
+    }
+
     private static int clickDelay() {
-        return Math.max(8, Configs.Speed.shopClickDelayTicks()) + no.sindrens.printeraddon.build.ServerLag.pingTicks(Minecraft.getInstance()) / 2;
+        return Math.max(learnedDelay, Configs.Speed.shopClickDelayTicks()) + no.sindrens.printeraddon.build.ServerLag.pingTicks(Minecraft.getInstance()) / 2;
     }
 
     private static String names(List<Item> items) {

@@ -95,7 +95,9 @@ public class Mover {
     public String describe() {
         return switch (state) {
             case WALKING -> target != null ? "walking to " + target.toShortString() : "walking";
-            case FLYING -> (gliding && lastPrinterReach > 0 ? "gliding, placing " + lastPrinterReach + " on the way to " : "flying to ")
+            case FLYING -> sweeping() ? (laneApproach ? "to lane " : "lane ") + (laneIndex + 1) + " of " + lanes.size()
+                    + (lastPrinterReach > 0 ? ", placing " + lastPrinterReach + " in reach" : "")
+                    : (gliding && lastPrinterReach > 0 ? "gliding, placing " + lastPrinterReach + " on the way to " : "flying to ")
                     + (target != null ? target.toShortString() : "the next spot");
             case WORKING -> "placing " + lastPrinterReach + " block" + (lastPrinterReach == 1 ? "" : "s") + " within reach";
             case IDLE -> work.isEmpty() ? (skipped.isEmpty() ? "waiting" : "waiting, " + skipped.size() + " left for later")
@@ -191,6 +193,12 @@ public class Mover {
     private final Map<BlockPos, Integer> skipCounts = new HashMap<>();
     private static final int MAX_SKIPS = 4;
 
+    /** Nothing on the current layers to go to (as of the last look): no block to place or break, no part to load. */
+    public boolean nothingToDo() {
+        return work.isEmpty() && waitingForItems == 0
+                && unloaded.stream().allMatch(p -> skipped.containsKey(p) || areaUnreachable(areaKey(p)));
+    }
+
     /** True for a block the printer was given time for in reach, but nothing happened. */
     public boolean wasSkipped(BlockPos pos) {
         return skipped.containsKey(pos);
@@ -207,7 +215,8 @@ public class Mover {
         }
         // The speed the mover flies at; without the mover (the player moving by hand), the real motion
         Vec3 motion = state == State.FLYING || state == State.WORKING ? velocity : player.getDeltaMovement();
-        return motion.x * motion.x + motion.z * motion.z > SAFE_PLACE_SPEED * SAFE_PLACE_SPEED || Math.abs(motion.y) > 0.15;
+        double safe = sweeping() ? SWEEP_SAFE : SAFE_PLACE_SPEED;
+        return motion.x * motion.x + motion.z * motion.z > safe * safe || Math.abs(motion.y) > 0.15;
     }
 
     /** Fastest the player glides while the printer places (blocks a tick, almost 5 blocks a second), just under SAFE_PLACE_SPEED. */
@@ -316,6 +325,31 @@ public class Mover {
             return player.position().subtract(velocity.normalize().scale(2.5));
         }
         return player.position();
+    }
+
+    /**
+     * While flying on placing (a lane or a glide): for a block, how many ticks until it leaves the printer's reach at
+     * this speed. Null when the player stays put (the usual order then).
+     */
+    @Nullable
+    public java.util.function.ToDoubleFunction<BlockPos> ticksLeftInReach(LocalPlayer player) {
+        if (state != State.FLYING || !gliding) {
+            return null;
+        }
+        Vec3 flat = new Vec3(velocity.x, 0, velocity.z);
+        double speed = flat.length();
+        if (speed < 0.02) {
+            return null;
+        }
+        Vec3 direction = flat.scale(1 / speed);
+        Vec3 eye = player.getEyePosition();
+        double range = me.aleksilassila.litematica.printer.config.Configs.PRINTING_RANGE.getDoubleValue();
+        return pos -> {
+            Vec3 d = Vec3.atCenterOf(pos).subtract(eye);
+            double along = d.dot(direction);
+            double across = d.lengthSqr() - along * along;
+            return (along + Math.sqrt(Math.max(0, range * range - across))) / speed;
+        };
     }
 
     /** Mover state for the build log's snapshots. */
@@ -479,6 +513,11 @@ public class Mover {
         }
         boolean keepMoving = Configs.Movement.KEEP_MOVING.getBooleanValue() && mode.canFly() && flying(player);
 
+        // Full layers: straight lanes over the whole layer, the printer placing all the way (see sweepTick)
+        if (mode.canFly() && sweepTick(mc, player, schematic, inReach, reach, mode)) {
+            return;
+        }
+
         // On the way to a chosen spot, keep going (the printer places what's in reach meanwhile): gliding while there
         // is something to place in reach, slower the more there is, so the printer gets to all of it on the way; at
         // full speed otherwise
@@ -629,6 +668,320 @@ public class Mover {
         }
 
         move(mc, player, mode);
+    }
+
+    // ---- Lanes ----
+
+    /** The layer the lanes are for; planned; all flown (the rest goes spot by spot). */
+    private int sweepFor = Integer.MIN_VALUE;
+    private boolean sweepPlanned;
+    private boolean sweepDone;
+    /** Lanes run east-west (along x), else north-south. */
+    private boolean lanesAlongX;
+    /** The lanes' cross coordinate (z of an east-west lane), in the order they're flown, and how many blocks each covers to either side. */
+    private List<Integer> lanes = List.of();
+    private int laneIndex;
+    private int laneHalf;
+    /** The lane being flown: its start and end (blocks of the layer); first flying to its start. */
+    @Nullable
+    private BlockPos laneStart;
+    @Nullable
+    private BlockPos laneEnd;
+    private boolean laneApproach;
+    /** Blocks the printer places a tick while there's something in its reach (learned while flying the lanes). */
+    private double sweepRate = 0.6;
+    private int rateTicks;
+    private int ratePlaced;
+    private int rateLastCount = -1;
+
+    /** Fastest while placing (blocks a tick); with nothing to place in reach, on to the next blocks faster. */
+    private static final double SWEEP_MAX = 0.4;
+    private static final double SWEEP_TRAVEL = 0.6;
+    /** Up to this speed the printer places while flying a lane. */
+    private static final double SWEEP_SAFE = 0.45;
+    /** A layer with fewer unfinished blocks than this isn't worth lanes. */
+    private static final int SWEEP_MIN_BLOCKS = 40;
+
+    private boolean sweeping() {
+        return state == State.FLYING && laneEnd != null && !sweepDone && sweepFor == AutoBuild.INSTANCE.layers.getLayer();
+    }
+
+    /**
+     * Full layers are flown over in straight lanes (like mowing a lawn), as wide as the printer reaches sideways, the
+     * printer placing all the way: no stops, no flying with the printer waiting. The speed is the fastest at which
+     * nothing in reach is left behind (see sweepSpeed). Layers of chains (hoppers into hoppers, rails) and what's left
+     * after the last lane go spot by spot. Returns false when there's no sweep.
+     */
+    private boolean sweepTick(Minecraft mc, LocalPlayer player, WorldSchematic schematic, List<BlockPos> inReach, double reach,
+                              MoveMode mode) {
+        LayerManager layers = AutoBuild.INSTANCE.layers;
+        if (layers.getLayer() != sweepFor) {
+            sweepFor = layers.getLayer();
+            sweepPlanned = false;
+            sweepDone = false;
+            laneEnd = null;
+        }
+        if (sweepDone || !Configs.Movement.LANES.getBooleanValue() || !layers.isActive() || layers.isFinishingDeferred()) {
+            return false;
+        }
+        if (!sweepPlanned) {
+            // Not while most of the layer waits for its items (being bought): planned from a handful of blocks,
+            // the whole layer went spot by spot (a test layer took 60 s instead of 32)
+            if (work.isEmpty() || waitingForItems > work.size()) {
+                return false;
+            }
+            sweepPlanned = true;
+            if (!planLanes(player, schematic, reach)) {
+                sweepDone = true;
+                return false;
+            }
+        }
+        if (!ensureFlying(player)) {
+            return true;
+        }
+        if (laneEnd == null || state != State.FLYING) {
+            if (laneEnd != null && laneApproach && player.position().distanceToSqr(laneHover(laneStart)) <= 1.5 * 1.5) {
+                // At the lane's start: along it
+                laneApproach = false;
+                flyAlongLane(player, laneEnd);
+            } else if (laneEnd != null && (laneApproach || player.position().distanceToSqr(laneHover(laneEnd)) > 2.0 * 2.0)) {
+                // Stopped on the way (a trip to the shop, a vault): on from here
+                flyAlongLane(player, laneApproach ? laneStart : laneEnd);
+            } else if (!nextLane(player)) {
+                sweepDone = true;
+                laneEnd = null;
+                state = State.IDLE;
+                BuildLog.line("SWEEP", "all lanes of " + layers.describeLayers() + " flown; " + work.size()
+                        + " blocks left for spot by spot");
+                return false;
+            }
+        }
+        gliding = true;
+        glideSpeed = sweepSpeed(mc, player, inReach, reach);
+        learnRate(inReach);
+        move(mc, player, mode);
+        return true;
+    }
+
+    /** The lanes for this layer from its unfinished blocks; false if it isn't one to fly in lanes. */
+    private boolean planLanes(LocalPlayer player, WorldSchematic schematic, double reach) {
+        int minX = Integer.MAX_VALUE;
+        int maxX = Integer.MIN_VALUE;
+        int minZ = Integer.MAX_VALUE;
+        int maxZ = Integer.MIN_VALUE;
+        int lowestY = Integer.MAX_VALUE;
+        int chains = 0;
+        for (BlockPos pos : work) {
+            minX = Math.min(minX, pos.getX());
+            maxX = Math.max(maxX, pos.getX());
+            minZ = Math.min(minZ, pos.getZ());
+            maxZ = Math.max(maxZ, pos.getZ());
+            lowestY = Math.min(lowestY, pos.getY());
+            BlockState target = schematic.getBlockState(pos);
+            if (target.getBlock() instanceof net.minecraft.world.level.block.HopperBlock
+                    && target.getValue(net.minecraft.world.level.block.HopperBlock.FACING) != net.minecraft.core.Direction.DOWN
+                    || target.getBlock() instanceof net.minecraft.world.level.block.BaseRailBlock) {
+                chains++;
+            }
+        }
+        // The parts not loaded yet are part of the layer too: the lanes go over them (they load on the way)
+        List<int[]> notLoaded = unloadedParts();
+        for (int[] part : notLoaded) {
+            minX = Math.min(minX, part[0]);
+            maxX = Math.max(maxX, part[1]);
+            minZ = Math.min(minZ, part[2]);
+            maxZ = Math.max(maxZ, part[3]);
+        }
+        if (lowestY == Integer.MAX_VALUE) {
+            lowestY = AutoBuild.INSTANCE.layers.getLayer();
+        }
+        String layer = AutoBuild.INSTANCE.layers.describeLayers();
+        if (work.size() + 16 * notLoaded.size() < SWEEP_MIN_BLOCKS || chains * 5 > work.size()) {
+            BuildLog.line("SWEEP", layer + " spot by spot: " + (work.size() < SWEEP_MIN_BLOCKS ? "only " + work.size() + " blocks"
+                    : chains + " of " + work.size() + " blocks are chains (hoppers into hoppers, rails), placed in their order"));
+            return false;
+        }
+        lanesAlongX = maxX - minX >= maxZ - minZ;
+        // As wide as the printer reaches sideways from the hover height (from the lowest blocks, with a margin)
+        double eyeAbove = laneHover(new BlockPos(minX, lowestY, minZ)).y + player.getEyeHeight() - (lowestY + 0.5);
+        double planR = planReach(reach);
+        double sideways = Math.sqrt(Math.max(1, planR * planR - eyeAbove * eyeAbove));
+        laneHalf = Math.max(1, (int) Math.floor(sideways - 0.5));
+        int width = 2 * laneHalf + 1;
+        int from = lanesAlongX ? minZ : minX;
+        int to = lanesAlongX ? maxZ : maxX;
+        // As few lanes as cover it, centred on it (a strip 3 wide is one lane over its middle, not along its edge)
+        int span = to - from + 1;
+        int count = (span + width - 1) / width;
+        int first = from + laneHalf - (count * width - span) / 2;
+        List<Integer> centers = new ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            centers.add(first + i * width);
+        }
+        // From the side the player is on
+        double at = lanesAlongX ? player.getZ() : player.getX();
+        if (Math.abs(at - from) > Math.abs(at - to)) {
+            java.util.Collections.reverse(centers);
+        }
+        lanes = centers;
+        laneIndex = -1;
+        laneEnd = null;
+        BuildLog.line("SWEEP", String.format(java.util.Locale.ROOT, "%s in %d %s lanes %d wide, for %d blocks%s (reach %.2f, %.2f above the blocks, %.2f sideways)",
+                layer, centers.size(), lanesAlongX ? "east-west" : "north-south", width, work.size(),
+                notLoaded.isEmpty() ? "" : " and " + notLoaded.size() + " parts not loaded yet", planR, eyeAbove, sideways));
+        return true;
+    }
+
+    /** The next lane with unfinished blocks, flown from its end nearest the player. False when none is left. */
+    private boolean nextLane(LocalPlayer player) {
+        while (++laneIndex < lanes.size()) {
+            int c = lanes.get(laneIndex);
+            int lo = Integer.MAX_VALUE;
+            int hi = Integer.MIN_VALUE;
+            int y = Integer.MAX_VALUE;
+            int blocks = 0;
+            for (BlockPos pos : work) {
+                if (Math.abs((lanesAlongX ? pos.getZ() : pos.getX()) - c) > laneHalf) {
+                    continue;
+                }
+                int along = lanesAlongX ? pos.getX() : pos.getZ();
+                lo = Math.min(lo, along);
+                hi = Math.max(hi, along);
+                y = Math.min(y, pos.getY());
+                blocks++;
+            }
+            int parts = 0;
+            for (int[] part : unloadedParts()) {
+                int crossFrom = lanesAlongX ? part[2] : part[0];
+                int crossTo = lanesAlongX ? part[3] : part[1];
+                if (crossTo < c - laneHalf || crossFrom > c + laneHalf) {
+                    continue;
+                }
+                lo = Math.min(lo, lanesAlongX ? part[0] : part[2]);
+                hi = Math.max(hi, lanesAlongX ? part[1] : part[3]);
+                y = Math.min(y, AutoBuild.INSTANCE.layers.getLayer());
+                parts++;
+            }
+            if (blocks == 0 && parts == 0) {
+                continue;
+            }
+            double at = lanesAlongX ? player.getX() : player.getZ();
+            boolean forward = Math.abs(at - lo) <= Math.abs(at - hi);
+            int startAlong = forward ? lo - 1 : hi + 1;
+            int endAlong = forward ? hi + 1 : lo - 1;
+            laneStart = lanesAlongX ? new BlockPos(startAlong, y, c) : new BlockPos(c, y, startAlong);
+            laneEnd = lanesAlongX ? new BlockPos(endAlong, y, c) : new BlockPos(c, y, endAlong);
+            laneApproach = player.position().distanceToSqr(laneHover(laneStart)) > 2.5 * 2.5;
+            flyAlongLane(player, laneApproach ? laneStart : laneEnd);
+            BuildLog.line("SWEEP", "lane " + (laneIndex + 1) + " of " + lanes.size() + ": " + blocks + " blocks"
+                    + (parts > 0 ? " and " + parts + " parts not loaded yet" : "") + ", from "
+                    + laneStart.toShortString() + " to " + laneEnd.toShortString() + String.format(java.util.Locale.ROOT,
+                    " | printer %.2f blocks a tick", sweepRate));
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * The parts of the current layers that aren't loaded yet (and weren't seen finished): x and z from-to of each,
+     * within the schematic. Unknown what's there, so the lanes go over them.
+     */
+    private List<int[]> unloadedParts() {
+        List<int[]> parts = new ArrayList<>();
+        for (long key : unloadedAreas.keySet()) {
+            int chunkX = (int) key;
+            int chunkZ = (int) (key >> 32);
+            for (SchematicHelper.Area area : SchematicHelper.areas()) {
+                int x0 = Math.max(area.minX(), chunkX * 16);
+                int x1 = Math.min(area.maxX(), chunkX * 16 + 15);
+                int z0 = Math.max(area.minZ(), chunkZ * 16);
+                int z1 = Math.min(area.maxZ(), chunkZ * 16 + 15);
+                if (x0 <= x1 && z0 <= z1) {
+                    parts.add(new int[]{x0, x1, z0, z1});
+                }
+            }
+        }
+        return parts;
+    }
+
+    private void flyAlongLane(LocalPlayer player, BlockPos to) {
+        flyTarget = laneHover(to);
+        flyPath = null;
+        target = to;
+        spotFor = null;
+        spotFlight = false;
+        stuckTicks = 0;
+        lastDistance = Double.MAX_VALUE;
+        replans = 0;
+        moveStartTick = tick;
+        moveFrom = player.position();
+        state = State.FLYING;
+    }
+
+    /** Where the player flies over a block of the layer: the hover height above the layers being built. */
+    private static Vec3 laneHover(BlockPos pos) {
+        int hoverY = AutoBuild.INSTANCE.layers.getLayerTop() + Configs.Movement.HOVER_HEIGHT.getIntegerValue();
+        return new Vec3(pos.getX() + 0.5, hoverY, pos.getZ() + 0.5);
+    }
+
+    /**
+     * How fast to fly the lane: every placeable block in reach (and the ones next to a block just placed, a moment
+     * later) gets placed before it leaves the reach. The printer places about one a turn, those about to leave first,
+     * so the k-th of them is placed after k turns and has to be in reach until then: the speed is at most its distance
+     * left to the edge of the reach over those turns. Nothing to place in reach: on at travel speed.
+     */
+    private double sweepSpeed(Minecraft mc, LocalPlayer player, List<BlockPos> inReach, double reach) {
+        if (AutoBuild.INSTANCE.breaker.isBusy() || AutoBuild.INSTANCE.fluids.isBusy() || flyTarget == null) {
+            return 0;
+        }
+        Vec3 eye = player.getEyePosition();
+        Vec3 toTarget = flyTarget.subtract(player.position());
+        Vec3 direction = new Vec3(toTarget.x, 0, toTarget.z);
+        if (direction.lengthSqr() < 1.0e-4) {
+            return SWEEP_MAX;
+        }
+        direction = direction.normalize();
+        WorldSchematic schematic = SchematicHelper.world();
+        int ack = 2 * ServerLag.pingTicks(mc) + 2;
+        double bucket = bucketRange(mc);
+        List<double[]> leaving = new ArrayList<>(inReach.size());
+        for (BlockPos pos : inReach) {
+            Vec3 d = Vec3.atCenterOf(pos).subtract(eye);
+            double along = d.dot(direction);
+            double across = d.lengthSqr() - along * along;
+            boolean water = schematic != null && BlockCheck.check(mc.level, schematic, pos) == BlockCheck.Result.BUCKET;
+            double r = water ? bucket : reach;
+            leaving.add(new double[]{along + Math.sqrt(Math.max(0, r * r - across)), heldBack(pos) ? ack : 0});
+        }
+        if (leaving.isEmpty()) {
+            return SWEEP_TRAVEL;
+        }
+        leaving.sort(java.util.Comparator.comparingDouble(l -> l[0]));
+        double speed = SWEEP_MAX;
+        for (int k = 0; k < leaving.size(); k++) {
+            double room = leaving.get(k)[0] - 0.35;
+            if (room <= 0) {
+                return 0;
+            }
+            speed = Math.min(speed, room / ((k + 1) / sweepRate + leaving.get(k)[1]));
+        }
+        return speed;
+    }
+
+    /** How many blocks the printer really places a tick while it has something in reach (for sweepSpeed). */
+    private void learnRate(List<BlockPos> inReach) {
+        int placed = AutoBuild.INSTANCE.stats.totalPlaced();
+        if (rateLastCount >= 0 && !inReach.isEmpty()) {
+            rateTicks++;
+            ratePlaced += placed - rateLastCount;
+        }
+        rateLastCount = placed;
+        if (rateTicks >= 60) {
+            double measured = ratePlaced / (double) rateTicks;
+            sweepRate = Math.max(0.25, Math.min(1.0, 0.7 * sweepRate + 0.3 * measured));
+            rateTicks = 0;
+            ratePlaced = 0;
+        }
     }
 
     private long lastRetry = -100000;
@@ -1865,6 +2218,10 @@ public class Mover {
                         }
                         BlockCheck.Result result = BlockCheck.check(mc.level, schematic, pos);
                         if (result == BlockCheck.Result.UNLOADED) {
+                            // Seen finished before it unloaded: nothing to fly there for (see LayerManager#seenFinished)
+                            if (oneLayer && layers.seenFinished(pos)) {
+                                continue;
+                            }
                             if (unloaded.size() < 512) {
                                 unloaded.add(pos.immutable());
                             }

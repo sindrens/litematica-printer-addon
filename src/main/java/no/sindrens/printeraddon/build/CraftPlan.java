@@ -38,7 +38,7 @@ public final class CraftPlan {
 
     /** True for items this plans (everything else is simply bought). */
     public static boolean crafted(Item item) {
-        return item == Items.RAIL || item == Items.POWERED_RAIL || item == Items.PUMPKIN_SEEDS || item == Tools.HOE
+        return item == Items.RAIL || item == Items.POWERED_RAIL || item == Items.PUMPKIN_SEEDS || Tools.isMarker(item)
                 || item == Items.REDSTONE;
     }
 
@@ -79,7 +79,7 @@ public final class CraftPlan {
         // Before the first step that needs it (rails), after what it's made of
         for (int i = 0; i < craft.size(); i++) {
             Item item = craft.get(i).item();
-            if (item == Items.RAIL || item == Items.POWERED_RAIL || Tools.isHoe(new ItemStack(item))) {
+            if (item == Items.RAIL || item == Items.POWERED_RAIL || Tools.kindOf(new ItemStack(item)) != null) {
                 return i;
             }
         }
@@ -92,6 +92,9 @@ public final class CraftPlan {
             buy.merge(item, count, Integer::sum);
         } else if (item == Tools.HOE) {
             hoes(count);
+        } else if (item == Tools.PICKAXE || item == Tools.SHOVEL) {
+            stoneTool(item == Tools.PICKAXE ? Items.STONE_PICKAXE : Items.STONE_SHOVEL,
+                    item == Tools.PICKAXE ? Items.WOODEN_PICKAXE : Items.WOODEN_SHOVEL, item == Tools.PICKAXE ? 3 : 1);
         } else if (item == Items.RAIL) {
             int crafts = ceil(count, 16);
             ingot(Items.IRON_INGOT, Items.IRON_BLOCK, 6 * crafts);
@@ -177,6 +180,26 @@ public final class CraftPlan {
             sticks(2 * wooden);
             needsTable = true;
             craft.add(new Step(Items.WOODEN_HOE, wooden));
+        }
+    }
+
+    /**
+     * One stone tool (pickaxe or shovel, {@code heads} stone each): from stone at hand or bought cheaply (a few more for
+     * the next ones), else a wooden one from planks.
+     */
+    private void stoneTool(Item stone, Item wooden, int heads) {
+        int have = takeTag(ItemTags.STONE_TOOL_MATERIALS, heads);
+        if (have < heads && sold.test(Items.COBBLESTONE)) {
+            buy.merge(Items.COBBLESTONE, Math.max(heads - have, 16), Integer::sum);
+            have = heads;
+        }
+        sticks(2);
+        needsTable = true;
+        if (have >= heads) {
+            craft.add(new Step(stone, 1));
+        } else {
+            planks(heads);
+            craft.add(new Step(wooden, 1));
         }
     }
 

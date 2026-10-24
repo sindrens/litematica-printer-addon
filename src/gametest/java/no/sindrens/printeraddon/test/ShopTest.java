@@ -141,7 +141,8 @@ public class ShopTest implements FabricClientGameTest {
                     mc.player.getInventory().countItem(Items.HOPPER), mc.player.getInventory().countItem(Items.STONE),
                     mc.player.getInventory().countItem(Items.CAULDRON), mc.player.getInventory().countItem(Items.PUMPKIN_SEEDS),
                     mc.player.getInventory().countItem(Items.LAVA_BUCKET)});
-            check(counts[0] == 200, "hoppers: " + counts[0] + ", wanted 200");
+            // 3 stacks by "purchase stacks"; the last 8 after a big purchase aren't worth another one (since 0.9.9)
+            check(counts[0] >= 192 && counts[0] <= 200, "hoppers: " + counts[0] + ", wanted 192 to 200");
             check(counts[1] == 10, "stone: " + counts[1] + ", wanted 10");
             check(counts[2] == 3, "cauldrons: " + counts[2] + ", wanted 3");
             check(counts[3] == 5, "pumpkin seeds: " + counts[3] + ", wanted 5");

@@ -125,7 +125,7 @@ public class InventoryCleaner {
             if (stack.isEmpty() || isBucket(item) || !ordinary(stack)) {
                 continue;
             }
-            if (Tools.isHoe(stack) || !stack.isDamageableItem() && (materials.contains(item)
+            if (Tools.isHoe(stack) || Tools.cheapTool(stack) || !stack.isDamageableItem() && (materials.contains(item)
                     || CRAFTING_LEFTOVERS.contains(item) || isSchematicBlock(item) || Tools.hoeMaterial(item))) {
                 items.add(item);
             }

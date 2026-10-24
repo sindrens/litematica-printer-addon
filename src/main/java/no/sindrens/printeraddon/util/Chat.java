@@ -40,6 +40,34 @@ public class Chat {
         }
     }
 
+    /**
+     * Routine progress (took items from storage, crafted, a block type's speed): in the build log, in chat only with
+     * "Detailed chat". Chat is for what matters: what the build is doing now, and anything that needs the player.
+     */
+    public static void quiet(String message) {
+        remember(message);
+        no.sindrens.printeraddon.build.BuildLog.line("info", message);
+        PrinterAddon.LOGGER.info(message);
+        if (Configs.Generic.DETAILED_CHAT.getBooleanValue()) {
+            send("\u00a77" + message);
+        }
+    }
+
+    private static final java.util.Map<String, Long> LAST_SHOWN = new java.util.HashMap<>();
+
+    /** A warning that can repeat (a lagging server, a missing bucket): in chat at most once per {@code everyMs}, always in the build log. */
+    public static void warnEvery(String key, long everyMs, String message) {
+        long now = System.currentTimeMillis();
+        Long last = LAST_SHOWN.get(key);
+        if (last != null && now - last < everyMs) {
+            remember(message);
+            no.sindrens.printeraddon.build.BuildLog.line("WARN", message);
+            return;
+        }
+        LAST_SHOWN.put(key, now);
+        warn(message);
+    }
+
     /** Always shown: something stopped or needs the player's attention. */
     public static void warn(String message) {
         remember(message);

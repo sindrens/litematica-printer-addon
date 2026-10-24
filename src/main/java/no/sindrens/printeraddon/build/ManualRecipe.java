@@ -61,6 +61,14 @@ public record ManualRecipe(Item result, int count, int width, int height, String
             return new ManualRecipe(item, 1, 2, 3, new String[]{"CC", " S", " S"},
                     Map.of('C', s -> s.is(ItemTags.STONE_TOOL_MATERIALS), 'S', stick));
         }
+        if (item == Items.STONE_PICKAXE || item == Items.WOODEN_PICKAXE) {
+            Predicate<ItemStack> head = item == Items.STONE_PICKAXE ? s -> s.is(ItemTags.STONE_TOOL_MATERIALS) : planks;
+            return new ManualRecipe(item, 1, 3, 3, new String[]{"HHH", " S ", " S "}, Map.of('H', head, 'S', stick));
+        }
+        if (item == Items.STONE_SHOVEL || item == Items.WOODEN_SHOVEL) {
+            Predicate<ItemStack> head = item == Items.STONE_SHOVEL ? s -> s.is(ItemTags.STONE_TOOL_MATERIALS) : planks;
+            return new ManualRecipe(item, 1, 1, 3, new String[]{"H", "S", "S"}, Map.of('H', head, 'S', stick));
+        }
         if (item == Items.WOODEN_HOE) {
             return new ManualRecipe(item, 1, 2, 3, new String[]{"PP", " S", " S"},
                     Map.of('P', planks, 'S', stick));

@@ -126,6 +126,7 @@ public class Fluids {
             pending = null;
             usedSlot = player.getInventory().getSelectedSlot();
             usedAt = tick;
+            resyncedAt = -1;
             use(mc, player, schematic, pos);
             cooldown = Math.max(COOLDOWN, 10 + 2 * ServerLag.pingTicks(mc));
             AutoBuild.INSTANCE.inventory.moved();
@@ -161,26 +162,54 @@ public class Fluids {
     }
 
     /**
-     * The client shows the bucket empty after using it; an infinite water bucket is full again on the server. If
-     * the slot still shows an empty bucket a while later, click it once (pick up, put back) so the server sends
-     * what's really there: otherwise a ghost bucket stays in the inventory.
+     * The client shows the bucket empty after using it; an infinite water bucket is full again on the server, which
+     * doesn't always say so (the slot then stays an empty "ghost" bucket, and the layer's water waited for minutes).
+     * Soon after a use, a slot still showing an empty bucket is swapped with another slot and back: the server answers
+     * every click with what's really in those slots. (Picking it up and putting it back did the same, but this server
+     * ignores those clicks without a menu open; swapping works.)
      */
     private void checkBucket(Minecraft mc, LocalPlayer player) {
-        if (usedSlot < 0 || tick - usedAt < 40) {
+        int wait = 4 + 2 * ServerLag.pingTicks(mc);
+        if (usedSlot < 0 || tick - usedAt < wait || mc.gui.screen() != null) {
             return;
         }
         int slot = usedSlot;
-        usedSlot = -1;
-        if (!player.getInventory().getItem(slot).is(Items.BUCKET) || mc.gui.screen() != null) {
+        Inventory inventory = player.getInventory();
+        if (!inventory.getItem(slot).is(Items.BUCKET)) {
+            usedSlot = -1;
             return;
         }
-        int menuSlot = slot < 9 ? 36 + slot : slot;
+        if (resyncedAt >= 0) {
+            // Asked once: still empty after the answer, it's a real empty bucket (filled from water nearby, see refill)
+            if (tick - resyncedAt >= wait) {
+                usedSlot = -1;
+            }
+            return;
+        }
+        resyncedAt = tick;
+        // Another inventory slot to swap with (an empty one if there is one): there and back in the same tick
+        int other = -1;
+        for (int i = Inventory.getSelectionSize(); i < Inventory.INVENTORY_SIZE; i++) {
+            if (i != slot && (other < 0 || inventory.getItem(i).isEmpty() && !inventory.getItem(other).isEmpty())) {
+                other = i;
+            }
+        }
         int id = player.inventoryMenu.containerId;
-        mc.gameMode.handleContainerInput(id, menuSlot, 0, net.minecraft.world.inventory.ContainerInput.PICKUP, player);
-        mc.gameMode.handleContainerInput(id, menuSlot, 0, net.minecraft.world.inventory.ContainerInput.PICKUP, player);
+        if (Inventory.isHotbarSlot(slot) && other >= 0) {
+            mc.gameMode.handleContainerInput(id, other, slot, net.minecraft.world.inventory.ContainerInput.SWAP, player);
+            mc.gameMode.handleContainerInput(id, other, slot, net.minecraft.world.inventory.ContainerInput.SWAP, player);
+        } else if (!Inventory.isHotbarSlot(slot)) {
+            int hotbar = inventory.getSelectedSlot();
+            mc.gameMode.handleContainerInput(id, slot, hotbar, net.minecraft.world.inventory.ContainerInput.SWAP, player);
+            mc.gameMode.handleContainerInput(id, slot, hotbar, net.minecraft.world.inventory.ContainerInput.SWAP, player);
+        }
         AutoBuild.INSTANCE.inventory.moved();
         PrinterAddon.debug("Bucket in slot {} still empty after use: asked the server for the real item", slot + 1);
     }
+
+    /** When the empty-looking bucket was swapped there and back to get the real item (-1: not yet). */
+    private long resyncedAt = -1;
+    private long lastGhostCheck = -100000;
 
     /**
      * Out of water buckets but holding empty ones: fill one from water in reach that isn't part of the build (a
@@ -189,6 +218,15 @@ public class Fluids {
     private boolean refill(Minecraft mc, LocalPlayer player) {
         Inventory inventory = player.getInventory();
         if (inventory.contains(s -> s.is(Items.WATER_BUCKET)) || !inventory.contains(s -> s.is(Items.BUCKET))) {
+            return false;
+        }
+        // Only empty buckets: one of them may be an infinite water bucket the client shows empty (see checkBucket),
+        // asked about every 30 s
+        if (usedSlot < 0 && tick - lastGhostCheck > 20 * 30) {
+            lastGhostCheck = tick;
+            usedSlot = slotOf(inventory, Items.BUCKET);
+            usedAt = tick - 100;
+            resyncedAt = -1;
             return false;
         }
         WorldSchematic schematic = SchematicHelper.world();

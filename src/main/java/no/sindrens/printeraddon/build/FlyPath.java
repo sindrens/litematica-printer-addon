@@ -39,6 +39,7 @@ public final class FlyPath {
     /** Feet positions from start to goal (excluding the start), or null if there's no way within the limits. */
     @Nullable
     public static List<Vec3> find(Level level, Vec3 from, Vec3 to) {
+        from = lift(level, from);
         BlockPos start = BlockPos.containing(from.x, from.y + 0.01, from.z);
         BlockPos goal = BlockPos.containing(to.x, to.y + 0.01, to.z);
         if (start.equals(goal)) {
@@ -59,6 +60,7 @@ public final class FlyPath {
      */
     @Nullable
     public static List<Vec3> findNear(Level level, Vec3 from, BlockPos block, double reach, double eyeHeight, Predicate<BlockPos> avoid) {
+        from = lift(level, from);
         Vec3 center = Vec3.atCenterOf(block);
         BlockPos start = BlockPos.containing(from.x, from.y + 0.01, from.z);
         Predicate<BlockPos> goal = p -> reaches(p, center, reach, eyeHeight) && !avoid.test(p) && !avoid.test(p.above());
@@ -253,7 +255,22 @@ public final class FlyPath {
         return clear(level, a, b, true);
     }
 
+    /**
+     * The player resting on a block lower than a whole one (farmland, mud, soul sand, a path) has the feet a little
+     * inside that block's space: for the way from there, the feet count as on top of it. Without this every way from
+     * there started by going down into the block, and the player stood still for minutes (seen in a test on farmland).
+     */
+    static Vec3 lift(Level level, Vec3 from) {
+        double floor = Math.floor(from.y + 0.01);
+        if (from.y + 0.01 - floor > 0.5 && !PathFinder.isPassable(level, BlockPos.containing(from.x, from.y + 0.01, from.z))
+                && PathFinder.isPassable(level, BlockPos.containing(from.x, floor + 1.01, from.z))) {
+            return new Vec3(from.x, floor + 1, from.z);
+        }
+        return from;
+    }
+
     private static boolean clear(Level level, Vec3 a, Vec3 b, boolean unloadedIsFree) {
+        a = lift(level, a);
         Vec3 d = b.subtract(a);
         double length = d.length();
         int steps = Math.max(1, (int) Math.ceil(length / 0.3));

@@ -57,9 +57,9 @@ public final class ServerLag {
         if (wait != paused) {
             paused = wait;
             if (wait) {
-                Chat.warn(String.format("The server lags (%.0f ticks per second): placing waits until it catches up.", silent ? 0 : tps));
+                Chat.warnEvery("lag", 5 * 60_000L, String.format("The server lags (%.0f ticks per second): placing waits until it catches up.", silent ? 0 : tps));
             } else {
-                Chat.info(String.format("The server is back to %.0f ticks per second: placing again.", tps));
+                Chat.quiet(String.format("The server is back to %.0f ticks per second: placing again.", tps));
             }
         }
         return wait;

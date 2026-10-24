@@ -17,6 +17,76 @@ import no.sindrens.printeraddon.config.Configs;
 public final class Tools {
     /** Stands for "a hoe" in the lists of what's needed: storage gives any usable hoe, crafting picks the material. */
     public static final Item HOE = Items.STONE_HOE;
+    /** Stand for "a pickaxe" and "a shovel" (for breaking wrong blocks: hoppers and observers only drop with a pickaxe). */
+    public static final Item PICKAXE = Items.STONE_PICKAXE;
+    public static final Item SHOVEL = Items.STONE_SHOVEL;
+
+    /** True for the items that stand for a kind of tool in the lists of what's needed. */
+    public static boolean isMarker(Item item) {
+        return item == HOE || item == PICKAXE || item == SHOVEL;
+    }
+
+    /** The marker for the kind of tool this is (HOE, PICKAXE, SHOVEL), or null for anything else. */
+    @javax.annotation.Nullable
+    public static Item kindOf(ItemStack stack) {
+        if (isHoe(stack)) {
+            return HOE;
+        }
+        if (stack.is(ItemTags.PICKAXES)) {
+            return PICKAXE;
+        }
+        if (stack.is(ItemTags.SHOVELS)) {
+            return SHOVEL;
+        }
+        return null;
+    }
+
+    /** A tool of this kind good for a while (a hoe: see usableHoe; a pickaxe or shovel: not about to break). */
+    public static boolean usable(Item kind, ItemStack stack) {
+        if (kind == HOE) {
+            return usableHoe(stack);
+        }
+        return kindOf(stack) == kind && (!stack.isDamageableItem()
+                || left(stack) > Math.max(Configs.Breaking.MIN_TOOL_DURABILITY.getIntegerValue(), stack.getMaxDamage() / 10));
+    }
+
+    public static boolean has(Item kind, Inventory inventory) {
+        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+            if (usable(kind, inventory.getItem(slot))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * The pickaxe and shovel the build may need for breaking wrong blocks, that the inventory has no usable one of:
+     * a pickaxe when the schematic has blocks that drop nothing without one (hoppers, observers, concrete), a shovel
+     * when it has dirt, mud or the like.
+     */
+    public static java.util.List<Item> breakingToolsMissing(java.util.Set<net.minecraft.world.level.block.Block> blocks, Inventory inventory) {
+        boolean pickaxe = false;
+        boolean shovel = false;
+        for (net.minecraft.world.level.block.Block block : blocks) {
+            net.minecraft.world.level.block.state.BlockState state = block.defaultBlockState();
+            pickaxe |= state.requiresCorrectToolForDrops() && state.is(net.minecraft.tags.BlockTags.MINEABLE_WITH_PICKAXE);
+            shovel |= state.is(net.minecraft.tags.BlockTags.MINEABLE_WITH_SHOVEL);
+        }
+        java.util.List<Item> missing = new java.util.ArrayList<>();
+        if (pickaxe && !has(PICKAXE, inventory)) {
+            missing.add(PICKAXE);
+        }
+        if (shovel && !has(SHOVEL, inventory)) {
+            missing.add(SHOVEL);
+        }
+        return missing;
+    }
+
+    /** A stone or wooden pickaxe or shovel, as the add-on makes them (put away with the building items). */
+    public static boolean cheapTool(ItemStack stack) {
+        Item item = stack.getItem();
+        return item == Items.STONE_PICKAXE || item == Items.STONE_SHOVEL || item == Items.WOODEN_PICKAXE || item == Items.WOODEN_SHOVEL;
+    }
     /** Uses of a stone hoe: how many to make for the tilling left. */
     private static final int STONE_USES = 131;
     /** At most this many hoes are made in one go (each takes a slot). */
@@ -65,6 +135,14 @@ public final class Tools {
     /** How many hoes to get for this much tilling (stone ones last 131 uses each; at most 3 at a time). */
     public static int hoesFor(int tilling) {
         return Math.max(1, Math.min(MAX_AT_ONCE, (tilling + STONE_USES - 1) / STONE_USES));
+    }
+
+    /**
+     * Same, but never more than there are free slots for (one is kept free): each hoe takes a slot of its own. With
+     * a full inventory it crafted three and couldn't take them out of the crafting grid ("Your inventory is full!").
+     */
+    public static int hoesFor(int tilling, Inventory inventory) {
+        return Math.max(1, Math.min(hoesFor(tilling), InventoryCleaner.freeSlots(inventory) - 1));
     }
 
     /**

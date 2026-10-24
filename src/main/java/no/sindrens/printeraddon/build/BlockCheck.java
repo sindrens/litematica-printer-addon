@@ -79,8 +79,10 @@ public final class BlockCheck {
         BlockState target = schematic.getBlockState(pos);
         BlockState current = level.getBlockState(pos);
 
-        // A piston that was moving when the schematic was saved: nothing to place there
-        if (target.getBlock() == Blocks.MOVING_PISTON) {
+        // A piston that was moving when the schematic was saved: nothing to place there. One moving right now (a
+        // farm at work): in 2 ticks it's settled, and the next look sees what's there then (it can't be broken,
+        // and counted as wrong a farm's layer was never done)
+        if (target.getBlock() == Blocks.MOVING_PISTON || current.getBlock() == Blocks.MOVING_PISTON) {
             return Result.OK;
         }
 

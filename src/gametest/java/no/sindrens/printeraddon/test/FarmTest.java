@@ -82,8 +82,15 @@ public class FarmTest implements FabricClientGameTest {
             server.runCommand("give @p diamond_shovel");
             server.runCommand("give @p diamond_hoe");
 
+            // PRINTER_ADDON_WATCH=1: run on your own PC to watch it, with your own graphics settings
+            boolean watch = System.getenv("PRINTER_ADDON_WATCH") != null;
             context.runOnClient(mc -> {
                 mc.options.setCameraType(CameraType.THIRD_PERSON_BACK);
+                if (watch) {
+                    Configs.Generic.SHOW_HUD.setBooleanValue(true);
+                }
+            });
+            if (!watch) context.runOnClient(mc -> {
                 // Software rendering on the test machine takes the CPU from the game server: keep drawing cheap
                 mc.options.renderDistance().set(3);
                 // The see-through schematic blocks cost the most to draw; the coloured outlines stay
@@ -98,6 +105,8 @@ public class FarmTest implements FabricClientGameTest {
                 mc.options.biomeBlendRadius().set(0);
                 mc.options.mipmapLevels().set(0);
                 mc.options.chunkSectionFadeInTime().set(0.0);
+            });
+            context.runOnClient(mc -> {
                 LitematicaSchematic schematic = LitematicaSchematic.createFromFile(schematicFile.getParent(),
                         schematicFile.getFileName().toString());
                 if (schematic == null) {
@@ -147,7 +156,15 @@ public class FarmTest implements FabricClientGameTest {
                 me.aleksilassila.litematica.printer.config.Configs.PRINTING_RANGE.setDoubleValue(4.5);
                 // No /pv in singleplayer
                 Configs.Shop.VAULTS.setValueFromString("");
-                me.aleksilassila.litematica.printer.config.Configs.PRINTING_INTERVAL.setIntegerValue(12);
+                // The player's interval on their server now (PRINTER_ADDON_INTERVAL to try another)
+                String interval = System.getenv("PRINTER_ADDON_INTERVAL");
+                me.aleksilassila.litematica.printer.config.Configs.PRINTING_INTERVAL.setIntegerValue(
+                        interval == null || interval.isBlank() ? 2 : Integer.parseInt(interval.trim()));
+                // PRINTER_ADDON_LANES=0: spot by spot only (to compare with flying in lanes)
+                String lanes = System.getenv("PRINTER_ADDON_LANES");
+                if (lanes != null) {
+                    Configs.Movement.LANES.setBooleanValue(!lanes.equals("0"));
+                }
                 String keepMoving = System.getenv("PRINTER_ADDON_KEEP_MOVING");
                 if (keepMoving != null) {
                     Configs.Movement.KEEP_MOVING.setBooleanValue(!keepMoving.equals("0"));
@@ -167,9 +184,20 @@ public class FarmTest implements FabricClientGameTest {
             // Short test rounds: PRINTER_ADDON_TEST_MINUTES=5 stops after that many minutes of building
             String minutesEnv = System.getenv("PRINTER_ADDON_TEST_MINUTES");
             int maxTicks = minutesEnv == null || minutesEnv.isBlank() ? MAX_TICKS : Integer.parseInt(minutesEnv.trim()) * 20 * 60;
+            int buildingLayer = context.computeOnClient(mc -> AutoBuild.INSTANCE.layers.getLayer());
+            int layerStartTicks = 0;
             while (ticks < maxTicks && context.computeOnClient(mc -> AutoBuild.INSTANCE.isRunning())) {
                 context.waitTicks(SCREENSHOT_EVERY);
                 ticks += SCREENSHOT_EVERY;
+                // Each finished layer: its time, and a picture of it
+                int nowLayer = context.computeOnClient(mc -> AutoBuild.INSTANCE.layers.getLayer());
+                if (nowLayer != buildingLayer) {
+                    System.out.println("FARM TEST: layer Y " + buildingLayer + " done after " + (ticks - layerStartTicks) / 20
+                            + " s game time (" + ticks / 20 + " s in all, " + (System.currentTimeMillis() - started) / 1000 + " s real)");
+                    context.takeScreenshot("layer-" + buildingLayer);
+                    buildingLayer = nowLayer;
+                    layerStartTicks = ticks;
+                }
                 // A picture every 3 seconds is plenty for the live view, and each one costs the slow test machine time
                 if (ticks % SCREENSHOT_SAVE_EVERY == 0) {
                     context.takeScreenshot("rec");
@@ -250,6 +278,12 @@ public class FarmTest implements FabricClientGameTest {
                         if (result == BlockCheck.Result.BUCKET && no.sindrens.printeraddon.build.Fluids.bucketFor(target) != null) {
                             needed.merge(no.sindrens.printeraddon.build.Fluids.bucketFor(target), 1, Integer::sum);
                             continue;
+                        }
+                        // Water to come once the block is placed (waterlogged leaves): the bucket is ready before,
+                        // like the player's infinite water bucket (else each lane passed its water with none)
+                        if (result == BlockCheck.Result.MISSING && no.sindrens.printeraddon.build.PlacementOrder.holdsWater(target)
+                                && no.sindrens.printeraddon.build.Fluids.bucketFor(target) != null) {
+                            needed.merge(no.sindrens.printeraddon.build.Fluids.bucketFor(target), 1, Integer::sum);
                         }
                         if (result != BlockCheck.Result.MISSING && result != BlockCheck.Result.PRINTER_FIXES
                                 && !result.needsBreaking()) {

@@ -357,7 +357,7 @@ public class AutoBuild {
         lastOfferedTick = clientTicks;
         lastRawCount = all.size();
         java.util.List<net.minecraft.core.BlockPos> ordered = PlacementOrder.order(mc.level, schematic, forPrinter, mover.orderFrom(mc.player),
-                mc.player.getMainHandItem().isEmpty() ? null : mc.player.getMainHandItem().getItem());
+                mc.player.getMainHandItem().isEmpty() ? null : mc.player.getMainHandItem().getItem(), mover.ticksLeftInReach(mc.player));
         if (!ordered.isEmpty()) {
             nextBlock = ordered.getFirst();
         }
@@ -384,6 +384,11 @@ public class AutoBuild {
     /** True if the whole schematic still needs this (as last counted). */
     public boolean wholeNeeds(net.minecraft.world.item.Item item) {
         return neededWhole.getOrDefault(item, 0) > 0;
+    }
+
+    /** How many of this item the whole schematic still needs (as last counted). */
+    public int wholeCount(net.minecraft.world.item.Item item) {
+        return neededWhole.getOrDefault(item, 0);
     }
 
     /** Blocks still to place in the whole schematic (as last counted). */
@@ -608,6 +613,11 @@ public class AutoBuild {
         if (wholeTilling > 0 && !Tools.hasUsableHoe(mc.player.getInventory())) {
             needs.put(Tools.HOE, 1);
         }
+        if (Configs.Breaking.BREAK_WRONG_BLOCKS.getBooleanValue()) {
+            for (net.minecraft.world.item.Item tool : Tools.breakingToolsMissing(schematicBlocks, mc.player.getInventory())) {
+                needs.put(tool, 1);
+            }
+        }
         neededWhole.clear();
         neededWhole.putAll(needs);
         cleaner.remember(needs);
@@ -824,7 +834,7 @@ public class AutoBuild {
         int tilling = layers.tillingLeft();
         int hoeUses = Tools.hoeUses(inventory);
         if (tilling > hoeUses && hoeUses < 150 && !wants.containsKey(Tools.HOE)) {
-            wants.put(Tools.HOE, Tools.hoesFor(tilling - hoeUses));
+            wants.put(Tools.HOE, Tools.hoesFor(tilling - hoeUses, inventory));
         }
         // Only empty buckets for minutes: a water bucket is got as if there were none
         if (noBucket && !wants.containsKey(net.minecraft.world.item.Items.WATER_BUCKET)) {
@@ -976,11 +986,37 @@ public class AutoBuild {
         return false;
     }
 
+    /**
+     * Two stacks of what the inventory has most of (a building item, never a tool or bucket) into storage, so a
+     * crafted tool has a slot. Without storage: said once, nothing is thrown away.
+     */
+    private void makeRoomForCrafting(Minecraft mc) {
+        net.minecraft.world.entity.player.Inventory inventory = mc.player.getInventory();
+        java.util.Map<net.minecraft.world.item.Item, Integer> stacks = new java.util.HashMap<>();
+        for (int slot = 0; slot < net.minecraft.world.entity.player.Inventory.INVENTORY_SIZE; slot++) {
+            net.minecraft.world.item.ItemStack stack = inventory.getItem(slot);
+            if (!stack.isEmpty() && stack.getMaxStackSize() > 1 && !InventoryCleaner.isBucket(stack.getItem())) {
+                stacks.merge(stack.getItem(), 1, Integer::sum);
+            }
+        }
+        net.minecraft.world.item.Item most = stacks.entrySet().stream().filter(e -> e.getValue() >= 3)
+                .max(java.util.Map.Entry.comparingByValue()).map(java.util.Map.Entry::getKey).orElse(null);
+        if (most != null && fetcher.startStore(mc, java.util.Map.of(most, stacks.get(most) - 2))) {
+            BuildLog.line("CRAFT", "inventory full: 2 stacks of " + net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(most).getPath()
+                    + " into storage to make room for a crafted tool");
+            Chat.info("Inventory full: putting 2 stacks of " + new net.minecraft.world.item.ItemStack(most).getHoverName().getString()
+                    + " in storage to make room for a tool.");
+            buyCooldown = 0;
+            return;
+        }
+        Chat.warn("Inventory full: no room for a crafted tool, and nowhere to put things (link a chest or make room in your vaults).");
+    }
+
     /** An item the layer needs (not a bucket) is used up and can be got. */
     private boolean layerItemOut(Minecraft mc) {
         for (var entry : layers.layerNeeds().entrySet()) {
             net.minecraft.world.item.Item item = entry.getKey();
-            if (entry.getValue() > 0 && !InventoryCleaner.isBucket(item) && item != Tools.HOE
+            if (entry.getValue() > 0 && !InventoryCleaner.isBucket(item) && !Tools.isMarker(item)
                     && mc.player.getInventory().countItem(item) == 0 && gettable(mc, item)) {
                 return true;
             }
@@ -1656,9 +1692,14 @@ public class AutoBuild {
             if (crafter.tick(mc)) {
                 return;
             }
+        } else if (crafter.needsRoom()) {
+            // The inventory was too full for what was crafted: room first (two stacks into storage), then it's
+            // crafted again on the next round; not counted as "can't be crafted"
+            craftingFor = java.util.Set.of();
+            makeRoomForCrafting(mc);
         } else if (!craftingFor.isEmpty()) {
             for (net.minecraft.world.item.Item item : craftingFor) {
-                boolean got = item == Tools.HOE ? Tools.hasUsableHoe(mc.player.getInventory()) : mc.player.getInventory().countItem(item) > 0;
+                boolean got = Tools.isMarker(item) ? Tools.has(item, mc.player.getInventory()) : mc.player.getInventory().countItem(item) > 0;
                 if (shoppingList.containsKey(item) && !got) {
                     // Crafting it didn't work: not again from the same ingredients for a while either
                     cantBuy(java.util.List.of(item));

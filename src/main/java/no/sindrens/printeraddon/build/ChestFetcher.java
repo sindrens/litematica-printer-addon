@@ -259,7 +259,7 @@ public class ChestFetcher {
         }
         taken = 0;
         active = true;
-        Chat.info("Looking in " + toVisit.size() + " vault" + (toVisit.size() == 1 ? "" : "s") + "/chest"
+        Chat.quiet("Looking in " + toVisit.size() + " vault" + (toVisit.size() == 1 ? "" : "s") + "/chest"
                 + (toVisit.size() == 1 ? "" : "s") + " for " + describe(wanted) + " before buying.");
         return true;
     }
@@ -285,7 +285,7 @@ public class ChestFetcher {
                             + (vaults().size() + ChestLinks.list(mc).size() == 1 ? "is" : "are") + " full. Link a chest for the"
                             + " rest: look at a chest, press J+B and click 'Link the chest' (then 'Put building items away').");
                 } else if (taken > 0) {
-                    Chat.info("Put " + taken + " items in storage.");
+                    Chat.quiet("Put " + taken + " items in storage.");
                 }
                 warnIfFilling(mc);
                 storing.clear();
@@ -307,7 +307,7 @@ public class ChestFetcher {
             wanted.values().removeIf(count -> count <= 0);
             if (wanted.isEmpty() || toVisit.isEmpty()) {
                 if (!toVisit.isEmpty() || taken > 0) {
-                    Chat.info("Took " + taken + " items from storage.");
+                    Chat.quiet("Took " + taken + " items from storage.");
                 }
                 toVisit.clear();
                 active = false;
@@ -437,15 +437,17 @@ public class ChestFetcher {
                     phase = Phase.CLOSE;
                     return true;
                 }
-                // A hoe is a hoe: the one with the most uses left, if one is wanted
-                int bestHoe = -1;
-                if (wanted.getOrDefault(Tools.HOE, 0) > 0) {
-                    for (Slot slot : menu.slots) {
-                        ItemStack stack = slot.getItem();
-                        if (!(slot.container instanceof Inventory) && Tools.usableHoe(stack)
-                                && (bestHoe < 0 || Tools.left(stack) > Tools.left(menu.slots.get(bestHoe).getItem()))) {
-                            bestHoe = slot.index;
-                        }
+                // A hoe is a hoe (a pickaxe a pickaxe...): of each kind wanted, the one with the most uses left here
+                Map<Item, Integer> bestTool = new HashMap<>();
+                for (Slot slot : menu.slots) {
+                    ItemStack stack = slot.getItem();
+                    Item kind = Tools.kindOf(stack);
+                    if (slot.container instanceof Inventory || kind == null || wanted.getOrDefault(kind, 0) <= 0 || !Tools.usable(kind, stack)) {
+                        continue;
+                    }
+                    Integer best = bestTool.get(kind);
+                    if (best == null || Tools.left(stack) > Tools.left(menu.slots.get(best).getItem())) {
+                        bestTool.put(kind, slot.index);
                     }
                 }
                 Map<Item, Integer> contents = new HashMap<>();
@@ -461,10 +463,11 @@ public class ChestFetcher {
                     Item item = stack.getItem();
                     int count = stack.getCount();
                     contents.merge(item, count, Integer::sum);
-                    // What it's wanted as: a hoe as "a hoe" (only the best one here), anything else as itself
-                    boolean hoe = Tools.isHoe(stack);
-                    Item key = hoe ? Tools.HOE : item;
-                    Integer want = hoe && slot.index != bestHoe ? null : wanted.get(key);
+                    // What it's wanted as: a tool as its kind (only the best one here), anything else as itself
+                    Item kind = Tools.kindOf(stack);
+                    boolean tool = kind != null && wanted.containsKey(kind);
+                    Item key = tool ? kind : item;
+                    Integer want = tool && !Integer.valueOf(slot.index).equals(bestTool.get(kind)) ? null : wanted.get(key);
                     // Never into the last few free slots (see InventoryBudget), unless it tops up a stack
                     boolean fits = InventoryCleaner.freeSlots(player.getInventory()) > InventoryBudget.KEEP_FREE
                             || InventoryBudget.topUpRoom(player.getInventory(), item) >= count;

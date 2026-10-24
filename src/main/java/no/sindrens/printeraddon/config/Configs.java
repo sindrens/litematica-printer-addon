@@ -175,6 +175,11 @@ public class Configs implements IConfigHandler {
                 "Flying: when only a few blocks are left to place where you are, already fly on to the next spot (the printer\n"
                         + "places the last ones on the way) instead of stopping until everything around is done.",
                 "Keep moving");
+        public static final ConfigBoolean LANES = new ConfigBoolean("flyInLanes", true,
+                "Full layers (a farm's dirt, mud, stems, observers, redstone...) are flown over in straight lanes, the printer\n"
+                        + "placing all the way: as fast as the printer keeps up, slowing down only so nothing is left behind.\n"
+                        + "Layers of chains (hoppers into hoppers) and what's left at the end go spot by spot as before.",
+                "Fly in lanes");
         public static final ConfigInteger HOVER_HEIGHT = new ConfigInteger("hoverHeightAbove", 1, 1, 4,
                 "When flying, hover this many blocks above the layer being built (1 = right above it, the most reach).",
                 "Hover height");
@@ -187,7 +192,7 @@ public class Configs implements IConfigHandler {
                 "Max walk distance");
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                MOVE_MODE, FLY_COMMAND, KEEP_MOVING, HOVER_HEIGHT, WORK_WAIT_SECONDS, MAX_WALK_DISTANCE);
+                MOVE_MODE, FLY_COMMAND, KEEP_MOVING, LANES, HOVER_HEIGHT, WORK_WAIT_SECONDS, MAX_WALK_DISTANCE);
 
         public static MoveMode mode() {
             return (MoveMode) MOVE_MODE.getOptionListValue();

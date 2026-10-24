@@ -83,6 +83,23 @@ public class Crafter {
     private int waited;
     private int startCount;
     private int crafted;
+    /** The count when the result was last shift-clicked out, and how often in a row that changed nothing. */
+    private int lastTakeCount = -1;
+    private int stuckTakes;
+    /** The last job ended because the inventory had no room for what was crafted (see needsRoom). */
+    private boolean noRoom;
+    /** The crafting table menu this job opened on the server (-1: none), closed there by its own number. */
+    private int openedMenu = -1;
+
+    /**
+     * True once after a job ended for lack of room in the inventory: room is made (stacks into storage) before the
+     * next try, and it doesn't count as "can't be crafted".
+     */
+    public boolean needsRoom() {
+        boolean was = noRoom;
+        noRoom = false;
+        return was;
+    }
 
     public boolean isBusy() {
         return job != null || !jobs.isEmpty();
@@ -122,6 +139,15 @@ public class Crafter {
             findTries = 0;
             crafted = 0;
             startCount = count(player, job.item());
+            lastTakeCount = -1;
+            stuckTakes = 0;
+            // A tool takes a slot of its own: none free, nothing is crafted (it was crafted over and over with the
+            // server saying "Your inventory is full!", the grid never emptied)
+            if (job.item().getDefaultMaxStackSize() == 1 && no.sindrens.printeraddon.build.InventoryCleaner.freeSlots(player.getInventory()) == 0) {
+                noRoom = true;
+                fail(mc, "no free slot for it, the inventory is full (making room first)");
+                return true;
+            }
         }
         if (wait > 0) {
             wait--;
@@ -199,6 +225,8 @@ public class Crafter {
             }
             case WAIT_OPEN -> {
                 if (player.containerMenu instanceof CraftingMenu) {
+                    openedMenu = player.containerMenu.containerId;
+                    PrinterAddon.debug("Crafting table open for {} (menu {})", job.item(), openedMenu);
                     phase = Phase.FILL;
                 } else if (waited > TIMEOUT + 2 * ServerLag.pingTicks(mc)) {
                     if (usedCommand) {
@@ -265,6 +293,18 @@ public class Crafter {
                     }
                     return true;
                 }
+                // The last shift-click took nothing (the result is still there): no room for it in the inventory
+                int now = count(player, job.item());
+                if (lastTakeCount >= 0 && now == lastTakeCount) {
+                    if (++stuckTakes >= 2) {
+                        noRoom = true;
+                        fail(mc, "no room in the inventory for what was crafted (making room first)");
+                        return true;
+                    }
+                } else {
+                    stuckTakes = 0;
+                }
+                lastTakeCount = now;
                 mc.gameMode.handleContainerInput(menu.containerId, 0, 0, ContainerInput.QUICK_MOVE, player);
                 wait = WAIT;
                 crafted = count(player, job.item()) - startCount;
@@ -283,11 +323,12 @@ public class Crafter {
                 phase = Phase.CLOSE;
             }
             case CLOSE -> {
-                if (needsTable && mc.gui.screen() instanceof CraftingScreen) {
-                    player.closeContainer();
-                }
+                // Whatever the screen shows now: a crafting table still open on the server sends the inventory's
+                // changes for its own menu, which the client then ignores (in a test the inventory looked unchanged
+                // after items were cleared and given)
+                closeTable(mc, player);
                 crafted = count(player, job.item()) - startCount;
-                Chat.info("Crafted " + crafted + " " + new ItemStack(job.item()).getHoverName().getString() + ".");
+                Chat.quiet("Crafted " + crafted + " " + new ItemStack(job.item()).getHoverName().getString() + ".");
                 finishJob();
             }
         }
@@ -306,10 +347,29 @@ public class Crafter {
 
     private void fail(Minecraft mc, String why) {
         Chat.warn("Can't craft " + new ItemStack(job.item()).getHoverName().getString() + ": " + why + ".");
-        if (mc.player != null && mc.player.containerMenu != mc.player.inventoryMenu) {
-            mc.player.closeContainer();
+        if (mc.player != null) {
+            closeTable(mc, mc.player);
         }
         finishJob();
+    }
+
+    /**
+     * Closes the crafting table this job opened, on the server too, by its own number: in a test the client had
+     * already gone back to the inventory while the server still had the table open, and from then on the server
+     * sent every inventory change for the table's menu, which the client ignored (the inventory looked unchanged
+     * after items were cleared and given, and the add-on went by a wrong inventory).
+     */
+    private void closeTable(Minecraft mc, LocalPlayer player) {
+        PrinterAddon.debug("Closing the crafting table: client menu {}, opened {}", player.containerMenu.containerId, openedMenu);
+        if (player.containerMenu != player.inventoryMenu) {
+            player.closeContainer();
+        } else if (openedMenu > 0) {
+            player.connection.send(new net.minecraft.network.protocol.game.ServerboundContainerClosePacket(openedMenu));
+            if (mc.gui.screen() instanceof CraftingScreen) {
+                mc.gui.setScreen(null);
+            }
+        }
+        openedMenu = -1;
     }
 
     /** How many the inventory has (planks of any wood count as planks). */
