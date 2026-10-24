@@ -571,66 +571,73 @@ public class Mover {
                 here.add(pos);
             }
         }
-        List<BlockPos> doable = here;
-
+        // Inside the area a fixed plan, like mowing a lawn: 9 spots 6 blocks apart (3 rows of 3), done row by row,
+        // back and forth, starting at the corner nearest the player. At each spot everything in reach is placed
+        // (also what only becomes placeable there, like tilling after the dirt), then on to the next spot in the
+        // plan that has something placeable; past the end it starts over (a chain grown back, items that arrived)
         double r = reach - 0.25;
         double eyeHeight = player.getEyeHeight();
-        List<BlockPos> near = sorted.subList(0, Math.min(NEARBY_FOR_SPOT, sorted.size()));
-        java.util.Set<BlockPos> doableSet = new java.util.HashSet<>(doable);
-
-        // Inside the square: the northern-most placeable row band first, along it in the sweep direction
-        int northRow = Integer.MAX_VALUE;
+        int y = here.isEmpty() ? AutoBuild.INSTANCE.layers.getLayer() : here.getFirst().getY();
+        if (!area.equals(planArea)) {
+            planArea = area;
+            plan = lawnPlan(area, from, y);
+            planIndex = 0;
+        }
+        for (int step = 0; step < plan.size(); step++) {
+            int i = (planIndex + step) % plan.size();
+            BlockPos spot = plan.get(i).atY(y);
+            Vec3 eye = hoverPoint(mc, spot).add(0, eyeHeight, 0);
+            BlockPos nearest = null;
+            double nearestDistance = Double.MAX_VALUE;
+            for (BlockPos pos : here) {
+                double d = eye.distanceToSqr(Vec3.atCenterOf(pos));
+                if (d <= r * r && d < nearestDistance) {
+                    nearestDistance = d;
+                    nearest = pos;
+                }
+            }
+            if (nearest != null) {
+                if (i != planIndex) {
+                    PrinterAddon.debug("Next spot in area {}: {} of {}", areaName(area), i + 1, plan.size());
+                }
+                planIndex = i;
+                spotFor = nearest;
+                return spot;
+            }
+        }
+        // Nothing placeable in reach of any spot (blocks near the area's edge): straight to the nearest one
+        BlockPos nearest = null;
         for (BlockPos pos : here) {
-            northRow = Math.min(northRow, pos.getZ());
+            if (nearest == null || from.distanceToSqr(Vec3.atCenterOf(pos)) < from.distanceToSqr(Vec3.atCenterOf(nearest))) {
+                nearest = pos;
+            }
         }
-        int bandEnd = northRow + 3;
+        spotFor = nearest;
+        return nearest;
+    }
 
-        BlockPos best = null;
-        double bestScore = -Double.MAX_VALUE;
-        int candidates = 0;
-        BlockPos bestCandidate = null;
-        for (BlockPos candidate : here) {
-            if (candidate.getZ() > bandEnd) {
-                continue;
-            }
-            if (++candidates > CANDIDATES_TO_CHECK) {
-                break;
-            }
-            // Right above it, or a few blocks to a side (over the unfinished part a chain grows into, so the
-            // placeable front moves through the whole reach instead of out of it after a block or two)
-            for (int[] shift : HOVER_SHIFTS) {
-                BlockPos spot = candidate.offset(shift[0], 0, shift[1]);
-                Vec3 eye = hoverPoint(mc, spot).add(0, eyeHeight, 0);
-                if (eye.distanceToSqr(Vec3.atCenterOf(candidate)) > r * r) {
-                    continue;
-                }
-                // What can be placed from there: now, plus what becomes placeable there once the block it hangs on
-                // (the hopper a hopper points into) is placed. The rest of the unfinished blocks count a little
-                List<BlockPos> inReach = new ArrayList<>();
-                for (BlockPos pos : near) {
-                    if (eye.distanceToSqr(Vec3.atCenterOf(pos)) <= r * r) {
-                        inReach.add(pos);
-                    }
-                }
-                int placeable = chainClosure(mc, schematic, inReach, doableSet);
-                double score = 2 * placeable + 0.5 * inReach.size() - 0.25 * from.distanceTo(eye);
-                // Back and forth: keep going the same way and only turn when nothing is left ahead
-                if ((eye.x - from.x) * sweep < -r) {
-                    score -= BEHIND_PENALTY;
-                }
-                if (score > bestScore) {
-                    bestScore = score;
-                    best = spot;
-                    bestCandidate = candidate;
-                }
+    @Nullable
+    private Long planArea;
+    private List<BlockPos> plan = List.of();
+    private int planIndex;
+
+    /** The spots of an area (y 0, set later), row by row back and forth from the corner nearest to the player. */
+    private static List<BlockPos> lawnPlan(long key, Vec3 from, int y) {
+        int minX = ((int) key) * 16;
+        int minZ = ((int) (key >> 32)) * 16;
+        int[] offsets = {2, 8, 14};
+        boolean westFirst = from.x < minX + 8;
+        boolean northFirst = from.z < minZ + 8;
+        List<BlockPos> spots = new ArrayList<>();
+        for (int row = 0; row < 3; row++) {
+            int z = minZ + offsets[northFirst ? row : 2 - row];
+            for (int col = 0; col < 3; col++) {
+                boolean east = westFirst == (row % 2 == 0);
+                int x = minX + offsets[east ? col : 2 - col];
+                spots.add(new BlockPos(x, y, z));
             }
         }
-        spotFor = bestCandidate;
-        if (best != null && (Vec3.atCenterOf(best).x - from.x) * sweep < -r) {
-            sweep = -sweep;
-            PrinterAddon.debug("Nothing left ahead in this area's rows: turning {}", sweep > 0 ? "east" : "west");
-        }
-        return best;
+        return spots;
     }
 
     /**
@@ -1025,6 +1032,7 @@ public class Mover {
         if (distance < 0.2 && flyIndex >= flyPath.size() - 1) {
             player.setDeltaMovement(Vec3.ZERO);
             state = State.IDLE;
+            logArrival(mc, player);
             return;
         }
 
@@ -1059,6 +1067,28 @@ public class Mover {
             motion = new Vec3(motion.x, Math.max(motion.y, 0.3), motion.z);
         }
         player.setDeltaMovement(motion);
+    }
+
+    private void logArrival(Minecraft mc, LocalPlayer player) {
+        if (moveStartTick < 0 || !BuildLog.isOpen()) {
+            moveStartTick = -1;
+            return;
+        }
+        WorldSchematic schematic = SchematicHelper.world();
+        int placeable = 0;
+        if (schematic != null) {
+            double reach = reach(player);
+            Vec3 eye = player.getEyePosition();
+            for (BlockPos pos : work) {
+                if (eye.distanceToSqr(Vec3.atCenterOf(pos)) <= (reach - 0.25) * (reach - 0.25) && canDoNow(mc, schematic, pos)) {
+                    placeable++;
+                }
+            }
+        }
+        BuildLog.line("MOVE", String.format("arrived at %s after %.1f s, %.1f blocks from %s; %d placeable in reach",
+                player.blockPosition().toShortString(), (tick - moveStartTick) / 20.0,
+                Math.sqrt(player.position().distanceToSqr(moveFrom)), BlockPos.containing(moveFrom).toShortString(), placeable));
+        moveStartTick = -1;
     }
 
     /** Turns flying on (sending the fly command once if needed). Returns false while waiting for it. */
