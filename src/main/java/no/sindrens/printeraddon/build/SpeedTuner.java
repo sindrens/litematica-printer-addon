@@ -68,7 +68,8 @@ public class SpeedTuner {
 
     /** The interval to use now (the starting one until it's tuned). */
     public int interval() {
-        int start = Configs.Speed.printerInterval();
+        // Start at the player's own Litematica Printer interval
+        int start = Math.max(1, PrinterBridge.userInterval());
         if (!Configs.Speed.AUTO_SPEED.getBooleanValue()) {
             return start;
         }
@@ -185,7 +186,7 @@ public class SpeedTuner {
         calmUntil = tick + CALM_AFTER_MISTAKE;
         // Never this fast again on this layer
         fastestSafe = Math.max(fastestSafe, interval() + 1);
-        int slower = Math.min(Configs.Speed.printerInterval(), interval() + 2);
+        int slower = Math.min(Math.max(Configs.Speed.printerInterval(), PrinterBridge.userInterval()), interval() + 2);
         if (slower != interval) {
             interval = slower;
             Chat.warn("Speed: printer interval " + interval + " (" + why + "; it won't go below " + fastestSafe + " again on this layer)");

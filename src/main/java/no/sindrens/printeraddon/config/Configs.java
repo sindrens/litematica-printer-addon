@@ -33,8 +33,8 @@ public class Configs implements IConfigHandler {
                 "How fast everything runs. Safe / Normal / Fast, or Custom to use the values in the Speed tab.",
                 "Speed preset");
         public static final ConfigBoolean APPLY_SPEED_TO_PRINTER = new ConfigBoolean("applySpeedToPrinter", true,
-                "During auto build, set Litematica Printer's settings for reliable building: interval from the speed preset (12),\n"
-                        + "range to your reach (4.5 in survival), rotate and interact blocks on. Your own values come back when it stops.",
+                "During auto build, set Litematica Printer's own settings: the interval (starting at yours, then the automatic\n"
+                        + "speed), rotate and interact blocks on. The range stays yours. Your own values come back when it stops.",
                 "Set printer settings");
         public static final ConfigBoolean SHOW_HUD = new ConfigBoolean("showHud", true,
                 "During auto build, show a small box at the top left: layer, blocks left, time to go, speed, what's missing.",
@@ -119,7 +119,7 @@ public class Configs implements IConfigHandler {
         public static final ConfigInteger STUCK_REPORT_SECONDS = new ConfigInteger("stuckReportSeconds", 30, 5, 600,
                 "If the layer hasn't changed for this long, list in chat what is left and why.",
                 "Report stuck layer after (seconds)");
-        public static final ConfigOptionList QUICK_PLACE = new ConfigOptionList("quickPlace", QuickPlaceMode.WHEN_PRINTER_CANT,
+        public static final ConfigOptionList QUICK_PLACE = new ConfigOptionList("quickPlace", QuickPlaceMode.OFF,
                 "Blocks the add-on places itself with one click (one per printer interval), working out which way to look and\n"
                         + "which side to click so they come out exactly as in the schematic.\n"
                         + "Only what the printer can't place (default): e.g. the first row of hoppers with nothing in front of them.\n"
@@ -141,6 +141,11 @@ public class Configs implements IConfigHandler {
                         + "right after tilling. Farmland without a crop and without water dries back to dirt.",
                 "Plant right after tilling");
 
+        public static final ConfigBoolean ADDON_PLACES = new ConfigBoolean("addonPlacesBlocks", false,
+                "Let the add-on place what Litematica Printer can't: water and lava with buckets, rails (with temporary\n"
+                        + "rails for the right shape) and minecarts. Off: the printer places everything and the add-on only moves,\n"
+                        + "breaks wrong blocks, gets the items and sets the printer's settings.",
+                "Add-on places blocks itself");
         public static final ConfigBoolean USE_AIR_PLACE = new ConfigBoolean("useAirPlace", false,
                 "When every missing block within reach floats (nothing next to it to place it against), turn on the\n"
                         + "printer's 'printInAir' for exactly one block, then off again. Off by default: placing against air is what\n"
@@ -148,7 +153,7 @@ public class Configs implements IConfigHandler {
                 "Use printer's air place");
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                AUTO_LAYER, QUICK_PLACE, LAYER_CHECK_INTERVAL, STUCK_REPORT_SECONDS, SKIP_STUCK_SECONDS, EXTRA_BLOCKS_BLOCK_LAYER,
+                AUTO_LAYER, ADDON_PLACES, QUICK_PLACE, LAYER_CHECK_INTERVAL, STUCK_REPORT_SECONDS, SKIP_STUCK_SECONDS, EXTRA_BLOCKS_BLOCK_LAYER,
                 PLANT_WITH_TILLING,
                 USE_AIR_PLACE);
     }
@@ -170,7 +175,7 @@ public class Configs implements IConfigHandler {
         public static final ConfigString FLY_COMMAND = new ConfigString("flyCommand", "fly",
                 "Command (without the slash) sent once if flying is needed but not allowed yet. Empty: never send one.",
                 "Fly command");
-        public static final ConfigBoolean KEEP_MOVING = new ConfigBoolean("keepMoving", true,
+        public static final ConfigBoolean KEEP_MOVING = new ConfigBoolean("keepMoving", false,
                 "Flying: when only a few blocks are left to place where you are, already fly on to the next spot (the printer\n"
                         + "places the last ones on the way) instead of stopping until everything around is done.",
                 "Keep moving");

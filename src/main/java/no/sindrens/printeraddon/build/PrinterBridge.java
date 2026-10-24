@@ -59,6 +59,11 @@ public final class PrinterBridge {
     private static Saved saved;
 
     /** Remembers the player's printer settings so {@link #restoreSettings()} can put them back. */
+    /** The player's own printer interval (from before auto build changed it): where the automatic speed starts. */
+    public static int userInterval() {
+        return saved != null ? saved.interval() : Configs.PRINTING_INTERVAL.getIntegerValue();
+    }
+
     public static void saveSettings() {
         saved = new Saved(Configs.PRINTING_INTERVAL.getIntegerValue(), Configs.PRINTING_RANGE.getDoubleValue(),
                 Configs.ROTATE.getBooleanValue(), Configs.INTERACT_BLOCKS.getBooleanValue());
@@ -86,10 +91,6 @@ public final class PrinterBridge {
         int interval = AutoBuild.INSTANCE.speed.interval();
         if (Configs.PRINTING_INTERVAL.getIntegerValue() != interval) {
             Configs.PRINTING_INTERVAL.setIntegerValue(interval);
-        }
-        double range = Math.min(5.0, player.blockInteractionRange());
-        if (Math.abs(Configs.PRINTING_RANGE.getDoubleValue() - range) > 0.001) {
-            Configs.PRINTING_RANGE.setDoubleValue(range);
         }
         if (!Configs.ROTATE.getBooleanValue()) {
             Configs.ROTATE.setBooleanValue(true);

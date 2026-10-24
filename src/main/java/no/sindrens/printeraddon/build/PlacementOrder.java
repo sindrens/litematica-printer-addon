@@ -60,12 +60,13 @@ public final class PlacementOrder {
             return "needs the block it stands on or hangs from first";
         }
 
-        // Rails wait until they'll get the right shape (see RailHelper)
-        RailHelper.Plan plan = AutoBuild.INSTANCE.rails.plan(level, schematic, pos, target);
-        if (plan.waitForRails()) {
+        // Rails wait until they'll get the right shape (see RailHelper; only when the add-on places rails itself)
+        RailHelper.Plan plan = no.sindrens.printeraddon.config.Configs.Layers.ADDON_PLACES.getBooleanValue()
+                ? AutoBuild.INSTANCE.rails.plan(level, schematic, pos, target) : null;
+        if (plan != null && plan.waitForRails()) {
             return "rail curve waits for the rails it joins";
         }
-        if (!plan.temps().isEmpty()) {
+        if (plan != null && !plan.temps().isEmpty()) {
             return "rail waits for temporary rails at " + plan.temps().stream().map(BlockPos::toShortString).toList();
         }
         // Nothing goes where a temporary rail stands

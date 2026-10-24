@@ -675,13 +675,15 @@ public class AutoBuild {
 
         airPlace.tick(mc, breaker.isBusy());
 
-        if (!breaker.isBusy() && !airPlace.isActive() && !rails.isBusy() && (fluids.isBusy() || PrinterBridge.isIdle())) {
+        // The add-on's own placing (buckets, rails, minecarts) only when switched on; normally the printer places all
+        boolean addonPlaces = Configs.Layers.ADDON_PLACES.getBooleanValue();
+        if (addonPlaces && !breaker.isBusy() && !airPlace.isActive() && !rails.isBusy() && (fluids.isBusy() || PrinterBridge.isIdle())) {
             fluids.tick(mc);
         }
-        if (!breaker.isBusy() && !airPlace.isActive() && !fluids.isBusy() && (rails.isBusy() || PrinterBridge.isIdle())) {
+        if (addonPlaces && !breaker.isBusy() && !airPlace.isActive() && !fluids.isBusy() && (rails.isBusy() || PrinterBridge.isIdle())) {
             rails.tick(mc);
         }
-        if (!breaker.isBusy() && !airPlace.isActive() && !fluids.isBusy() && !rails.isBusy()
+        if (addonPlaces && !breaker.isBusy() && !airPlace.isActive() && !fluids.isBusy() && !rails.isBusy()
                 && (entities.isBusy() || PrinterBridge.isIdle())) {
             entities.tick(mc);
         }

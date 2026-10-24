@@ -112,6 +112,7 @@ public class Mover {
 
     public void reset() {
         state = State.IDLE;
+        sweepLayer = Integer.MIN_VALUE;
         errand = null;
         work.clear();
         reserved.clear();
@@ -324,7 +325,7 @@ public class Mover {
                 return true;
             }
             if (result == BlockCheck.Result.BUCKET) {
-                return Fluids.canDo(mc, schematic, p, schematic.getBlockState(p));
+                return Configs.Layers.ADDON_PLACES.getBooleanValue() && Fluids.canDo(mc, schematic, p, schematic.getBlockState(p));
             }
             if (result != BlockCheck.Result.MISSING && result != BlockCheck.Result.PRINTER_FIXES) {
                 return false;
@@ -340,7 +341,8 @@ public class Mover {
                 }
             }
             // Rails the printer won't place but the add-on can (they get the right shape)
-            if (result == BlockCheck.Result.MISSING && AutoBuild.INSTANCE.rails.selfPlaceFacing(mc.level, schematic, p, schematic.getBlockState(p)) != null) {
+            if (result == BlockCheck.Result.MISSING && Configs.Layers.ADDON_PLACES.getBooleanValue()
+                    && AutoBuild.INSTANCE.rails.selfPlaceFacing(mc.level, schematic, p, schematic.getBlockState(p)) != null) {
                 return true;
             }
             // Blocks with nothing to place them against: the add-on clicks the right face itself
@@ -380,6 +382,8 @@ public class Mover {
     /** How many of the nearest unfinished blocks are asked whether they can be placed now, when choosing a spot. */
     private static final int DOABLE_CHECKS = 600;
     /** Where to hover relative to a placeable block: above it, or 3 blocks to a side. */
+    /** The layer the current sweep is for (a new one starts at its corner). */
+    private int sweepLayer = Integer.MIN_VALUE;
     private static final int[][] HOVER_SHIFTS = {{0, 0}, {3, 0}, {-3, 0}, {0, 3}, {0, -3}};
     /** The placeable block the chosen hover spot is for (the spot itself may be a block to the side of it). */
     @Nullable
@@ -444,6 +448,26 @@ public class Mover {
         BlockPos best = null;
         double bestScore = -Double.MAX_VALUE;
         int candidates = 0;
+        // A new layer starts at its north-west corner and sweeps east, not wherever the player happens to be
+        int layer = AutoBuild.INSTANCE.layers.getLayer();
+        if (layer != sweepLayer) {
+            sweepLayer = layer;
+            sweep = 1;
+            int west = Integer.MAX_VALUE;
+            BlockPos corner = null;
+            for (BlockPos pos : doable) {
+                if (pos.getZ() <= bandEnd && pos.getX() < west) {
+                    west = pos.getX();
+                    corner = pos;
+                }
+            }
+            if (corner != null) {
+                PrinterAddon.debug("New layer: starting at the north-west corner, {}", corner.toShortString());
+                spotFor = corner;
+                return corner;
+            }
+        }
+
         BlockPos bestCandidate = null;
         for (BlockPos candidate : doable) {
             if (candidate.getZ() > bandEnd) {
@@ -850,8 +874,8 @@ public class Mover {
     }
 
     private static double reach(LocalPlayer player) {
-        double printerRange = me.aleksilassila.litematica.printer.config.Configs.PRINTING_RANGE.getDoubleValue();
-        return Math.min(printerRange, player.blockInteractionRange());
+        // The printer's own range (the player's setting): that's where it places
+        return me.aleksilassila.litematica.printer.config.Configs.PRINTING_RANGE.getDoubleValue();
     }
 
     private static BlockPos nearest(LocalPlayer player, List<BlockPos> positions) {

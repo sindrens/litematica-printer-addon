@@ -11,8 +11,10 @@ Litematica Printer does the placing; the add-on builds whole schematics in survi
 - **Gets the items:** takes them from the chests, barrels and shulker boxes you linked (no other chest is ever
   opened), then buys the rest in `/shop` (ShopGUI+), and crafts rails, powered rails and pumpkin seeds from
   iron and gold blocks, logs, redstone and pumpkins.
-- **Builds like a player:** every block is clicked against a real block next to it (no clicks into the air,
-  which anticheats block), hopper chains are built from the hopper they end in, and your camera stays free.
+- **Litematica Printer places everything.** The add-on moves, breaks wrong blocks, gets the items and sets the
+  printer's own settings (it starts at your interval, keeps your range). It doesn't place blocks itself; the
+  optional "Add-on places blocks itself" (buckets, rails, minecarts) and quick place are off by default.
+  Hopper chains are built from the hopper they end in, and your camera stays free.
 - Keeps the layer's blocks on the hotbar, eats when hungry, waits when the server lags, picks up again after
   logging out, and shows the build on screen (layer, blocks left, time to go, speed, what's missing).
 - Safety: stops when you take damage or another player comes close, and never uses a nearly broken tool.

@@ -137,6 +137,9 @@ public class FarmTest implements FabricClientGameTest {
                 Configs.Generic.DEBUG_LOG.setBooleanValue(true);
                 Configs.Generic.DETAILED_CHAT.setBooleanValue(true);
                 Configs.Generic.STATUS_FILE.setBooleanValue(true);
+                // The player's own Litematica Printer settings: range 5, interval 12
+                me.aleksilassila.litematica.printer.config.Configs.PRINTING_RANGE.setDoubleValue(5.0);
+                me.aleksilassila.litematica.printer.config.Configs.PRINTING_INTERVAL.setIntegerValue(12);
                 String keepMoving = System.getenv("PRINTER_ADDON_KEEP_MOVING");
                 if (keepMoving != null) {
                     Configs.Movement.KEEP_MOVING.setBooleanValue(!keepMoving.equals("0"));
