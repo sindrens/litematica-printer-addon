@@ -113,7 +113,15 @@ public class InventoryCleaner {
             return false;
         }
         Map<Item, Integer> layerNeeds = AutoBuild.INSTANCE.layers.layerNeeds();
-        Item missing = layerNeeds.keySet().stream().filter(item -> inventory.countItem(item) == 0).findFirst().orElse(null);
+        // Only when the layer is really stuck on it, and it can be got (the shop sells it or a chest is linked)
+        if (!AutoBuild.INSTANCE.layers.stalledFor(20 * 30)) {
+            return false;
+        }
+        boolean chests = !ChestLinks.list(mc).isEmpty() && no.sindrens.printeraddon.config.Configs.Shop.FETCH_FROM_CHESTS.getBooleanValue();
+        Item missing = layerNeeds.keySet().stream().filter(item -> inventory.countItem(item) == 0)
+                .filter(item -> chests || (no.sindrens.printeraddon.config.Configs.Shop.AUTO_BUY.getBooleanValue()
+                        && no.sindrens.printeraddon.shop.ShopBuyer.sells(mc, item)))
+                .findFirst().orElse(null);
         if (missing == null) {
             return false;
         }
