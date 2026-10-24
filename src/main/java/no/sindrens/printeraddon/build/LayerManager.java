@@ -96,6 +96,9 @@ public class LayerManager {
             Chat.info("Every layer is already finished.");
             return false;
         }
+        if (layer > minY) {
+            Chat.info("Layers Y " + minY + " to " + (layer - 1) + " are already done: going on at Y " + layer + ".");
+        }
 
         layerTop = topFor(mc.level, schematic, areas, layer);
 

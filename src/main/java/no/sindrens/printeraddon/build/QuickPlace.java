@@ -79,7 +79,7 @@ public class QuickPlace {
         if (mc.player == null || mc.level == null) {
             return null;
         }
-        long now = mc.level.getGameTime();
+        long now = AutoBuild.clientTicks;
         if (now - cacheTick > 5 || now < cacheTick) {
             CACHE.clear();
             cacheTick = now;

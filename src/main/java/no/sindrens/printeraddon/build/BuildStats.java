@@ -34,11 +34,26 @@ public class BuildStats {
         totalTicks.clear();
         layerStartMillis = buildStartMillis = System.currentTimeMillis();
         layerPlaced = totalPlaced = 0;
+        recent.clear();
         layerTickCount = totalTickCount = 0;
+    }
+
+    /** Times of recent placements, for the blocks-per-minute on screen. */
+    private final java.util.ArrayDeque<Long> recent = new java.util.ArrayDeque<>();
+
+    /** Blocks placed per real minute over the last minute (or since the start, if shorter). */
+    public double recentRate() {
+        long now = System.currentTimeMillis();
+        while (!recent.isEmpty() && now - recent.peekFirst() > 60_000) {
+            recent.pollFirst();
+        }
+        long span = Math.min(60_000, Math.max(5_000, now - buildStartMillis));
+        return recent.size() * 60_000.0 / span;
     }
 
     /** The printer queued a placement. */
     public void placed() {
+        recent.addLast(System.currentTimeMillis());
         layerPlaced++;
         totalPlaced++;
     }

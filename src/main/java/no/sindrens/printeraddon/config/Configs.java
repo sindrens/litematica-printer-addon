@@ -36,6 +36,13 @@ public class Configs implements IConfigHandler {
                 "During auto build, set Litematica Printer's settings for reliable building: interval from the speed preset (12),\n"
                         + "range to your reach (4.5 in survival), rotate and interact blocks on. Your own values come back when it stops.",
                 "Set printer settings");
+        public static final ConfigBoolean SHOW_HUD = new ConfigBoolean("showHud", true,
+                "During auto build, show a small box at the top left: layer, blocks left, time to go, speed, what's missing.",
+                "Show build status on screen");
+        public static final ConfigBoolean RESUME_AFTER_REJOIN = new ConfigBoolean("resumeAfterRejoin", true,
+                "If auto build was running when you logged out or lost the connection, start it again 10 seconds after\n"
+                        + "rejoining the same server with the same schematic. It goes on from the first unfinished layer.",
+                "Resume after rejoining");
         public static final ConfigBoolean CHAT_MESSAGES = new ConfigBoolean("chatMessages", true,
                 "Show status messages in chat (layer done, stuck, scan results...).",
                 "Chat messages");
@@ -57,7 +64,7 @@ public class Configs implements IConfigHandler {
                 "Debug log");
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                ADDON_ENABLED, AUTO_BUILD, SPEED_PRESET, APPLY_SPEED_TO_PRINTER, TURN_VIEW_FOR_PRINTER, CHAT_MESSAGES, DETAILED_CHAT, STATUS_FILE, DEBUG_LOG);
+                ADDON_ENABLED, AUTO_BUILD, SHOW_HUD, RESUME_AFTER_REJOIN, SPEED_PRESET, APPLY_SPEED_TO_PRINTER, TURN_VIEW_FOR_PRINTER, CHAT_MESSAGES, DETAILED_CHAT, STATUS_FILE, DEBUG_LOG);
     }
 
     public static class Breaking {

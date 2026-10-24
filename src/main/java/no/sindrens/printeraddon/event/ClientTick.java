@@ -9,10 +9,13 @@ import no.sindrens.printeraddon.shop.ShopScanner;
 public class ClientTick implements IClientTickHandler {
     @Override
     public void onClientTick(Minecraft mc) {
+        AutoBuild.clientTicks++;
         if (mc.player == null || mc.level == null) {
             ShopScanner.INSTANCE.cancel(null);
             ShopBuyer.INSTANCE.cancel(null);
-            AutoBuild.INSTANCE.stopEverything(mc);
+            // Lost the connection or logged out: stop, but keep the resume file
+            AutoBuild.INSTANCE.stopForDisconnect(mc);
+            no.sindrens.printeraddon.build.Resume.onDisconnect();
             return;
         }
 
@@ -27,6 +30,12 @@ public class ClientTick implements IClientTickHandler {
             return;
         }
 
+        no.sindrens.printeraddon.build.CostEstimate.tick(mc);
+        if (AutoBuild.INSTANCE.isRunning()) {
+            no.sindrens.printeraddon.build.Resume.whileRunning(mc);
+        } else {
+            no.sindrens.printeraddon.build.Resume.whileIdle(mc);
+        }
         AutoBuild.INSTANCE.tick(mc);
     }
 }

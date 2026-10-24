@@ -41,6 +41,8 @@ public class KeyCallbacks {
                     build.stopEverything(mc);
                 }
                 no.sindrens.printeraddon.util.Chat.info("Printer Addon " + (on ? "\u00a7aon" : "\u00a7coff\u00a7r (the printer works on its own)") + ".");
+            } else if (key == Hotkeys.SHOW_COST.getKeybind()) {
+                no.sindrens.printeraddon.build.CostEstimate.show(mc);
             } else if (key == Hotkeys.TOGGLE_AUTO_BUILD.getKeybind()) {
                 build.toggle(mc);
             } else if (key == Hotkeys.FIX_WRONG_NOW.getKeybind()) {

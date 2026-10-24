@@ -22,6 +22,7 @@ public class AddonInit implements IInitializationHandler {
         InputEventHandler.getKeybindManager().registerKeybindProvider(new InputHandler());
         TickHandler.getInstance().registerClientTickHandler(new ClientTick());
         KeyCallbacks.init();
+        no.sindrens.printeraddon.gui.BuildHud.register();
 
         PrinterAddon.LOGGER.info("{} initialized", PrinterAddon.MOD_NAME);
     }

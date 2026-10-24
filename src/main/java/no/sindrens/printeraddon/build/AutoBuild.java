@@ -29,13 +29,15 @@ public class AutoBuild {
     private final InventoryCleaner cleaner = new InventoryCleaner();
     public final BuildStats stats = new BuildStats();
     public final SpeedTuner speed = new SpeedTuner();
+    /** Client ticks since the game started (game time can stand still, e.g. with /tick freeze). */
+    public static long clientTicks;
     /** Spots the printer just placed (game tick of the attempt): not given to it again until the server has answered. */
     private final java.util.Map<net.minecraft.core.BlockPos, Long> recentlyTried = new java.util.HashMap<>();
 
     public void printerTried(net.minecraft.core.BlockPos pos) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.level != null) {
-            recentlyTried.put(pos.immutable(), mc.level.getGameTime());
+            recentlyTried.put(pos.immutable(), clientTicks);
             speed.attempted();
         }
     }
@@ -115,7 +117,7 @@ public class AutoBuild {
         java.util.List<net.minecraft.core.BlockPos> forPrinter = new java.util.ArrayList<>(all.size());
         // A spot tried a moment ago may just not have the server's answer yet: trying it again places a second
         // block next to it (the wrong blocks seen at fast intervals)
-        long now = mc.level.getGameTime();
+        long now = AutoBuild.clientTicks;
         recentlyTried.values().removeIf(at -> now - at > 20);
         for (net.minecraft.core.BlockPos pos : all) {
             if (recentlyTried.containsKey(pos)) {
@@ -131,6 +133,15 @@ public class AutoBuild {
             nextBlock = ordered.getFirst();
         }
         return ordered;
+    }
+
+    /** Blocks still to place in the whole schematic (as last counted). */
+    public int blocksLeft() {
+        int left = 0;
+        for (int count : neededWhole.values()) {
+            left += count;
+        }
+        return left;
     }
 
     /** What auto build is doing right now, in words. */
@@ -376,6 +387,9 @@ public class AutoBuild {
         mover.stop(mc);
         airPlace.stop();
 
+        if (wasRunning && !resumeLater) {
+            Resume.forget();
+        }
         if (wasRunning) {
             PrinterBridge.setPrinting(printerWasOn);
             PrinterBridge.setAirPlace(airPlaceWasOn);
@@ -392,6 +406,18 @@ public class AutoBuild {
         manualTask = ManualTask.NONE;
         stop(mc, null);
     }
+
+    /** Disconnected: stop without forgetting what was being built (see Resume). */
+    public void stopForDisconnect(Minecraft mc) {
+        if (!running && manualTask == ManualTask.NONE) {
+            return;
+        }
+        resumeLater = true;
+        stopEverything(mc);
+        resumeLater = false;
+    }
+
+    private boolean resumeLater;
 
     public void toggle(Minecraft mc) {
         if (running) {

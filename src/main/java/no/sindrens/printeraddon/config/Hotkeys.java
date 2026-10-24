@@ -23,6 +23,9 @@ public class Hotkeys {
             "Go one layer up.", "Next layer");
     public static final ConfigHotkey PREVIOUS_LAYER = new ConfigHotkey("previousLayer", "J,PAGE_DOWN",
             "Go one layer down.", "Previous layer");
+    public static final ConfigHotkey SHOW_COST = new ConfigHotkey("showCost", "J,P",
+            "Show what the loaded schematic still needs and what it costs in the shop (also shown when a schematic is loaded).",
+            "Show cost of the build");
     public static final ConfigHotkey SCAN_SHOP = new ConfigHotkey("scanShop", "J,S",
             "Scan /shop: reads every category and page and saves where each item is and what it costs.",
             "Scan shop");
@@ -33,5 +36,5 @@ public class Hotkeys {
 
     public static final ImmutableList<ConfigHotkey> HOTKEY_LIST = ImmutableList.of(
             OPEN_SETTINGS, TOGGLE_ADDON, TOGGLE_AUTO_BUILD, FIX_WRONG_NOW, CLEAR_EXTRA_BLOCKS, NEXT_LAYER, PREVIOUS_LAYER,
-            SCAN_SHOP, STOP_ALL);
+            SHOW_COST, SCAN_SHOP, STOP_ALL);
 }
