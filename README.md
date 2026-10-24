@@ -21,9 +21,11 @@ Litematica Printer does the placing; the add-on builds whole schematics in survi
   you linked (no other chest is ever opened), then buys the rest in `/shop` (ShopGUI+), whole stacks per purchase
   with the buy screen's "Purchase stacks" (a stack at a time if that screen isn't understood, tried again after 10
   minutes), and crafts rails, powered rails, a diamond hoe, pumpkin seeds and redstone dust from iron and gold
-  blocks, diamonds, logs, redstone blocks and pumpkins (seeds: always pumpkins bought and crafted; dust: bought as
-  dust when that's cheaper, from redstone blocks when the shop can't deliver dust or "Buy blocks and craft them back"
-  is on). Uses `/craft` for recipes that need a crafting table and `/feed` when hungry (both can be switched off,
+  blocks, diamonds, logs, redstone blocks and pumpkins (seeds: always pumpkins bought and crafted; dust: from
+  redstone blocks when dust is only sold there, or "Buy blocks and craft them back" is on). The shop scan reads the
+  buy and the sell price of every item (also when the price is on the line under "Buy price" / "Sell price", and in
+  small caps); what can only be sold is never bought, and an item that opens no buy screen is marked as such in the
+  scan by itself. Older scans are read again from their saved text, no new scan needed. Uses `/craft` for recipes that need a crafting table and `/feed` when hungry (both can be switched off,
   and fall back by themselves when you don't have the permission). A purchase that fails is tried again a few
   minutes later instead of never.
 - **Shares the inventory between the layer's items:** each gets a part of the free slots in proportion to how many

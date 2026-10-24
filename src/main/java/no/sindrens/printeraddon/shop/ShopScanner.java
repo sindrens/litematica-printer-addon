@@ -259,7 +259,7 @@ public class ShopScanner {
             String parentName = cut < 0 ? "Main menu" : category.name.substring(0, cut);
             for (ShopScanResult.Category item : siblings) {
                 String itemName = item.name.substring(item.name.lastIndexOf(" > ") + (item.name.contains(" > ") ? 3 : 0));
-                addLocation(parentName, item.itemId, itemName, new ArrayList<>(parent), 0, item.path.get(item.path.size() - 1), item.count, null);
+                addLocation(parentName, item.itemId, itemName, new ArrayList<>(parent), 0, item.path.get(item.path.size() - 1), item.count, null, null);
             }
             result.notes.add("'" + category.name + "' opened a buy screen ('" + snapshot.title() + "'): its menu holds "
                     + siblings.size() + " items without a price in their text.");
@@ -297,11 +297,11 @@ public class ShopScanner {
                 continue;
             }
             Double price = item.buyPrice();
+            // Sell-only items are kept too (with their sell price), marked as not buyable
+            addLocation(category.name, item.itemId(), item.name(), category.path, index, item.slot(), item.count(), price, item.sellPrice());
             if (price == null && item.sellPrice() != null) {
-                // Sell only
                 continue;
             }
-            addLocation(category.name, item.itemId(), item.name(), category.path, index, item.slot(), item.count(), price);
 
             // Probe the cheapest item; one without a known price only if nothing has a price
             double probePrice = price == null ? Double.MAX_VALUE : price;
@@ -331,7 +331,7 @@ public class ShopScanner {
     }
 
     private void addLocation(String categoryName, String itemId, String name, List<Integer> path, int page, int slot, int count,
-                             @Nullable Double price) {
+                             @Nullable Double price, @Nullable Double sellPrice) {
         if (itemId == null) {
             return;
         }
@@ -343,6 +343,7 @@ public class ShopScanner {
         location.name = name;
         location.amountShown = count;
         location.buyPrice = price;
+        location.sellPrice = sellPrice;
         result.items.computeIfAbsent(itemId, k -> new ArrayList<>()).add(location);
     }
 

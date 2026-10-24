@@ -66,24 +66,16 @@ public final class ShopText {
         return Nav.NONE;
     }
 
+    /** The buy price in an item's lore, or null if it can't be bought (only sold, or no price). */
     @Nullable
     public static Double buyPrice(List<String> lore) {
-        Double price = priceAfter(lore, "buy", null);
-        if (price == null) {
-            price = priceAfter(lore, "cost", "sell");
-        }
-        if (price == null) {
-            price = priceAfter(lore, "price", "sell");
-        }
-        if (price == null) {
-            price = priceAfter(lore, "$", "sell");
-        }
-        return price;
+        return prices(lore)[0];
     }
 
+    /** The sell price in an item's lore, or null if it can't be sold there. */
     @Nullable
     public static Double sellPrice(List<String> lore) {
-        return priceAfter(lore, "sell", null);
+        return prices(lore)[1];
     }
 
     /**
@@ -91,11 +83,12 @@ public final class ShopText {
      * clicked while scanning (clicking it opens the buy screen, or buys it).
      */
     public static boolean isShopItem(List<String> lore) {
-        if (buyPrice(lore) != null || sellPrice(lore) != null) {
+        Double[] prices = prices(lore);
+        if (prices[0] != null || prices[1] != null) {
             return true;
         }
         for (String line : lore) {
-            String l = lower(line);
+            String l = plain(line);
             if (l.contains("buy") || l.contains("sell") || l.contains("price") || l.contains("cost")
                     || l.contains("purchase") || l.contains("$")) {
                 return true;
@@ -105,26 +98,99 @@ public final class ShopText {
     }
 
     /**
-     * First number on the first lore line that mentions {@code keyword} (e.g. "Buy price: $5"), skipping lines
-     * with {@code skipWord}. A number after a $ wins over others ("Buy 1x for $5" is 5).
+     * {buy, sell} from an item's lore. Prices are on the line with "buy" / "sell" ("Buy price: $5"), or on the lines
+     * under such a heading until the next empty line (" ʙᴜʏ ᴘʀɪᴄᴇ" then " ▬ $750.00 $712.50": the last $ is what it
+     * costs now). Words are matched in plain letters (servers write them in small caps: "ѕᴇʟʟ ᴘʀɪᴄᴇ" is "sell
+     * price"; matched as typed, a sell-only item's "$4.16" once counted as its buy price). A price under no heading
+     * counts as the buy price only when the lore has neither.
      */
-    @Nullable
-    private static Double priceAfter(List<String> lore, String keyword, @Nullable String skipWord) {
-        for (String line : lore) {
-            String l = lower(line);
-            int at = l.indexOf(keyword);
-            // "Left click to buy" has no number: keep looking
-            if (at < 0 || (skipWord != null && l.contains(skipWord))) {
+    static Double[] prices(List<String> lore) {
+        Double buy = null;
+        Double sell = null;
+        Double other = null;
+        String section = null;
+        for (String raw : lore) {
+            String l = plain(raw);
+            if (l.isBlank()) {
+                section = null;
                 continue;
             }
-            String rest = l.substring(at + keyword.length());
-            int dollar = rest.indexOf('$');
-            Double value = parseNumber(dollar >= 0 ? rest.substring(dollar + 1) : rest);
-            if (value != null) {
-                return value;
+            int b = firstOf(l, "buy", "cost", "purchase");
+            int s = l.indexOf("sell");
+            if (b >= 0 && s >= 0) {
+                // Both on one line ("Buy $5 / Sell $2"): each number belongs to the word before it
+                Double first = numberIn(l.substring(Math.min(b, s), Math.max(b, s)));
+                Double second = numberIn(l.substring(Math.max(b, s)));
+                if (b < s) {
+                    buy = buy == null ? first : buy;
+                    sell = sell == null ? second : sell;
+                } else {
+                    sell = sell == null ? first : sell;
+                    buy = buy == null ? second : buy;
+                }
+                section = null;
+                continue;
+            }
+            if (b >= 0 || s >= 0) {
+                String kind = b >= 0 ? "buy" : "sell";
+                Double value = numberIn(l.substring(b >= 0 ? b : s));
+                if (value != null) {
+                    if (kind.equals("buy") && buy == null) {
+                        buy = value;
+                    } else if (kind.equals("sell") && sell == null) {
+                        sell = value;
+                    }
+                    section = null;
+                } else {
+                    // A heading ("Buy price"): the prices under it are its own. A line about clicking isn't one
+                    section = isHeading(l) ? kind : section;
+                }
+                continue;
+            }
+            if (!l.contains("$")) {
+                continue;
+            }
+            Double value = numberIn(l);
+            if (value == null) {
+                continue;
+            }
+            if ("buy".equals(section) && buy == null) {
+                buy = value;
+            } else if ("sell".equals(section) && sell == null) {
+                sell = value;
+            } else if (section == null && other == null) {
+                other = value;
             }
         }
-        return null;
+        if (buy == null && sell == null) {
+            buy = other;
+        }
+        return new Double[]{buy, sell};
+    }
+
+    /** "buy price", "sell price:", "buy", "price (sell)": only the word and "price" (no "click to buy"). */
+    private static boolean isHeading(String plain) {
+        String rest = plain.replace("buy", "").replace("sell", "").replace("cost", "").replace("purchase", "")
+                .replace("price", "").replace("each", "").replaceAll("[\\s:()\\-▬•|»>*]", "");
+        return rest.isEmpty();
+    }
+
+    private static int firstOf(String text, String... words) {
+        int best = -1;
+        for (String word : words) {
+            int at = text.indexOf(word);
+            if (at >= 0 && (best < 0 || at < best)) {
+                best = at;
+            }
+        }
+        return best;
+    }
+
+    /** The number after the last $ on the line ("$750.00 $712.50" is 712.50 now), else the first number. */
+    @Nullable
+    private static Double numberIn(String text) {
+        int dollar = text.lastIndexOf('$');
+        return parseNumber(dollar >= 0 ? text.substring(dollar + 1) : text);
     }
 
     /** Parses the first number in the text, with k / m / b suffixes ("118k" = 118000). */

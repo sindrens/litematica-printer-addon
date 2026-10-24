@@ -83,6 +83,48 @@ public class ShopScanResult {
         public String name;
         public int amountShown;
         public Double buyPrice;
+        public Double sellPrice;
+        /** Clicking it didn't open a buy screen (it can only be sold): never bought from here. */
+        public Boolean cantBuy;
+
+        /** Can be bought here: not marked as only sold (no buy price but a sell price), and buying it worked. */
+        public boolean buyable() {
+            return !Boolean.TRUE.equals(cantBuy) && !(buyPrice == null && sellPrice != null);
+        }
+    }
+
+    /**
+     * The prices read again from the saved lore of every item (older scans read the sell price of sell-only items,
+     * written in small caps, as their buy price: redstone dust, diamonds). Returns true if anything changed.
+     */
+    public boolean rereadPrices() {
+        Map<String, Button> buttons = new java.util.HashMap<>();
+        for (Category category : categories) {
+            for (Page page : category.pages) {
+                for (Button button : page.items) {
+                    buttons.put(category.path + "|" + page.index + "|" + button.slot, button);
+                }
+            }
+        }
+        boolean changed = false;
+        for (List<Location> locations : items.values()) {
+            for (Location location : locations) {
+                Button button = buttons.get(location.path + "|" + location.page + "|" + location.slot);
+                if (button == null || button.lore == null) {
+                    continue;
+                }
+                Double buy = ShopText.buyPrice(button.lore);
+                Double sell = ShopText.sellPrice(button.lore);
+                if (!java.util.Objects.equals(buy, location.buyPrice) || !java.util.Objects.equals(sell, location.sellPrice)) {
+                    location.buyPrice = buy;
+                    location.sellPrice = sell;
+                    button.buyPrice = buy;
+                    button.sellPrice = sell;
+                    changed = true;
+                }
+            }
+        }
+        return changed;
     }
 
     public static Menu menuOf(ScreenSnapshot snapshot) {

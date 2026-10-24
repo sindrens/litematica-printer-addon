@@ -133,14 +133,53 @@ public class ShopBuyer {
         try {
             long modified = Files.getLastModifiedTime(file).toMillis();
             if (cachedScan == null || modified != cachedScanTime) {
-                cachedScan = new Gson().fromJson(Files.readString(file, StandardCharsets.UTF_8), ShopScanResult.class);
+                cachedScan = load(file);
                 cachedScanTime = modified;
             }
         } catch (IOException | RuntimeException e) {
             return false;
         }
         List<ShopScanResult.Location> locations = cachedScan.items.get(BuiltInRegistries.ITEM.getKey(item).toString());
-        return locations != null && locations.stream().anyMatch(l -> l.buyPrice != null);
+        return locations != null && locations.stream().anyMatch(l -> l.buyPrice != null && l.buyable());
+    }
+
+    /**
+     * A shop scan from its file, with the prices read again from the saved lore (a scan from before 0.9.10 took the
+     * sell price of sell-only items as their buy price); saved back when that changed something.
+     */
+    public static ShopScanResult load(Path file) throws IOException {
+        ShopScanResult scan = new Gson().fromJson(Files.readString(file, StandardCharsets.UTF_8), ShopScanResult.class);
+        if (scan.rereadPrices()) {
+            save(file, scan);
+            no.sindrens.printeraddon.build.BuildLog.line("SHOP", "prices in the shop scan read again from its lore (sell-only items aren't bought any more)");
+        }
+        return scan;
+    }
+
+    private static void save(Path file, ShopScanResult scan) {
+        try {
+            Files.writeString(file, new com.google.gson.GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create().toJson(scan),
+                    StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            PrinterAddon.LOGGER.warn("Couldn't save the shop scan {}", file, e);
+        }
+    }
+
+    /**
+     * Clicking the item in the shop didn't open a buy screen, twice: it can't be bought there (only sold). Written
+     * into the scan, so it isn't tried again; what it's made of is bought instead (dust from redstone blocks).
+     */
+    private void markCantBuy(Minecraft mc, Order order) {
+        order.location.cantBuy = true;
+        Path file = scanFile(mc);
+        if (file == null || shop == null) {
+            return;
+        }
+        save(file, shop);
+        cachedScan = null;
+        no.sindrens.printeraddon.build.BuildLog.line("SHOP", order.location.name + " in " + order.location.category
+                + " opens no buy screen: marked as not buyable in the shop scan");
+        Chat.warn(order.location.name + " can't be bought in the shop (clicking it does nothing): not tried again.");
     }
 
     /** The lowest buy price of one of the item in this server's shop scan, or null if it's not sold. */
@@ -185,7 +224,7 @@ public class ShopBuyer {
             return false;
         }
         try {
-            shop = new Gson().fromJson(Files.readString(file, StandardCharsets.UTF_8), ShopScanResult.class);
+            shop = load(file);
         } catch (IOException | RuntimeException e) {
             PrinterAddon.LOGGER.error("Couldn't read the shop scan {}", file, e);
             Chat.warn("Couldn't read the shop scan (" + e.getMessage() + "). Scan the shop again (J+S).");
@@ -290,6 +329,10 @@ public class ShopBuyer {
                     if (next == Phase.STACKS) {
                         // The stacks button did nothing: not the end of this purchase, a stack at a time instead
                         stacksFailed(mc, order, "nothing happened when purchase stacks was clicked");
+                    } else if (next == Phase.AMOUNT && order.retries >= 1) {
+                        // Clicking the item opened nothing, twice: it can't be bought here
+                        markCantBuy(mc, order);
+                        fail(order, "clicking it opens no buy screen (it can only be sold there)");
                     } else if (order.retries++ < 1) {
                         // A slow server (or a lost click): once more from the start before giving up on it
                         logScreen("no change after a click, buying " + order.location.name + " (trying again from the start)", ScreenSnapshot.capture(mc));
@@ -634,6 +677,9 @@ public class ShopBuyer {
         }
         ShopScanResult.Location best = null;
         for (ShopScanResult.Location location : locations) {
+            if (!location.buyable()) {
+                continue;
+            }
             if (best == null || (location.buyPrice != null && (best.buyPrice == null || location.buyPrice < best.buyPrice))) {
                 best = location;
             }

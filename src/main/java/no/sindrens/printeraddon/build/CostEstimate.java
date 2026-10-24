@@ -158,7 +158,7 @@ public final class CostEstimate {
             return null;
         }
         try {
-            return new Gson().fromJson(Files.readString(file, StandardCharsets.UTF_8), ShopScanResult.class);
+            return ShopBuyer.load(file);
         } catch (Exception e) {
             PrinterAddon.LOGGER.warn("Couldn't read {}", file, e);
             return null;
@@ -225,7 +225,7 @@ public final class CostEstimate {
         }
         Double best = null;
         for (ShopScanResult.Location location : locations) {
-            if (location.buyPrice != null && location.amountShown > 0) {
+            if (location.buyPrice != null && location.buyable() && location.amountShown > 0) {
                 double each = location.buyPrice / Math.max(1, location.amountShown);
                 if (best == null || each < best) {
                     best = each;
