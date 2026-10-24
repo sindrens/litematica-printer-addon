@@ -332,6 +332,10 @@ public class Mover {
     /** Score taken off spots behind the sweep direction (more than any spot ahead can have). */
     private static final double BEHIND_PENALTY = 10000;
 
+    /** How many of the nearest unfinished blocks are asked whether they can be placed now, when choosing a spot. */
+    private static final int DOABLE_CHECKS = 600;
+    private long lastNothingDoableReport = -100000;
+
     /** How many unfinished blocks near the player are looked at when choosing where to fly. */
     private static final int NEARBY_FOR_SPOT = 400;
 
@@ -344,43 +348,65 @@ public class Mover {
         Vec3 from = player.position();
         List<BlockPos> sorted = new ArrayList<>(work);
         sorted.sort(java.util.Comparator.comparingDouble(p -> from.distanceToSqr(Vec3.atCenterOf(p))));
-        List<BlockPos> near = sorted.subList(0, Math.min(NEARBY_FOR_SPOT, sorted.size()));
-        // Sweep the layer from north to south: only spots near the most northern unfinished row, so no holes are left
+
+        // What can be placed right now, nearest first. Chains (hoppers pointing into each other, rails...) can only
+        // be built from where they end, so the sweep starts where blocks are placeable, not just at the north edge:
+        // otherwise it creeps along a part where nothing can be placed yet
+        List<BlockPos> doable = new ArrayList<>();
+        int checked = 0;
+        for (BlockPos pos : sorted) {
+            if (checked++ >= DOABLE_CHECKS) {
+                break;
+            }
+            if (canDoNow(mc, schematic, pos)) {
+                doable.add(pos);
+            }
+        }
+        if (doable.isEmpty()) {
+            if (tick - lastNothingDoableReport > 20 * 30 && !sorted.isEmpty()) {
+                lastNothingDoableReport = tick;
+                PrinterAddon.debug("Nothing in the {} nearest unfinished blocks can be placed now; nearest: {}",
+                        Math.min(DOABLE_CHECKS, sorted.size()), Diagnose.explain(mc, schematic, sorted.getFirst()));
+            }
+            // Further away than the checked ones: head that way so they get checked; otherwise wait here
+            return sorted.size() > DOABLE_CHECKS ? sorted.get(DOABLE_CHECKS) : null;
+        }
+
+        // Sweep from the most northern placeable row, so no holes are left behind
         int northRow = Integer.MAX_VALUE;
-        for (BlockPos pos : work) {
+        for (BlockPos pos : doable) {
             northRow = Math.min(northRow, pos.getZ());
         }
         int bandEnd = northRow + 3;
         double r = reach - 0.25;
         double eyeHeight = player.getEyeHeight();
+        List<BlockPos> near = sorted.subList(0, Math.min(NEARBY_FOR_SPOT, sorted.size()));
 
         BlockPos best = null;
         double bestScore = -Double.MAX_VALUE;
         int candidates = 0;
-        List<BlockPos> band = new ArrayList<>();
-        for (BlockPos pos : sorted) {
-            if (pos.getZ() <= bandEnd) {
-                band.add(pos);
-            }
-        }
-        if (band.isEmpty()) {
-            band = sorted;
-        }
-        near = band.subList(0, Math.min(NEARBY_FOR_SPOT, band.size()));
-        for (int i = 0; i < near.size() && i < CANDIDATES_TO_CHECK * 2 && candidates < CANDIDATES_TO_CHECK; i++) {
-            BlockPos candidate = near.get(i);
-            if (candidate.getZ() > bandEnd || !canDoNow(mc, schematic, candidate)) {
+        for (BlockPos candidate : doable) {
+            if (candidate.getZ() > bandEnd) {
                 continue;
             }
-            candidates++;
+            if (++candidates > CANDIDATES_TO_CHECK) {
+                break;
+            }
             Vec3 eye = hoverPoint(mc, candidate).add(0, eyeHeight, 0);
-            int inReach = 0;
-            for (BlockPos pos : near) {
+            // Placeable blocks in reach count most; the rest a little (they often become placeable while there)
+            int placeable = 0;
+            for (BlockPos pos : doable) {
                 if (eye.distanceToSqr(Vec3.atCenterOf(pos)) <= r * r) {
-                    inReach++;
+                    placeable++;
                 }
             }
-            double score = inReach - 0.25 * from.distanceTo(eye);
+            int unfinished = 0;
+            for (BlockPos pos : near) {
+                if (eye.distanceToSqr(Vec3.atCenterOf(pos)) <= r * r) {
+                    unfinished++;
+                }
+            }
+            double score = 2 * placeable + 0.5 * unfinished - 0.25 * from.distanceTo(eye);
             // Snake along the band: keep going the same way (east or west) and only turn back when nothing is
             // left ahead, instead of zig-zagging to the best spot anywhere in the band
             if ((eye.x - from.x) * sweep < -r) {
@@ -395,12 +421,20 @@ public class Mover {
             sweep = -sweep;
             PrinterAddon.debug("Nothing left ahead in these rows: turning {}", sweep > 0 ? "east" : "west");
         }
-        return best != null ? best : (sorted.isEmpty() ? null : sorted.getFirst());
+        return best;
     }
+
+
+    /**
+     * Fewest ticks to wait for the printer to pick something in reach before moving on: longer than the 20 ticks a
+     * block that was just tried is held back while the server answers.
+     */
+    private static final int MIN_IDLE_TICKS = 25;
 
     /** Waits while the printer and breaker work; skips the blocks in reach if nothing happens for a while. */
     private void waitForWork(LocalPlayer player, List<BlockPos> inReach) {
-        boolean busy = AutoBuild.INSTANCE.breaker.isBusy() || !PrinterBridge.isIdle();
+        // Paused printer (slot change settling, lag, eating...) isn't "nothing happening"
+        boolean busy = AutoBuild.INSTANCE.breaker.isBusy() || !PrinterBridge.isIdle() || AutoBuild.INSTANCE.shouldPausePrinter();
         if (busy || inReach.size() < lastInReach) {
             workTicksWithoutProgress = 0;
         } else {
@@ -412,8 +446,19 @@ public class Mover {
             player.setDeltaMovement(Vec3.ZERO);
         }
 
-        if (workTicksWithoutProgress > Configs.Movement.WORK_WAIT_SECONDS.getIntegerValue() * 20) {
-            PrinterAddon.debug("Nothing happened to {} blocks in reach, skipping them for now", inReach.size());
+        // The printer looks for a block every interval: when it found nothing for two of its turns (and nothing
+        // else is busy), the blocks here aren't going to happen now. Move on instead of hovering.
+        int idleLimit = Math.max(MIN_IDLE_TICKS, 2 * AutoBuild.INSTANCE.speed.interval() + 4);
+        int limit = Math.min(idleLimit, Configs.Movement.WORK_WAIT_SECONDS.getIntegerValue() * 20);
+        if (workTicksWithoutProgress > limit) {
+            PrinterAddon.debug("Nothing happened to {} blocks in reach for {} ticks, skipping them for now", inReach.size(), limit);
+            WorldSchematic schematic = SchematicHelper.world();
+            if (schematic != null) {
+                Minecraft mc = Minecraft.getInstance();
+                for (BlockPos pos : inReach.subList(0, Math.min(3, inReach.size()))) {
+                    PrinterAddon.debug("  why: {}", Diagnose.explain(mc, schematic, pos));
+                }
+            }
             for (BlockPos pos : inReach) {
                 skipped.put(pos, tick + SKIP_TICKS);
             }

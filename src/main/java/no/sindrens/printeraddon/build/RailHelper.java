@@ -438,13 +438,23 @@ public class RailHelper {
             temps.remove(at);
             return;
         }
+        float oldYaw = player.getYRot();
+        float oldPitch = player.getXRot();
         if (facing != null) {
+            if (!PrinterBridge.releaseLook()) {
+                return;
+            }
             player.setYRot(facing.toYRot());
-            player.yRotO = facing.toYRot();
+            player.connection.send(new net.minecraft.network.protocol.game.ServerboundMovePlayerPacket.Rot(facing.toYRot(), oldPitch,
+                    player.onGround(), player.horizontalCollision));
         }
         BlockPos below = at.below();
         mc.gameMode.useItemOn(player, InteractionHand.MAIN_HAND,
                 new BlockHitResult(Vec3.atCenterOf(below).add(0, 0.5, 0), Direction.UP, below, false));
+        if (facing != null) {
+            // Only for the click: the camera stays the player's
+            QuickPlace.restoreView(player, oldYaw, oldPitch);
+        }
         BlockPos rail = temps.get(at);
         PrinterAddon.debug("Temporary rail at {} so the rail at {} gets the right shape", at.toShortString(),
                 rail == null ? "?" : rail.toShortString());

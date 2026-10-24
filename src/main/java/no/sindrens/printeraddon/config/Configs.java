@@ -52,9 +52,10 @@ public class Configs implements IConfigHandler {
                 "Chat messages");
 
         public static final ConfigBoolean TURN_VIEW_FOR_PRINTER = new ConfigBoolean("turnViewForPrinter", true,
-                "Turn your view the way the printer places, so observers, pistons, stairs etc. always face the right way.\n"
-                        + "Without it the server sometimes uses the direction you're looking instead (Minecraft 26.2).",
-                "Turn view for printer");
+                "Give the server the printer's direction when it clicks, so observers, pistons, hoppers, stairs etc. face\n"
+                        + "the right way (in 26.2 the server takes the direction you look in). Your camera stays free: it only\n"
+                        + "faces that way during the click itself, within one tick.",
+                "Right direction for printer");
         public static final ConfigBoolean DETAILED_CHAT = new ConfigBoolean("detailedChat", false,
                 "Say in chat every step auto build takes: walking, flying, breaking, air placing...",
                 "Detailed chat");
@@ -97,7 +98,7 @@ public class Configs implements IConfigHandler {
                 "Stop breaking a spot after this many tries if it keeps coming back wrong, and say so in chat.",
                 "Max breaks per spot");
         public static final ConfigBoolean LOOK_AT_BLOCKS = new ConfigBoolean("lookAtBlocks", false,
-                "Turn the camera towards the block being broken. Needed on servers with strict anticheat.",
+                "Tell the server you look at the block being broken (your camera stays free). For servers with strict anticheat.",
                 "Look at blocks when breaking");
         public static final ConfigBoolean SKIP_CONTAINERS = new ConfigBoolean("skipContainers", true,
                 "Never break chests, barrels, hoppers, shulker boxes, furnaces etc., even if they are wrong.",

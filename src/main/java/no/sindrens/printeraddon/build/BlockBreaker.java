@@ -4,7 +4,6 @@ import fi.dy.masa.litematica.data.DataManager;
 import fi.dy.masa.litematica.world.WorldSchematic;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.commands.arguments.EntityAnchorArgument;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.InteractionHand;
@@ -277,9 +276,14 @@ public class BlockBreaker {
         return Direction.getApproximateNearest(d.x, d.y, d.z);
     }
 
+    /** Tells the server the player looks at the block (some servers check it); the camera stays where it is. */
     private static void lookAt(LocalPlayer player, BlockPos pos) {
         if (Configs.Breaking.LOOK_AT_BLOCKS.getBooleanValue()) {
-            player.lookAt(EntityAnchorArgument.Anchor.EYES, Vec3.atCenterOf(pos));
+            Vec3 d = Vec3.atCenterOf(pos).subtract(player.getEyePosition());
+            float yaw = (float) (Math.toDegrees(Math.atan2(d.z, d.x)) - 90.0);
+            float pitch = (float) -Math.toDegrees(Math.atan2(d.y, Math.sqrt(d.x * d.x + d.z * d.z)));
+            player.connection.send(new net.minecraft.network.protocol.game.ServerboundMovePlayerPacket.Rot(yaw, pitch,
+                    player.onGround(), player.horizontalCollision));
         }
     }
 

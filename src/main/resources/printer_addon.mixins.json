@@ -8,7 +8,7 @@
     "GuideMixin",
     "GuideExecuteMixin",
     "MinecraftMixin",
-    "PrepareActionMixin",
+    "InteractActionMixin",
     "PropertySpecificGuesserGuideMixin",
     "PrinterMixin"
   ],
