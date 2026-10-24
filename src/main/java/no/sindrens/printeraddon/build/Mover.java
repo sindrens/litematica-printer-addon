@@ -924,35 +924,17 @@ public class Mover {
      * learned on the server: a block in reach that the printer kept trying without result brings it down to just
      * inside that block's distance; long runs without such misses let it grow back towards the printer's range.
      */
-    private static double learnedReach = -1;
-    private static int placedSinceMiss;
+    /** The planning reach last written to the build log. */
+    private static double loggedReach = -1;
 
     private double planReach(double reach) {
         double max = reach - 0.25;
-        if (learnedReach < 0 || learnedReach > max) {
-            learnedReach = max - 0.25;
+        double learned = ReachStats.reach(max);
+        if (Math.abs(learned - loggedReach) >= 0.2) {
+            BuildLog.line("LEARN", String.format("planning with reach %.2f (most %.2f): %s", learned, max, ReachStats.explain(max)));
+            loggedReach = learned;
         }
-        int placed = AutoBuild.INSTANCE.stats.totalPlaced();
-        if (placed - placedSinceMiss >= 150 && learnedReach < max) {
-            placedSinceMiss = placed;
-            learnedReach = Math.min(max, learnedReach + 0.1);
-        }
-        return learnedReach;
-    }
-
-    /** A block at this distance from the eye couldn't be done: plan closer from now on. */
-    public static void missedAt(double distance) {
-        // Only misses near the edge of the reach say something about the reach (a close block that isn't placed
-        // has another reason)
-        if (learnedReach > 0 && distance < learnedReach + 0.3 && distance > learnedReach - 0.8) {
-            double before = learnedReach;
-            learnedReach = Math.max(2.5, Math.min(learnedReach, distance - 0.25));
-            placedSinceMiss = AutoBuild.INSTANCE.stats.totalPlaced();
-            if (learnedReach < before - 0.01) {
-                BuildLog.line("LEARN", String.format("a block %.2f away wasn't placed: planning with reach %.2f now (was %.2f)",
-                        distance, learnedReach, before));
-            }
-        }
+        return learned;
     }
 
     /**
@@ -1165,10 +1147,8 @@ public class Mover {
                     PrinterAddon.debug("  why: {}", Diagnose.explain(mc, schematic, pos));
                 }
             }
-            Vec3 eye = player.getEyePosition();
             for (BlockPos pos : inReach) {
                 skip(pos, "nothing happened to it in reach");
-                missedAt(Math.sqrt(eye.distanceToSqr(Vec3.atCenterOf(pos))));
             }
             work.removeAll(inReach);
             workVersion++;

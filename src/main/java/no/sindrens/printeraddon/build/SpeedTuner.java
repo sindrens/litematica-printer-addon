@@ -44,7 +44,7 @@ public class SpeedTuner {
 
     /** One click of the printer, waiting for its result: how the spot and its neighbours looked when it clicked. */
     private record Pick(BlockPos pos, @Nullable Item item, int interval, long tick, @Nullable Item before,
-                        BlockState[] states) {
+                        BlockState[] states, double distance) {
     }
 
     private enum Outcome { RIGHT, WRONG, LANDED_NEXT, NOTHING, PENDING }
@@ -216,7 +216,9 @@ public class SpeedTuner {
         for (Direction d : Direction.values()) {
             states[1 + d.ordinal()] = mc.level.getBlockState(pos.relative(d));
         }
-        picks.add(new Pick(pos.immutable(), item, interval(), AutoBuild.clientTicks, before, states));
+        // How far from the eye, for learning how far clicks still work here (see ReachStats)
+        double distance = mc.player == null ? -1 : Math.sqrt(mc.player.getEyePosition().distanceToSqr(net.minecraft.world.phys.Vec3.atCenterOf(pos)));
+        picks.add(new Pick(pos.immutable(), item, interval(), AutoBuild.clientTicks, before, states, distance));
     }
 
     /**
@@ -307,6 +309,7 @@ public class SpeedTuner {
         String how = name(pick.item()) + " at interval " + pick.interval() + (switched ? ", right after switching from " + name(pick.before()) : "")
                 + ", " + age + " ticks after the click";
         s.recent[s.recentCount++ % RECENT] = outcome != Outcome.NOTHING;
+        ReachStats.clicked(pick.distance(), outcome != Outcome.NOTHING);
         switch (outcome) {
             case RIGHT -> {
                 good++;
