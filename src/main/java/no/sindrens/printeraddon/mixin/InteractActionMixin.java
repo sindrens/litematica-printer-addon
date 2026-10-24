@@ -35,9 +35,23 @@ public class InteractActionMixin {
     @Unique
     private static float printer_addon$pitchO;
 
+    @Unique
+    private static boolean printer_addon$sneaked;
+
     @Inject(method = "interact", at = @At("HEAD"))
     private void printer_addon$faceForClick(Minecraft client, LocalPlayer player, InteractionHand hand, BlockHitResult hit, CallbackInfo ci) {
         printer_addon$turned = false;
+        printer_addon$sneaked = false;
+        // Placing against a hopper, chest, door...: the server must see the player sneaking at the moment of the
+        // click, or it opens the hopper instead (and nothing is placed). The printer doesn't always sneak, and its
+        // sneak can be overtaken by the click. Sneak right before the click, in the same packet order a player would
+        if (Configs.enabled() && client.level != null
+                && no.sindrens.printeraddon.build.QuickPlace.isInteractive(client.level.getBlockState(hit.getBlockPos()))) {
+            net.minecraft.world.entity.player.Input keys = player.input.keyPresses;
+            player.connection.send(new net.minecraft.network.protocol.game.ServerboundPlayerInputPacket(new net.minecraft.world.entity.player.Input(
+                    keys.forward(), keys.backward(), keys.left(), keys.right(), keys.jump(), true, keys.sprint())));
+            printer_addon$sneaked = true;
+        }
         if (!Configs.enabled() || !Configs.Generic.TURN_VIEW_FOR_PRINTER.getBooleanValue()
                 || !me.aleksilassila.litematica.printer.config.Configs.ROTATE.getBooleanValue()) {
             return;
@@ -62,6 +76,11 @@ public class InteractActionMixin {
 
     @Inject(method = "interact", at = @At("RETURN"))
     private void printer_addon$lookBack(Minecraft client, LocalPlayer player, InteractionHand hand, BlockHitResult hit, CallbackInfo ci) {
+        if (printer_addon$sneaked) {
+            // Back to what the keyboard says
+            printer_addon$sneaked = false;
+            player.connection.send(new net.minecraft.network.protocol.game.ServerboundPlayerInputPacket(player.input.keyPresses));
+        }
         if (!printer_addon$turned) {
             return;
         }

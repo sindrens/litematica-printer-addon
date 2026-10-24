@@ -160,8 +160,13 @@ public class QuickPlace {
         if (state.isAir() || state.canBeReplaced() || !state.getFluidState().isEmpty()) {
             return false;
         }
+        return !isInteractive(state);
+    }
+
+    /** A block that does something when clicked (opens a menu, switches): placing against it needs sneaking. */
+    public static boolean isInteractive(BlockState state) {
         net.minecraft.world.level.block.Block block = state.getBlock();
-        return !(block instanceof net.minecraft.world.level.block.BaseEntityBlock
+        return (block instanceof net.minecraft.world.level.block.BaseEntityBlock
                 || block instanceof net.minecraft.world.level.block.DoorBlock
                 || block instanceof net.minecraft.world.level.block.TrapDoorBlock
                 || block instanceof net.minecraft.world.level.block.FenceGateBlock
