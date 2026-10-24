@@ -321,7 +321,7 @@ public class AutoBuild {
                 shoppingList.forEach((item, count) -> sb.append(count).append(' ')
                         .append(new net.minecraft.world.item.ItemStack(item).getHoverName().getString()).append(", "));
                 stop(mc, "missing " + sb.substring(0, sb.length() - 2)
-                        + ". Put them in your inventory and turn auto build on again (J+B)");
+                        + ". Put them in your inventory and start auto build again (J+B menu)");
                 return true;
             }
             return false;
@@ -472,6 +472,7 @@ public class AutoBuild {
             PrinterBridge.restoreSettings();
             if (reason != null) {
                 Chat.warn("Auto build stopped: " + reason + ".");
+                Chat.announce("Auto build stopped", reason, false);
             } else {
                 Chat.info("Auto build §cstopped§r.");
             }
@@ -521,10 +522,26 @@ public class AutoBuild {
      */
     private static void closeUnwantedMenu(Minecraft mc) {
         if (mc.gui.screen() instanceof AbstractContainerScreen<?> && !(mc.gui.screen() instanceof InventoryScreen)) {
-            PrinterAddon.debug("Closing {} that opened during auto build", mc.gui.screen().getTitle().getString());
+            String title = mc.gui.screen().getTitle().getString();
+            PrinterAddon.debug("Closing {} that opened during auto build", title);
             mc.player.closeContainer();
+            // Again and again: the server doesn't see the printer sneaking when it clicks, so blocks that go against
+            // a container (hoppers into hoppers) never get placed. Say so instead of building nothing silently
+            long now = clientTicks;
+            unwantedMenus.addLast(now);
+            while (!unwantedMenus.isEmpty() && now - unwantedMenus.getFirst() > 20 * 60) {
+                unwantedMenus.removeFirst();
+            }
+            if (unwantedMenus.size() >= 5 && now - lastUnwantedMenuWarning > 20 * 120) {
+                lastUnwantedMenuWarning = now;
+                Chat.warn(unwantedMenus.size() + " times in a minute a menu (" + title + ") opened instead of a block being placed"
+                        + " against it: the server doesn't see the printer sneak (details in logs/latest.log with Debug log on).");
+            }
         }
     }
+
+    private static final java.util.ArrayDeque<Long> unwantedMenus = new java.util.ArrayDeque<>();
+    private static long lastUnwantedMenuWarning = -100000;
 
     public void tick(Minecraft mc) {
         // The settings screen (or a hotkey) can flip the switch too

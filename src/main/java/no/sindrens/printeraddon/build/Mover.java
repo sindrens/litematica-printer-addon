@@ -207,6 +207,33 @@ public class Mover {
             return;
         }
 
+        // All that's left here is right under the player, where the printer never places: step aside to it now
+        // instead of waiting and leaving it behind
+        if (!inReach.isEmpty() && PrinterBridge.isIdle() && !AutoBuild.INSTANCE.breaker.isBusy()
+                && inReach.stream().allMatch(p -> p.getX() == feet.getX() && p.getZ() == feet.getZ() && p.getY() < feet.getY())) {
+            BlockPos under = inReach.getFirst();
+            if (state != State.FLYING && state != State.WALKING) {
+                PrinterAddon.debug("Only {} under the player is left here: moving aside to place it", under.toShortString());
+                target = under;
+                plan(mc, player, under, mode, reach);
+            }
+            move(mc, player, mode);
+            return;
+        }
+
+        if (!inReach.isEmpty() || !PrinterBridge.isIdle()) {
+            lastWorkTick = tick;
+        }
+        // Just placed something: the next block of a chain only counts as placeable once the server has the last
+        // one. Stay for two printer turns instead of flying off after every block or two
+        if (inReach.isEmpty() && state == State.WORKING && !work.isEmpty()
+                && tick - lastWorkTick < 2L * AutoBuild.INSTANCE.speed.interval() + GRACE_EXTRA_TICKS) {
+            if (flying(player)) {
+                player.setDeltaMovement(Vec3.ZERO);
+            }
+            return;
+        }
+
         if (!inReach.isEmpty()) {
             if (state == State.WALKING || state == State.FLYING) {
                 halt(player);
@@ -334,6 +361,13 @@ public class Mover {
 
     /** How many of the nearest unfinished blocks are asked whether they can be placed now, when choosing a spot. */
     private static final int DOABLE_CHECKS = 600;
+    /** Where to hover relative to a placeable block: above it, or 3 blocks to a side. */
+    private static final int[][] HOVER_SHIFTS = {{0, 0}, {3, 0}, {-3, 0}, {0, 3}, {0, -3}};
+    /** The placeable block the chosen hover spot is for (the spot itself may be a block to the side of it). */
+    @Nullable
+    private BlockPos spotFor;
+    /** The last tick something in reach could be placed or the printer was busy. */
+    private long lastWorkTick;
     /** Past the nearest ones, stop looking once this many placeable blocks are found. */
     private static final int ENOUGH_DOABLE = 40;
     private long lastNothingDoableReport = -100000;
@@ -374,7 +408,7 @@ public class Mover {
             }
             return null;
         }
-        if (checked > DOABLE_CHECKS) {
+        if (checked > DOABLE_CHECKS && doable.getFirst().distToCenterSqr(from) > 64 * 64) {
             PrinterAddon.debug("Nothing placeable nearby: the nearest placeable block is {} ({} blocks away)",
                     doable.getFirst().toShortString(), (int) Math.sqrt(doable.getFirst().distToCenterSqr(from)));
         }
@@ -392,6 +426,7 @@ public class Mover {
         BlockPos best = null;
         double bestScore = -Double.MAX_VALUE;
         int candidates = 0;
+        BlockPos bestCandidate = null;
         for (BlockPos candidate : doable) {
             if (candidate.getZ() > bandEnd) {
                 continue;
@@ -399,31 +434,41 @@ public class Mover {
             if (++candidates > CANDIDATES_TO_CHECK) {
                 break;
             }
-            Vec3 eye = hoverPoint(mc, candidate).add(0, eyeHeight, 0);
-            // Placeable blocks in reach count most; the rest a little (they often become placeable while there)
-            int placeable = 0;
-            for (BlockPos pos : doable) {
-                if (eye.distanceToSqr(Vec3.atCenterOf(pos)) <= r * r) {
-                    placeable++;
+            // Right above it, or a few blocks to a side (over the unfinished part a chain grows into, so the
+            // placeable front moves through the whole reach instead of out of it after a block or two)
+            for (int[] shift : HOVER_SHIFTS) {
+                BlockPos spot = candidate.offset(shift[0], 0, shift[1]);
+                Vec3 eye = hoverPoint(mc, spot).add(0, eyeHeight, 0);
+                if (eye.distanceToSqr(Vec3.atCenterOf(candidate)) > r * r) {
+                    continue;
                 }
-            }
-            int unfinished = 0;
-            for (BlockPos pos : near) {
-                if (eye.distanceToSqr(Vec3.atCenterOf(pos)) <= r * r) {
-                    unfinished++;
+                // Placeable blocks in reach count most; the rest too (they become placeable while there)
+                int placeable = 0;
+                for (BlockPos pos : doable) {
+                    if (eye.distanceToSqr(Vec3.atCenterOf(pos)) <= r * r) {
+                        placeable++;
+                    }
                 }
-            }
-            double score = 2 * placeable + 0.5 * unfinished - 0.25 * from.distanceTo(eye);
-            // Snake along the band: keep going the same way (east or west) and only turn back when nothing is
-            // left ahead, instead of zig-zagging to the best spot anywhere in the band
-            if ((eye.x - from.x) * sweep < -r) {
-                score -= BEHIND_PENALTY;
-            }
-            if (score > bestScore) {
-                bestScore = score;
-                best = candidate;
+                int unfinished = 0;
+                for (BlockPos pos : near) {
+                    if (eye.distanceToSqr(Vec3.atCenterOf(pos)) <= r * r) {
+                        unfinished++;
+                    }
+                }
+                double score = 2 * placeable + unfinished - 0.25 * from.distanceTo(eye);
+                // Snake along the band: keep going the same way (east or west) and only turn back when nothing is
+                // left ahead, instead of zig-zagging to the best spot anywhere in the band
+                if ((eye.x - from.x) * sweep < -r) {
+                    score -= BEHIND_PENALTY;
+                }
+                if (score > bestScore) {
+                    bestScore = score;
+                    best = spot;
+                    bestCandidate = candidate;
+                }
             }
         }
+        spotFor = bestCandidate;
         if (best != null && (Vec3.atCenterOf(best).x - from.x) * sweep < -r) {
             sweep = -sweep;
             PrinterAddon.debug("Nothing left ahead in these rows: turning {}", sweep > 0 ? "east" : "west");
@@ -437,6 +482,8 @@ public class Mover {
      * block that was just tried is held back while the server answers.
      */
     private static final int MIN_IDLE_TICKS = 25;
+    /** Ticks on top of two printer turns to wait for the next block of a chain (a server round trip). */
+    private static final int GRACE_EXTRA_TICKS = 8;
 
     /** Waits while the printer and breaker work; skips the blocks in reach if nothing happens for a while. */
     private void waitForWork(LocalPlayer player, List<BlockPos> inReach) {
@@ -488,9 +535,11 @@ public class Mover {
         // Got there over and over and still can't do it from there: leave it for later instead of looping
         if (goalBlock.equals(lastGoal)) {
             if (++samePlans > 4) {
-                PrinterAddon.debug("Can't do {} from where it can stand, skipping it for now", goalBlock.toShortString());
-                skipped.put(goalBlock, tick + SKIP_TICKS);
-                work.remove(goalBlock);
+                // A hover spot to the side of the block it's for: skip that block
+                BlockPos block = !work.contains(goalBlock) && spotFor != null ? spotFor : goalBlock;
+                PrinterAddon.debug("Can't do {} from where it can stand, skipping it for now", block.toShortString());
+                skipped.put(block, tick + SKIP_TICKS);
+                work.remove(block);
                 state = State.IDLE;
                 samePlans = 0;
                 lastGoal = null;

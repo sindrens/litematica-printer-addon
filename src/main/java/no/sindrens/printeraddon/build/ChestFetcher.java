@@ -191,31 +191,12 @@ public class ChestFetcher {
         return true;
     }
 
-    /** Chests, barrels and shulker boxes in loaded chunks within the radius, not part of the schematic. */
+    /** The chests the player linked (see {@link ChestLinks}) that are loaded and still a container. */
     private static List<BlockPos> containersNearby(Minecraft mc) {
-        int radius = Configs.Shop.FETCH_RADIUS.getIntegerValue();
-        BlockPos center = mc.player.blockPosition();
-        List<SchematicHelper.Area> areas = SchematicHelper.areas();
         List<BlockPos> found = new ArrayList<>();
-        int chunks = Math.min(radius >> 4, 32) + 1;
-        ChunkPos middle = ChunkPos.containing(center);
-        for (int cx = middle.x() - chunks; cx <= middle.x() + chunks; cx++) {
-            for (int cz = middle.z() - chunks; cz <= middle.z() + chunks; cz++) {
-                LevelChunk chunk = mc.level.getChunkSource().getChunk(cx, cz, false);
-                if (chunk == null) {
-                    continue;
-                }
-                for (BlockEntity entity : chunk.getBlockEntities().values()) {
-                    if (!(entity instanceof ChestBlockEntity) && !(entity instanceof BarrelBlockEntity)
-                            && !(entity instanceof ShulkerBoxBlockEntity)) {
-                        continue;
-                    }
-                    BlockPos pos = entity.getBlockPos();
-                    if (SchematicHelper.isInAnyArea(areas, pos) || pos.distSqr(center) > (long) radius * radius) {
-                        continue;
-                    }
-                    found.add(pos.immutable());
-                }
+        for (BlockPos pos : ChestLinks.list(mc)) {
+            if (mc.level.isLoaded(pos) && mc.level.getBlockEntity(pos) instanceof net.minecraft.world.Container) {
+                found.add(pos);
             }
         }
         return found;

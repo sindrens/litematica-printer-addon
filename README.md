@@ -8,9 +8,11 @@ Litematica Printer does the placing; the add-on builds whole schematics in survi
 - **Flies** above the layer, along the rows, to where the most blocks can be placed at once.
 - **Automatic speed:** goes faster while every block comes out right (down to printer interval 2) and slows
   down at the first wrong one. Remembers the speed per server for the next build.
-- **Gets the items:** takes them from chests, barrels and shulker boxes nearby (up to 500 blocks, in loaded
-  chunks), then buys the rest in `/shop` (ShopGUI+), and crafts rails, powered rails and pumpkin seeds from
+- **Gets the items:** takes them from the chests, barrels and shulker boxes you linked (no other chest is ever
+  opened), then buys the rest in `/shop` (ShopGUI+), and crafts rails, powered rails and pumpkin seeds from
   iron and gold blocks, logs, redstone and pumpkins.
+- **Builds like a player:** every block is clicked against a real block next to it (no clicks into the air,
+  which anticheats block), hopper chains are built from the hopper they end in, and your camera stays free.
 - Keeps the layer's blocks on the hotbar, eats when hungry, waits when the server lags, picks up again after
   logging out, and shows the build on screen (layer, blocks left, time to go, speed, what's missing).
 - Safety: stops when you take damage or another player comes close, and never uses a nearly broken tool.
@@ -32,13 +34,14 @@ Put these in `.minecraft/mods` (or the Modrinth profile's `mods` folder), togeth
 
 1. Load and place a schematic in Litematica as usual. The add-on says in chat what it still needs and what
    that costs in the shop (scan the shop once with `J`+`S`).
-2. `J`+`B` starts auto build. It turns the printer on and builds from the bottom layer up. `J`+`B` again, or
-   `J`+`Q`, stops it.
+2. `J`+`B` opens the build menu: start or stop auto build, link the chest you're looking at (look at it first,
+   then press `J`+`B`), build report, cost, shop scan. Auto build turns the printer on and builds from the
+   bottom layer up. `J`+`Q` stops everything.
 3. `J`+`C` (or Mod Menu) opens the settings.
 
 | Keys | What |
 |---|---|
-| `J`+`B` | Start / stop auto build |
+| `J`+`B` | Build menu: start / stop, link chests, report, cost, shop scan |
 | `J`+`Q` | Stop everything (also in menus) |
 | `J`+`A` | Add-on on / off (off: Litematica Printer works as without it) |
 | `J`+`C` | Settings |

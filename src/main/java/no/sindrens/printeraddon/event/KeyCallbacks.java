@@ -27,6 +27,10 @@ public class KeyCallbacks {
                 GuiBase.openGui(new ConfigGui());
                 return true;
             }
+            if (key == Hotkeys.BUILD_MENU.getKeybind()) {
+                GuiBase.openGui(ConfigGui.buildMenu());
+                return true;
+            }
 
             if (mc.player == null) {
                 return false;

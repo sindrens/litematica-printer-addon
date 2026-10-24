@@ -46,6 +46,22 @@ public class Chat {
         send("§e" + message);
     }
 
+    /**
+     * Big text in the middle of the screen plus a sound, for things the player must notice even while looking
+     * around (build finished, auto build stopped by itself).
+     */
+    public static void announce(String title, String subtitle, boolean good) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null) {
+            return;
+        }
+        mc.gui.hud.setTimes(10, 70, 20);
+        mc.gui.hud.setSubtitle(Component.literal(subtitle));
+        mc.gui.hud.setTitle(Component.literal((good ? "§a" : "§e") + title));
+        mc.getSoundManager().play(net.minecraft.client.resources.sounds.SimpleSoundInstance.forUI(
+                good ? net.minecraft.sounds.SoundEvents.PLAYER_LEVELUP : net.minecraft.sounds.SoundEvents.NOTE_BLOCK_BASS.value(), 1.0f));
+    }
+
     public static void actionBar(String message) {
         Minecraft mc = Minecraft.getInstance();
         mc.gui.hud.setOverlayMessage(Component.literal(message), false);

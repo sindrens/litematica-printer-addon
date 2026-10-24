@@ -75,7 +75,7 @@ public final class Resume {
             String[] saved = Files.readString(file(), StandardCharsets.UTF_8).split("\n");
             if (saved[0].trim().equals(key(mc))) {
                 joinedTicks = WAIT_AFTER_JOIN + GIVE_UP_AFTER + 1;
-                Chat.info("Picking auto build up again where it stopped (J+B to stop).");
+                Chat.info("Picking auto build up again where it stopped (J+Q to stop).");
                 AutoBuild.INSTANCE.start(mc);
                 if (saved.length > 1) {
                     AutoBuild.INSTANCE.layers.useSavedRange(saved[1].trim());

@@ -11,8 +11,11 @@ public class Hotkeys {
             "Open the Printer Addon settings.", "Open settings");
     public static final ConfigHotkey TOGGLE_ADDON = new ConfigHotkey("toggleAddon", "J,A",
             "Turn the whole add-on on or off (off: the printer works as without the add-on).", "Add-on on / off");
-    public static final ConfigHotkey TOGGLE_AUTO_BUILD = new ConfigHotkey("toggleAutoBuild", "J,B",
-            "Start / stop auto build.", "Start / stop auto build");
+    public static final ConfigHotkey BUILD_MENU = new ConfigHotkey("buildMenu", "J,B",
+            "Open the build menu: start / stop auto build, link the chest you look at, build report, cost, shop scan.",
+            "Build menu");
+    public static final ConfigHotkey TOGGLE_AUTO_BUILD = new ConfigHotkey("startStopAutoBuild", "",
+            "Start / stop auto build right away, without the menu (no key by default).", "Start / stop auto build");
     public static final ConfigHotkey FIX_WRONG_NOW = new ConfigHotkey("fixWrongNow", "J,F",
             "Break all wrong blocks within reach now (in the current layer range), even when auto build is off.",
             "Fix wrong blocks around me");
@@ -39,6 +42,6 @@ public class Hotkeys {
             "Stop everything (auto build, breaking, shop scan). Also works while a menu is open.", "Stop everything");
 
     public static final ImmutableList<ConfigHotkey> HOTKEY_LIST = ImmutableList.of(
-            OPEN_SETTINGS, TOGGLE_ADDON, TOGGLE_AUTO_BUILD, FIX_WRONG_NOW, CLEAR_EXTRA_BLOCKS, NEXT_LAYER, PREVIOUS_LAYER,
+            OPEN_SETTINGS, BUILD_MENU, TOGGLE_ADDON, TOGGLE_AUTO_BUILD, FIX_WRONG_NOW, CLEAR_EXTRA_BLOCKS, NEXT_LAYER, PREVIOUS_LAYER,
             SHOW_COST, BUILD_REPORT, SCAN_SHOP, STOP_ALL);
 }

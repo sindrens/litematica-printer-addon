@@ -238,6 +238,7 @@ public class LayerManager {
                     return true;
                 }
                 Chat.info("\u00a7aBuild finished!");
+                Chat.announce("Build finished", "everything in the schematic is placed", true);
                 Chat.info(AutoBuild.INSTANCE.stats.total());
                 reportUnfinished(mc, schematic);
                 stop();
@@ -280,6 +281,7 @@ public class LayerManager {
         List<BlockPos> left = unfinishedDeferred(mc.level, schematic);
         if (left.isEmpty()) {
             Chat.info("\u00a7aBuild finished!");
+                Chat.announce("Build finished", "everything in the schematic is placed", true);
             AutoBuild.INSTANCE.stats.layerDone("Last blocks");
             Chat.info(AutoBuild.INSTANCE.stats.total());
             reportUnfinished(mc, schematic);
@@ -430,7 +432,9 @@ public class LayerManager {
      * The shopping list: items the current layers still need that aren't in the inventory. Said in chat when it
      * changes; later used to buy from the shop.
      */
-    private void updateShoppingList(Minecraft mc, java.util.Map<net.minecraft.world.item.Item, Integer> needs) {
+    private long lastNeedsMessage = -100000;
+
+        private void updateShoppingList(Minecraft mc, java.util.Map<net.minecraft.world.item.Item, Integer> needs) {
         if (mc.player == null || mc.player.getAbilities().instabuild) {
             return;
         }
@@ -443,9 +447,12 @@ public class LayerManager {
         }
 
         if (!missing.equals(AutoBuild.INSTANCE.shoppingList)) {
+            // Counts change with every block placed: say it when another item is missing, or once a minute
+            boolean newItems = !AutoBuild.INSTANCE.shoppingList.keySet().containsAll(missing.keySet());
             AutoBuild.INSTANCE.shoppingList.clear();
             AutoBuild.INSTANCE.shoppingList.putAll(missing);
-            if (!missing.isEmpty()) {
+            if (!missing.isEmpty() && (newItems || AutoBuild.clientTicks - lastNeedsMessage > 20 * 60)) {
+                lastNeedsMessage = AutoBuild.clientTicks;
                 StringBuilder sb = new StringBuilder(describeLayers() + " still needs: ");
                 missing.forEach((item, count) -> sb.append(count).append(' ')
                         .append(new ItemStack(item).getHoverName().getString()).append(", "));

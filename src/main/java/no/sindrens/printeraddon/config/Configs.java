@@ -216,11 +216,9 @@ public class Configs implements IConfigHandler {
                 "Command that opens the shop, without the slash.",
                 "Shop command");
         public static final ConfigBoolean FETCH_FROM_CHESTS = new ConfigBoolean("fetchFromChests", true,
-                "Before buying, take missing items from chests, barrels and shulker boxes nearby (not the schematic's own).",
-                "Take from chests first");
-        public static final ConfigInteger FETCH_RADIUS = new ConfigInteger("fetchRadius", 500, 8, 2000,
-                "How far away (blocks) chests are used. Only loaded chunks count, so it can't be more than your view distance.",
-                "Chest distance (blocks)");
+                "Before buying, take missing items from the chests, barrels and shulker boxes you linked (J+B, Build tab:\n"
+                        + "look at one and press 'Link chest'). No other chest is ever opened. They have to be loaded (in view distance).",
+                "Take from linked chests first");
         public static final ConfigBoolean AUTO_BUY = new ConfigBoolean("autoBuy", true,
                 "During auto build, buy what the current layer is missing from the shop (as much as fits in the inventory).\n"
                         + "Needs a shop scan of the server first (J+S). No spending limit.",
@@ -241,7 +239,7 @@ public class Configs implements IConfigHandler {
                 "Shop menu timeout (ticks)");
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                FETCH_FROM_CHESTS, FETCH_RADIUS, AUTO_BUY, SHOP_COMMAND, SHOP_SECTION, PROBE_BUY_SCREEN, MAX_PAGES, WAIT_TIMEOUT_TICKS);
+                FETCH_FROM_CHESTS, AUTO_BUY, SHOP_COMMAND, SHOP_SECTION, PROBE_BUY_SCREEN, MAX_PAGES, WAIT_TIMEOUT_TICKS);
     }
 
     public static class Speed {
@@ -249,16 +247,16 @@ public class Configs implements IConfigHandler {
                 "Find the fastest printer interval that still places right: start at the preset's interval, go one tick\n"
                         + "faster after a run of correct blocks, two ticks slower as soon as a block comes out wrong.",
                 "Automatic speed");
-        public static final ConfigInteger AUTO_SPEED_MIN_INTERVAL = new ConfigInteger("autoSpeedMinInterval", 2, 1, 40,
+        public static final ConfigInteger AUTO_SPEED_MIN_INTERVAL = new ConfigInteger("autoSpeedMinInterval", 1, 1, 40,
                 "Automatic speed never goes below this printer interval. It only gets there while every block comes out\n"
                         + "right, and slows down again at the first wrong one. At 2 it places at most about 5 blocks a second\n"
-                        + "(every block takes at least two printer actions), like holding right-click. Raise it if a server complains.",
+                        + "(every block takes at least two printer actions); at 1 about twice that. Raise it if a server complains.",
                 "Automatic speed: fastest interval");
         public static final ConfigInteger LAG_PAUSE_TPS = new ConfigInteger("lagPauseTps", 12, 0, 19,
                 "On a server: stop placing while the server runs below this many ticks per second (20 is normal),\n"
                         + "because clicks then get answered late and blocks come out wrong. 0 = never wait.",
                 "Wait when server TPS below");
-        public static final ConfigInteger AUTO_SPEED_STEP_BLOCKS = new ConfigInteger("autoSpeedStepBlocks", 25, 5, 1000,
+        public static final ConfigInteger AUTO_SPEED_STEP_BLOCKS = new ConfigInteger("autoSpeedStepBlocks", 10, 5, 1000,
                 "Automatic speed goes one tick faster after this many correct blocks in a row.",
                 "Automatic speed: blocks per step");
         public static final ConfigInteger PRINTER_INTERVAL = new ConfigInteger("customPrinterInterval", 12, 1, 40,

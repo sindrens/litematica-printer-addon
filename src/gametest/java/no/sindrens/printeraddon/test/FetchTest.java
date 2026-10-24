@@ -7,14 +7,15 @@ import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContex
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
 import no.sindrens.printeraddon.build.ChestFetcher;
+import no.sindrens.printeraddon.build.ChestLinks;
 import no.sindrens.printeraddon.build.Mover;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * Taking missing items from containers nearby: a chest next to the player and a barrel 12 blocks away (flown to).
- * Items nobody asked for stay where they are.
+ * Taking missing items from linked containers: a chest next to the player and a barrel 12 blocks away (flown to).
+ * Items nobody asked for stay where they are, and a chest that isn't linked is never opened.
  */
 public class FetchTest implements FabricClientGameTest {
     @Override
@@ -30,7 +31,15 @@ public class FetchTest implements FabricClientGameTest {
             server.runCommand("setblock ~2 ~ ~ chest{Items:[{Slot:0b,id:\"minecraft:iron_block\",count:5},"
                     + "{Slot:1b,id:\"minecraft:diamond\",count:3}]}");
             server.runCommand("setblock ~12 ~ ~ barrel{Items:[{Slot:4b,id:\"minecraft:gold_block\",count:7}]}");
+            // Not linked: must stay shut although it has what's asked for
+            server.runCommand("setblock ~-2 ~ ~ chest{Items:[{Slot:0b,id:\"minecraft:redstone\",count:10}]}");
             context.waitTicks(40);
+            context.runOnClient(mc -> {
+                net.minecraft.core.BlockPos at = mc.player.blockPosition();
+                ChestLinks.clear(mc);
+                ChestLinks.toggle(mc, at.offset(2, 0, 0));
+                ChestLinks.toggle(mc, at.offset(12, 0, 0));
+            });
 
             ChestFetcher fetcher = new ChestFetcher();
             Mover mover = new Mover();
@@ -50,10 +59,13 @@ public class FetchTest implements FabricClientGameTest {
             }
             context.takeScreenshot("fetch");
             int[] counts = context.computeOnClient(mc -> new int[]{mc.player.getInventory().countItem(Items.IRON_BLOCK),
-                    mc.player.getInventory().countItem(Items.GOLD_BLOCK), mc.player.getInventory().countItem(Items.DIAMOND)});
-            String have = "started=" + started + " iron_block=" + counts[0] + " gold_block=" + counts[1] + " diamond=" + counts[2];
+                    mc.player.getInventory().countItem(Items.GOLD_BLOCK), mc.player.getInventory().countItem(Items.DIAMOND),
+                    mc.player.getInventory().countItem(Items.REDSTONE)});
+            context.runOnClient(ChestLinks::clear);
+            String have = "started=" + started + " iron_block=" + counts[0] + " gold_block=" + counts[1] + " diamond=" + counts[2]
+                    + " redstone from the unlinked chest=" + counts[3];
             System.out.println("FETCH TEST: " + have + " after " + ticks + " ticks");
-            if (!started || counts[0] < 5 || counts[1] < 7 || counts[2] != 0) {
+            if (!started || counts[0] < 5 || counts[1] < 7 || counts[2] != 0 || counts[3] != 0) {
                 throw new AssertionError("Fetch test: " + have);
             }
         }
