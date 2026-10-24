@@ -377,8 +377,15 @@ public class ShopBuyer {
                         phase = snapshot != null && snapshot.looksLikeBuyScreen() ? Phase.AMOUNT : Phase.OPEN;
                     }
                     delay = clickDelay();
+                } else if (waited > timeout() && order.retries++ < 1) {
+                    // Nothing arrived: once more from the start (the first purchase after opening sometimes gets lost)
+                    PrinterAddon.debug("The purchase of {} didn't arrive: trying once more", order.location.name);
+                    mc.player.closeContainer();
+                    phase = Phase.OPEN;
+                    waited = 0;
+                    delay = 20 + clickDelay();
                 } else if (waited > timeout()) {
-                    // Nothing arrived: most likely not enough money. Stop, don't keep clicking.
+                    // Nothing arrived again: most likely not enough money. Stop, don't keep clicking.
                     fail(order, "the purchase of " + order.location.name + " didn't arrive (not enough money?)");
                     orders.forEach(o -> notBought.add(o.item));
                     orders.clear();
