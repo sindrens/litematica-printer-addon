@@ -6,7 +6,7 @@ Litematica Printer does the placing; the add-on builds whole schematics in survi
 - **One layer at a time** from the bottom, never skipping a block. Wrong blocks (wrong block, or facing the
   wrong way) are broken so the printer can place the right one.
 - **Flies** above the layer, along the rows, to where the most blocks can be placed at once.
-- **Automatic speed:** goes faster while every block comes out right (down to printer interval 2) and slows
+- **Automatic speed:** starts at your printer interval, goes faster while every block comes out right (down to interval 1) and slows
   down at the first wrong one. Remembers the speed per server for the next build.
 - **Gets the items:** takes them from the chests, barrels and shulker boxes you linked (no other chest is ever
   opened), then buys the rest in `/shop` (ShopGUI+), and crafts rails, powered rails and pumpkin seeds from
