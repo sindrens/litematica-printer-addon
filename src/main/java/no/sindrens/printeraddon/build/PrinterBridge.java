@@ -93,6 +93,13 @@ public final class PrinterBridge {
         saved = null;
     }
 
+    /** The printer's interval right now (each kind of block has its own, set as the printer picks the block). */
+    public static void applyInterval(int interval) {
+        if (Generic.APPLY_SPEED_TO_PRINTER.getBooleanValue() && Configs.PRINTING_INTERVAL.getIntegerValue() != interval) {
+            Configs.PRINTING_INTERVAL.setIntegerValue(interval);
+        }
+    }
+
     /**
      * Settings that make the printer reliable: interval from the speed preset, range no farther than the
      * server lets the player reach (farther gives ghost blocks), and rotation and block interaction on.

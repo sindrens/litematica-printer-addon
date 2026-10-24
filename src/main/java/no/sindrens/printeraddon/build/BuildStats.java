@@ -116,7 +116,13 @@ public class BuildStats {
                 sb.append("last pause: ").append(AutoBuild.INSTANCE.pauseReason).append(", ");
             }
             net.minecraft.client.player.LocalPlayer player = net.minecraft.client.Minecraft.getInstance().player;
+            // Both views of "in reach" side by side: the mover's (placeable blocks in the printer's range) and the
+            // printer's own last offer (unfinished in its range, held back as just clicked, offered)
+            AutoBuild build = AutoBuild.INSTANCE;
             BuildLog.line("TURNS", (sb.length() > 2 ? sb.substring(0, sb.length() - 2) : "-")
+                    + " | in reach: mover " + build.mover.printerReachCount() + ", printer " + build.lastUnfinishedCount
+                    + " unfinished, " + build.lastHeldCount + " held back, " + build.lastOfferedCount + " offered"
+                    + " | " + build.mover.describe()
                     + (player != null ? String.format(" | at %.1f %.1f %.1f", player.getX(), player.getY(), player.getZ()) : ""));
             java.util.Arrays.fill(secondTurns, 0);
             secondStart = AutoBuild.clientTicks;

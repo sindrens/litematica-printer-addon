@@ -8,11 +8,15 @@ Litematica Printer does the placing; the add-on builds whole schematics in survi
 - **Flies** above the layer area by area (16x16, from the north-west corner, back and forth inside each area, no
   area skipped), always to where the most blocks can be placed at once, and moves on as soon as nothing in reach
   is left to place.
-- **Automatic speed:** starts at your printer interval, goes faster while every block comes out right (down to interval 1) and slows
-  down at the first wrong one. Remembers the speed per server, and per kind of block, for the next build.
+- **Automatic speed, per kind of block:** every kind (seeds, mud, pistons...) gets its own printer interval: it
+  starts at your interval, goes faster while that kind comes out right (down to interval 1) and slows down at the
+  first wrong one. Switching items that came out wrong once is done slower after. All of it is remembered per
+  server (`config/printer_addon/speed-blocks.txt`) for the next build. Only the printer's own clicks count (stems
+  growing, other players building don't).
 - **Gets the items:** takes them from the chests, barrels and shulker boxes you linked (no other chest is ever
-  opened), then buys the rest in `/shop` (ShopGUI+), and crafts rails, powered rails and pumpkin seeds from
-  iron and gold blocks, logs, redstone and pumpkins. Only what the current layer needs is bought; leftovers go
+  opened), then buys the rest in `/shop` (ShopGUI+), and crafts rails, powered rails, a diamond hoe and pumpkin
+  seeds from iron and gold blocks, diamonds, logs, redstone and pumpkins (seeds: always pumpkins bought and
+  crafted, a stack at a time; seeds only bought if the shop has no pumpkins). Only what the current layer needs is bought; leftovers go
   back into the linked chests when the inventory gets full.
 - **Litematica Printer places everything.** The add-on moves, breaks wrong blocks, gets the items and sets the
   printer's own settings (it starts at your interval, keeps your range). It doesn't place blocks itself; the
@@ -31,13 +35,15 @@ are kept; `J`+`B` → "Open build logs folder"). Send it when something goes wro
 | Kind | What |
 |---|---|
 | `START`, `SETTINGS`, `INVENTORY` | Versions, every setting (add-on and printer), reach, ping, storage, the whole inventory (also once a minute) |
-| `TRY` | Every click of the printer: the spot, what's there, what the schematic wants, the item in hand, the distance, where the player is |
-| `PLACED`, `WRONG` | Every block that appeared, right or wrong (and what it should have been) |
-| `SKIP`, `GIVEUP`, `IGNORED` | Every block left for later, with the reason; at the end the full list of what wasn't placed and why |
+| `TRY` | Every click of the printer: the spot, what's there, what the schematic wants, the item it clicks with, the item in hand, the distance, where the player is |
+| `PLACED`, `WRONG`, `NOCHANGE` | The result of every click once the server answered: right, wrong (or landed next to it) and what it should have been, or nothing placed; with the item, its interval and the item switched from |
+| `HOTBAR` | Every switch to another item before a click (and how often that switch went wrong before), clicks with an empty hand, once a minute a summary per switch |
+| `SPEED`, `SPEEDS` | Every speed change of a kind of block; once a minute and per layer the table of all of them (interval, right, wrong, placed nothing) |
+| `SKIP`, `RETRY`, `GIVEUP`, `IGNORED` | Every block left for later, with the reason and how often; tried again as soon as nothing else is left; left out of the layer after the 4th time (tried again at the end); at the end the full list of what wasn't placed and why |
 | `CONFLICT` | Blocks of the player's own buildings where the schematic wants something else: left alone, never broken |
 | `MOVE`, `STATE`, `PLAN` | Every flight (from, to, how long, blocks in reach on arrival), every change of what the player does, the spots planned per area |
-| `TURNS` | Every second: what the printer's turns went to (placed, paused and why, nothing in reach...) and where the player is |
-| `SCAN`, `LAYER`, `SNAP` | What's left to do, what waits for items, what isn't loaded; every 5 s a summary |
+| `TURNS` | Every second: what the printer's turns went to (placed, paused and why, nothing in reach...), how many blocks the mover and the printer see in reach, what the player does and where |
+| `SCAN`, `LAYER`, `SNAP`, `STUCK`, `WAIT` | What's left to do, what waits for items, what isn't loaded; every 5 s a summary; when nothing is placed for a while, the nearest unfinished blocks and why |
 | `LEARN`, `PERF` | What it learned about the reach on this server; how many ms each part of the add-on took |
 | `step`, `detail`, `info`, `WARN` | Everything else it does or says |
 

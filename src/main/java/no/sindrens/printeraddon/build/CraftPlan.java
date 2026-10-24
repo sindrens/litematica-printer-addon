@@ -42,8 +42,8 @@ public final class CraftPlan {
     }
 
     /**
-     * A plan for these items (item -> how many are missing). {@code sold} says what the shop sells; seeds are only
-     * crafted from pumpkins when there are pumpkins or the shop sells them.
+     * A plan for these items (item -> how many are missing). {@code sold} says what the shop sells; seeds are made
+     * from pumpkins (own, or bought), and only bought as seeds when the shop has no pumpkins.
      */
     public static CraftPlan of(Minecraft mc, Map<Item, Integer> missing, Predicate<Item> sold, boolean tableNearby) {
         CraftPlan plan = new CraftPlan(mc.player.getInventory(), sold);
@@ -92,13 +92,10 @@ public final class CraftPlan {
             needsTable = true;
             craft.add(new Step(Items.POWERED_RAIL, crafts * 6));
         } else if (item == Items.PUMPKIN_SEEDS) {
+            // Seeds are crafted from pumpkins (4 each): the player's own pumpkins (or from storage) first, then bought
+            // pumpkins. Seeds are only bought when the shop has no pumpkins
             int crafts = ceil(count, 4);
-            // Pumpkins the player brought (or that came from storage) are crafted first
             int pumpkins = take(Items.PUMPKIN, crafts);
-            if (pumpkins < crafts && sold.test(Items.PUMPKIN_SEEDS)) {
-                buy.merge(Items.PUMPKIN_SEEDS, (crafts - pumpkins) * 4, Integer::sum);
-                crafts = pumpkins;
-            }
             if (pumpkins < crafts && sold.test(Items.PUMPKIN)) {
                 buy.merge(Items.PUMPKIN, crafts - pumpkins, Integer::sum);
                 pumpkins = crafts;

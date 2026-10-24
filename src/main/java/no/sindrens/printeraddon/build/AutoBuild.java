@@ -49,22 +49,25 @@ public class AutoBuild {
     /** Spots the printer just placed (game tick of the attempt): not given to it again until the server has answered. */
     private final java.util.Map<net.minecraft.core.BlockPos, Long> recentlyTried = new java.util.HashMap<>();
 
-    public void printerTried(net.minecraft.core.BlockPos pos) {
+    /** The printer is about to click this spot with this item (null: none in particular). */
+    public void printerTried(net.minecraft.core.BlockPos pos, @javax.annotation.Nullable net.minecraft.world.item.Item item) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.level != null) {
             recentlyTried.put(pos.immutable(), clientTicks);
+            lastTried.put(pos.immutable(), clientTicks);
             triedDuringBuild.add(pos.immutable());
             if (BuildLog.isOpen()) {
                 fi.dy.masa.litematica.world.WorldSchematic schematic = SchematicHelper.world();
-                BuildLog.line("TRY", String.format("%s: is %s, wants %s | in hand %s | %.2f from the eye | player at %.1f %.1f %.1f",
+                BuildLog.line("TRY", String.format("%s: is %s, wants %s | with %s, in hand %s | %.2f from the eye | player at %.1f %.1f %.1f",
                         pos.toShortString(), shortState(mc.level.getBlockState(pos)),
                         schematic != null ? shortState(schematic.getBlockState(pos)) : "?",
+                        item == null ? "nothing" : net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(item).getPath(),
                         mc.player.getMainHandItem().isEmpty() ? "nothing" : mc.player.getMainHandItem().getCount() + " "
                                 + net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(mc.player.getMainHandItem().getItem()).getPath(),
                         Math.sqrt(mc.player.getEyePosition().distanceToSqr(net.minecraft.world.phys.Vec3.atCenterOf(pos))),
                         mc.player.getX(), mc.player.getY(), mc.player.getZ()));
             }
-            speed.attempted();
+            speed.picked(mc, pos, item);
             // The same click again and again with nothing changing (the server refuses it): leave that block for a
             // while instead of standing there; the player moves on and it's tried again later, from elsewhere
             net.minecraft.world.level.block.state.BlockState now = mc.level.getBlockState(pos);
@@ -91,10 +94,34 @@ public class AutoBuild {
     private record Tries(net.minecraft.world.level.block.state.BlockState state, int count, long since) {
     }
 
+    /** When the printer last clicked each spot (kept a few seconds, for telling its blocks from other changes). */
+    private final java.util.Map<net.minecraft.core.BlockPos, Long> lastTried = new java.util.HashMap<>();
+
+    /** True if the printer clicked this spot within the last {@code ticks}. */
+    public boolean triedRecently(net.minecraft.core.BlockPos pos, long ticks) {
+        Long at = lastTried.get(pos);
+        if (lastTried.size() > 512) {
+            lastTried.values().removeIf(t -> clientTicks - t > 20 * 10);
+        }
+        return at != null && clientTicks - at <= ticks;
+    }
+
     private static final int MAX_TRIES = 4;
     private static final int GIVE_UP_TICKS = 20 * 30;
     private final java.util.Map<net.minecraft.core.BlockPos, Tries> triesAt = new java.util.HashMap<>();
     private final java.util.Map<net.minecraft.core.BlockPos, Long> givenUp = new java.util.HashMap<>();
+
+    /** True if the printer gave up on any block for now. */
+    public boolean hasGivenUp() {
+        givenUp.values().removeIf(until -> until < clientTicks);
+        return !givenUp.isEmpty();
+    }
+
+    /** Nothing else is left to do: the blocks the printer gave up on are tried again now (see Mover). */
+    public void forgetGivenUp() {
+        givenUp.clear();
+        triesAt.clear();
+    }
 
     /** True for a block the printer kept trying without anything changing (left alone for 30 s). */
     public boolean givenUp(net.minecraft.core.BlockPos pos) {
@@ -503,12 +530,32 @@ public class AutoBuild {
         if (emptyDuringBuild.contains(pos) || triedDuringBuild.contains(pos) || schematicBlocks.contains(current.getBlock())) {
             return false;
         }
+        if (grownFruit(pos, current)) {
+            // A pumpkin or melon a stem grew onto a spot of the farm: not the player's building
+            return false;
+        }
         if (conflicts.add(pos.immutable())) {
             fi.dy.masa.litematica.world.WorldSchematic schematic = SchematicHelper.world();
             BuildLog.line("CONFLICT", pos.toShortString() + ": the world has " + current + ", the schematic wants "
                     + (schematic != null ? schematic.getBlockState(pos) : "?") + " (left alone, not counted)");
         }
         return true;
+    }
+
+    /** A pumpkin or melon with a stem of its kind next to it in the world (grown, not built). */
+    private static boolean grownFruit(net.minecraft.core.BlockPos pos, net.minecraft.world.level.block.state.BlockState current) {
+        Minecraft mc = Minecraft.getInstance();
+        net.minecraft.world.level.block.Block fruit = current.getBlock();
+        if (mc.level == null || (fruit != net.minecraft.world.level.block.Blocks.PUMPKIN && fruit != net.minecraft.world.level.block.Blocks.MELON)) {
+            return false;
+        }
+        for (net.minecraft.core.Direction direction : net.minecraft.core.Direction.Plane.HORIZONTAL) {
+            net.minecraft.world.level.block.Block next = mc.level.getBlockState(pos.relative(direction)).getBlock();
+            if (next instanceof net.minecraft.world.level.block.StemBlock || next instanceof net.minecraft.world.level.block.AttachedStemBlock) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** True for a protected (container) block that wasn't there when the build began. */

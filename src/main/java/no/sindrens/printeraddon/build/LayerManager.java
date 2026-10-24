@@ -212,6 +212,7 @@ public class LayerManager {
         if (finishingDeferred) {
             return finishDeferred(mc, schematic, areas, interval);
         }
+        followHandChange(mc, schematic, areas);
 
         Findings findings = new Findings();
         int remaining = scanLayers(mc.level, schematic, areas, null, findings);
@@ -388,6 +389,84 @@ public class LayerManager {
         return layerTop == layer ? "Layer Y " + layer : "Layers Y " + layer + "-" + layerTop;
     }
 
+    /**
+     * Litematica's layer view was moved by hand while building (to get past a block, or to do another layer first):
+     * that layer is built now, so the printer, the movement and the layer checks all work on the same one. What's
+     * left on the layer it was on waits until the end (like blocks waiting for something above). Any other view
+     * (everything at once, another axis) is put back to the layer.
+     */
+    private void followHandChange(Minecraft mc, WorldSchematic schematic, List<SchematicHelper.Area> areas) {
+        LayerRange range = DataManager.getRenderLayerRange();
+        int min;
+        int max;
+        if (range.getAxis() == Direction.Axis.Y && range.getLayerMode() == LayerMode.SINGLE_LAYER) {
+            min = max = range.getLayerSingle();
+        } else if (range.getAxis() == Direction.Axis.Y && range.getLayerMode() == LayerMode.LAYER_RANGE) {
+            min = range.getLayerRangeMin();
+            max = range.getLayerRangeMax();
+        } else {
+            BuildLog.line("LAYER", "Litematica's layer view was changed (" + range.getLayerMode() + ", axis " + range.getAxis()
+                    + "): set back to " + describeLayers());
+            applyLayer();
+            return;
+        }
+        if (min == layer && max == layerTop) {
+            return;
+        }
+        if (min > max || max < minY || min > maxY) {
+            applyLayer();
+            return;
+        }
+        String before = describeLayers();
+        List<BlockPos> left = new ArrayList<>();
+        if (min > layer) {
+            for (int y = layer; y <= Math.min(layerTop, min - 1); y++) {
+                collectUnfinished(mc.level, schematic, areas, y, left);
+            }
+            AutoBuild.INSTANCE.deferred.addAll(left);
+        }
+        layer = Math.max(minY, min);
+        layerTop = Math.min(maxY, max);
+        applyLayer();
+        resetProgress();
+        String now = describeLayers();
+        Chat.info("Layer view changed by hand: building " + now + " now" + (left.isEmpty() ? "" : " (" + left.size()
+                + " block" + (left.size() == 1 ? "" : "s") + " left on " + before + " are done at the end)") + ".");
+        BuildLog.line("LAYER", "changed by hand from " + before + " to " + now + "; " + left.size() + " unfinished blocks of "
+                + before + " wait until the end");
+    }
+
+    /** Adds the unfinished blocks of one layer (those that are loaded) to the list. */
+    private static void collectUnfinished(Level level, WorldSchematic schematic, List<SchematicHelper.Area> areas, int y, List<BlockPos> out) {
+        boolean extraCounts = Configs.Layers.EXTRA_BLOCKS_BLOCK_LAYER.getBooleanValue();
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        for (SchematicHelper.Area area : areas) {
+            if (y < area.minY() || y > area.maxY()) {
+                continue;
+            }
+            for (int x = area.minX(); x <= area.maxX(); x++) {
+                for (int z = area.minZ(); z <= area.maxZ(); z++) {
+                    pos.set(x, y, z);
+                    BlockCheck.Result result = BlockCheck.check(level, schematic, pos);
+                    if (result != BlockCheck.Result.UNLOADED && unfinished(level, pos, result, extraCounts)) {
+                        out.add(pos.immutable());
+                    }
+                }
+            }
+        }
+    }
+
+    /** Whether a block with this check result still has to be done for the layer to be finished. */
+    private static boolean unfinished(Level level, BlockPos pos, BlockCheck.Result result, boolean extraCounts) {
+        return switch (result) {
+            case OK -> false;
+            case EXTRA -> extraCounts;
+            case WRONG_BLOCK -> !AutoBuild.INSTANCE.isConflict(pos, result, level.getBlockState(pos))
+                    && !AutoBuild.INSTANCE.couldNotPlace.contains(pos);
+            default -> !AutoBuild.INSTANCE.couldNotPlace.contains(pos);
+        };
+    }
+
     private void applyLayer() {
         LayerRange range = DataManager.getRenderLayerRange();
         if (range.getAxis() != Direction.Axis.Y) {
@@ -518,13 +597,17 @@ public class LayerManager {
     }
 
     private void reportStuck(Minecraft mc, WorldSchematic schematic, List<SchematicHelper.Area> areas) {
-        List<BlockPos> positions = new ArrayList<>();
-        int remaining = scanLayers(mc.level, schematic, areas, positions);
+        int remaining = scanLayers(mc.level, schematic, areas, null);
+        // The nearest ones, not the first in the area (those were all in a far corner that wasn't loaded)
+        List<BlockPos> positions = nearestUnfinished(mc, schematic, areas, MAX_REPORTED);
 
         Chat.warn(describeLayers() + ": nothing placed for " + ticksWithoutProgress / 20 + " s. " + remaining
                 + " left. Player at " + mc.player.blockPosition().toShortString() + ", doing: " + AutoBuild.INSTANCE.doing());
         PrinterAddon.LOGGER.warn("[stuck] {}: nothing placed for {} s, {} left, player at {}, doing: {}", describeLayers(),
                 ticksWithoutProgress / 20, remaining, mc.player.blockPosition().toShortString(), AutoBuild.INSTANCE.doing());
+        BuildLog.line("STUCK", "mover " + AutoBuild.INSTANCE.mover.details() + " | " + AutoBuild.INSTANCE.doing()
+                + " | printer: " + AutoBuild.INSTANCE.lastUnfinishedCount + " unfinished in its range, " + AutoBuild.INSTANCE.lastHeldCount
+                + " held back, " + AutoBuild.INSTANCE.lastOfferedCount + " offered | last pause: " + AutoBuild.INSTANCE.pauseReason);
         int shown = 0;
         for (BlockPos pos : positions) {
             String why = Diagnose.explain(mc, schematic, pos);
@@ -534,6 +617,46 @@ public class LayerManager {
                 Chat.warn(" - " + why);
             }
         }
+    }
+
+    /** The unfinished blocks of the current layers nearest to the player; parts that aren't loaded only if nothing else is left. */
+    private List<BlockPos> nearestUnfinished(Minecraft mc, WorldSchematic schematic, List<SchematicHelper.Area> areas, int count) {
+        net.minecraft.world.phys.Vec3 from = mc.player.position();
+        java.util.Comparator<BlockPos> farthestFirst = java.util.Comparator.comparingDouble(
+                (BlockPos p) -> from.distanceToSqr(net.minecraft.world.phys.Vec3.atCenterOf(p))).reversed();
+        java.util.PriorityQueue<BlockPos> nearest = new java.util.PriorityQueue<>(farthestFirst);
+        List<BlockPos> notLoaded = new ArrayList<>();
+        boolean extraCounts = Configs.Layers.EXTRA_BLOCKS_BLOCK_LAYER.getBooleanValue();
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        for (int y = layer; y <= layerTop; y++) {
+            for (SchematicHelper.Area area : areas) {
+                if (y < area.minY() || y > area.maxY()) {
+                    continue;
+                }
+                for (int x = area.minX(); x <= area.maxX(); x++) {
+                    for (int z = area.minZ(); z <= area.maxZ(); z++) {
+                        pos.set(x, y, z);
+                        BlockCheck.Result result = BlockCheck.check(mc.level, schematic, pos);
+                        if (!unfinished(mc.level, pos, result, extraCounts)) {
+                            continue;
+                        }
+                        if (result == BlockCheck.Result.UNLOADED) {
+                            if (notLoaded.size() < count) {
+                                notLoaded.add(pos.immutable());
+                            }
+                            continue;
+                        }
+                        nearest.add(pos.immutable());
+                        if (nearest.size() > count) {
+                            nearest.poll();
+                        }
+                    }
+                }
+            }
+        }
+        List<BlockPos> out = new ArrayList<>(nearest);
+        out.sort(farthestFirst.reversed());
+        return out.isEmpty() ? notLoaded : out;
     }
 
     private static String describe(Minecraft mc, BlockCheck.Result result, BlockState target) {
@@ -596,15 +719,7 @@ public class LayerManager {
                     pos.set(x, y, z);
                     BlockCheck.Result result = BlockCheck.check(level, schematic, pos);
 
-                    boolean unfinished = switch (result) {
-                        case OK -> false;
-                        case EXTRA -> extraCounts;
-                        case WRONG_BLOCK -> !AutoBuild.INSTANCE.isConflict(pos, result, level.getBlockState(pos))
-                                && !AutoBuild.INSTANCE.couldNotPlace.contains(pos);
-                        default -> !AutoBuild.INSTANCE.couldNotPlace.contains(pos);
-                    };
-
-                    if (unfinished) {
+                    if (unfinished(level, pos, result, extraCounts)) {
                         remaining++;
                         if (findings != null && PlacementOrder.holdsWater(schematic.getBlockState(pos))) {
                             findings.water++;

@@ -112,6 +112,12 @@ public final class BlockCheck {
             return Result.OK;
         }
 
+        // A pumpkin or melon next to its stem grows there by itself (a farm's fruit spot): nothing to place, and
+        // whatever is there now (the fruit, or nothing) is right
+        if (isGrownFruit(schematic, pos, target)) {
+            return Result.OK;
+        }
+
         if (current.getBlock() == target.getBlock()) {
             return compareSameBlock(level, schematic, pos, target, current);
         }
@@ -168,6 +174,10 @@ public final class BlockCheck {
 
             String name = property.getName();
 
+            if (name.equals("facing") && (block == Blocks.ATTACHED_PUMPKIN_STEM || block == Blocks.ATTACHED_MELON_STEM)) {
+                // An attached stem bends towards wherever its fruit grew: that changes by itself (never broken for it)
+                continue;
+            }
             if (name.equals("type") && block instanceof ChestBlock) {
                 // single/left/right depends on the neighbour chest; the printer handles it
                 otherDiff = true;
@@ -214,6 +224,22 @@ public final class BlockCheck {
 
         // Only differs in things that change by themselves: power, age, connections, moisture...
         return Result.OK;
+    }
+
+    /** A pumpkin or melon in the schematic right next to a stem of its kind: the stem grows it. */
+    private static boolean isGrownFruit(WorldSchematic schematic, BlockPos pos, BlockState target) {
+        Block fruit = target.getBlock();
+        if (fruit != Blocks.PUMPKIN && fruit != Blocks.MELON) {
+            return false;
+        }
+        for (Direction direction : Direction.Plane.HORIZONTAL) {
+            Block next = schematic.getBlockState(pos.relative(direction)).getBlock();
+            if (fruit == Blocks.PUMPKIN ? next == Blocks.PUMPKIN_STEM || next == Blocks.ATTACHED_PUMPKIN_STEM
+                    : next == Blocks.MELON_STEM || next == Blocks.ATTACHED_MELON_STEM) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static <T extends Comparable<T>> boolean sameValue(BlockState a, BlockState b, Property<T> property) {

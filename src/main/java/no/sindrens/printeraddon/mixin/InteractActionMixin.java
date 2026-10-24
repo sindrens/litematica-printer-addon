@@ -48,6 +48,9 @@ public class InteractActionMixin {
         // hopper or chest it clicks on (sneaking doesn't help with empty hands). Skip it; the printer tries again
         if (Configs.enabled() && player.getItemInHand(hand).isEmpty()) {
             no.sindrens.printeraddon.PrinterAddon.trace("Skipped a printer click with an empty hand at {}", hit.getBlockPos().toShortString());
+            if (no.sindrens.printeraddon.build.AutoBuild.INSTANCE.isRunning()) {
+                no.sindrens.printeraddon.build.AutoBuild.INSTANCE.speed.emptyHand(hit.getBlockPos());
+            }
             ci.cancel();
             return;
         }

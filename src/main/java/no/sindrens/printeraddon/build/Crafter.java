@@ -186,8 +186,11 @@ public class Crafter {
                     return true;
                 }
                 if (manual != null) {
-                    // By hand: one set into the grid, the result is taken, again until there are enough
-                    if (!manual.fill(mc, player, menu, needsTable)) {
+                    // By hand: sets into the grid (a recipe of one item takes up to a stack at once), the result is
+                    // taken, again until there are enough
+                    int left = job.count() - (count(player, job.item()) - startCount);
+                    int sets = Math.max(1, (left + manual.count() - 1) / manual.count());
+                    if (!manual.fill(mc, player, menu, needsTable, sets)) {
                         fail(mc, "the ingredients ran out");
                         return true;
                     }
@@ -201,9 +204,16 @@ public class Crafter {
                 int perCraft = Math.max(1, recipe.resultItems(SlotDisplayContext.fromLevel(mc.level)).stream()
                         .filter(stack -> stack.is(job.item())).mapToInt(ItemStack::getCount).findFirst().orElse(1));
                 int left = job.count() - (count(player, job.item()) - startCount);
-                int sets = Math.min(MAX_SETS_PER_FILL, (left + perCraft - 1) / perCraft);
-                for (int i = 0; i < sets; i++) {
-                    mc.gameMode.handlePlaceRecipe(menu.containerId, recipe.id(), false);
+                int needed = (left + perCraft - 1) / perCraft;
+                if (needed >= 64) {
+                    // A stack's worth or more still to make (seeds for a whole farm): the grid filled up in one go,
+                    // like a shift-click on the recipe, instead of a click per set
+                    mc.gameMode.handlePlaceRecipe(menu.containerId, recipe.id(), true);
+                } else {
+                    int sets = Math.min(MAX_SETS_PER_FILL, needed);
+                    for (int i = 0; i < sets; i++) {
+                        mc.gameMode.handlePlaceRecipe(menu.containerId, recipe.id(), false);
+                    }
                 }
                 wait = WAIT;
                 waited = 0;

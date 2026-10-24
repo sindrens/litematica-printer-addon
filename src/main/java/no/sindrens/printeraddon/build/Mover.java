@@ -78,6 +78,8 @@ public class Mover {
     private int flyIndex;
     /** The path is a straight line towards a part that isn't loaded yet (worked out again once it is). */
     private boolean flyPathBlind;
+    /** The path is only the first part of a long way (the next part is worked out at its end). */
+    private boolean flyLeg;
 
     private int workTicksWithoutProgress;
     private int lastInReach = -1;
@@ -94,9 +96,18 @@ public class Mover {
         return switch (state) {
             case WALKING -> target != null ? "walking to " + target.toShortString() : "walking";
             case FLYING -> target != null ? "flying to " + target.toShortString() : "flying";
-            case WORKING -> "placing within reach";
-            case IDLE -> work.isEmpty() ? "waiting" : "looking for the next block";
+            case WORKING -> "placing " + lastPrinterReach + " block" + (lastPrinterReach == 1 ? "" : "s") + " within reach";
+            case IDLE -> work.isEmpty() ? (skipped.isEmpty() ? "waiting" : "waiting, " + skipped.size() + " left for later")
+                    : "looking for the next block";
         };
+    }
+
+    /** Placeable blocks in the printer's reach at the last tick (the printer's own test, see inPrinterReach). */
+    private int lastPrinterReach;
+
+    /** For the build log: how many placeable blocks the mover sees in the printer's reach right now. */
+    public int printerReachCount() {
+        return lastPrinterReach;
     }
 
     /** A spot to go to before building on (a chest to take items from). */
@@ -121,16 +132,30 @@ public class Mover {
         return new java.util.HashSet<>(skipped.keySet());
     }
 
-    /** Leaves a block for later (30 s), with the reason and everything known about it in the build log. */
+    /**
+     * Leaves a block for later (30 s, or sooner when nothing else is left), with the reason and everything known about
+     * it in the build log. A block left for later this many times in a layer is left out of the layer (it's tried
+     * again at the end of the build, and listed if it still can't be done): the layer never waits on one block.
+     */
     private void skip(BlockPos pos, String why) {
-        skipped.put(pos, tick + SKIP_TICKS);
-        if (BuildLog.isOpen()) {
-            Minecraft mc = Minecraft.getInstance();
-            WorldSchematic schematic = SchematicHelper.world();
-            BuildLog.line("SKIP", pos.toShortString() + " for 30 s: " + why
-                    + (schematic != null && mc.player != null ? " | " + Diagnose.explain(mc, schematic, pos) : ""));
+        Minecraft mc = Minecraft.getInstance();
+        WorldSchematic schematic = SchematicHelper.world();
+        String explain = schematic != null && mc.player != null ? " | " + Diagnose.explain(mc, schematic, pos) : "";
+        int times = skipCounts.merge(pos.immutable(), 1, Integer::sum);
+        if (times >= MAX_SKIPS && schematic != null && BlockCheck.check(mc.level, schematic, pos) != BlockCheck.Result.UNLOADED) {
+            skipCounts.remove(pos);
+            AutoBuild.INSTANCE.couldNotPlace.add(pos.immutable());
+            BuildLog.line("GIVEUP", pos.toShortString() + " for this layer: left for later " + times + " times (last: " + why
+                    + "); the layer goes on without it, it's tried again at the end of the build" + explain);
+            return;
         }
+        skipped.put(pos.immutable(), tick + SKIP_TICKS);
+        BuildLog.line("SKIP", pos.toShortString() + " for 30 s (" + times + " of " + MAX_SKIPS + "): " + why + explain);
     }
+
+    /** How often each block of this layer was left for later. */
+    private final Map<BlockPos, Integer> skipCounts = new HashMap<>();
+    private static final int MAX_SKIPS = 4;
 
     /** True for a block the printer was given time for in reach, but nothing happened. */
     public boolean wasSkipped(BlockPos pos) {
@@ -172,9 +197,12 @@ public class Mover {
         state = State.IDLE;
         sweepLayer = Integer.MIN_VALUE;
         unloadable.clear();
+        unreachableAreas.clear();
+        skipCounts.clear();
         nearUnloadedSince = -1;
         errand = null;
         work.clear();
+        workVersion++;
         reserved.clear();
         skipped.clear();
         target = null;
@@ -250,6 +278,7 @@ public class Mover {
             errandReached = false;
             if (state != State.FLYING && state != State.WALKING) {
                 target = errand;
+                spotFor = null;
                 path = null;
                 stuckTicks = 0;
                 lastDistance = Double.MAX_VALUE;
@@ -266,20 +295,44 @@ public class Mover {
         if (reserved.contains(feet) || reserved.contains(feet.above())) {
             if (state != State.WALKING && state != State.FLYING) {
                 PrinterAddon.debug("Standing in an unfinished spot {}, moving away", feet.toShortString());
+                spotFor = null;
                 plan(mc, player, feet, mode, reach);
             }
             move(mc, player, mode);
             return;
         }
 
-        // Only count blocks that can be done right now (the printer can place it, or it's for the breaker/bucket)
+        // In reach exactly as the printer sees it (its range from the eye, never within 1 block of the eye or the
+        // feet), and only blocks that can be done right now (the printer can place it, or it's for the
+        // breaker/bucket). Blocks the printer skips for being that close are kept apart: the player steps aside for them
         List<BlockPos> inReach = new ArrayList<>();
+        List<BlockPos> tooClose = new ArrayList<>();
         Vec3 eye = player.getEyePosition();
+        // Unfinished blocks in reach, placeable now or not: a chain's next block only counts as placeable once the
+        // server has the last one (see the grace below)
+        boolean unfinishedInReach = false;
         for (BlockPos pos : work) {
-            if (reachable(mc, schematic, eye, pos, reach) && canDoNow(mc, schematic, pos)) {
+            double dx = pos.getX() + 0.5 - eye.x;
+            double dy = pos.getY() + 0.5 - eye.y;
+            double dz = pos.getZ() + 0.5 - eye.z;
+            double d = dx * dx + dy * dy + dz * dz;
+            if (d > reach * reach) {
+                continue;
+            }
+            Vec3 center = Vec3.atCenterOf(pos);
+            unfinishedInReach = true;
+            if (!canDoNow(mc, schematic, pos)) {
+                continue;
+            }
+            BlockCheck.Result result = BlockCheck.check(mc.level, schematic, pos);
+            boolean printerPlaces = result == BlockCheck.Result.MISSING || result == BlockCheck.Result.PRINTER_FIXES;
+            if (printerPlaces && (d <= 1 || player.position().distanceToSqr(center) <= 1)) {
+                tooClose.add(pos);
+            } else if (result != BlockCheck.Result.BUCKET || d <= bucketRange(mc) * bucketRange(mc)) {
                 inReach.add(pos);
             }
         }
+        lastPrinterReach = inReach.size();
 
         // On the way to a chosen spot, keep going (the printer places what's in reach meanwhile): slowly while there
         // is something to place in reach, so the printer gets to all of it on the way; at full speed otherwise
@@ -290,14 +343,14 @@ public class Mover {
         }
         gliding = false;
 
-        // All that's left here is right under the player, where the printer never places: step aside to it now
+        // All that's left here is right next to the feet, where the printer never places: step aside for it now
         // instead of waiting and leaving it behind
-        if (!inReach.isEmpty() && PrinterBridge.isIdle() && !AutoBuild.INSTANCE.breaker.isBusy()
-                && inReach.stream().allMatch(p -> p.getX() == feet.getX() && p.getZ() == feet.getZ() && p.getY() < feet.getY())) {
-            BlockPos under = inReach.getFirst();
+        if (inReach.isEmpty() && !tooClose.isEmpty() && PrinterBridge.isIdle() && !AutoBuild.INSTANCE.breaker.isBusy()) {
+            BlockPos under = tooClose.getFirst();
             if (state != State.FLYING && state != State.WALKING) {
-                PrinterAddon.debug("Only {} under the player is left here: moving aside to place it", under.toShortString());
+                BuildLog.line("MOVE", "only " + under.toShortString() + " is left here and it's too close to the player for the printer: moving aside");
                 target = under;
+                spotFor = null;
                 plan(mc, player, under, mode, reach);
             }
             move(mc, player, mode);
@@ -307,22 +360,10 @@ public class Mover {
         if (!inReach.isEmpty() || !PrinterBridge.isIdle()) {
             lastWorkTick = tick;
         }
-        // Just placed something and an unfinished block of a chain is still in reach: its next block only counts as
-        // placeable once the server has the last one. Stay for two printer turns for it. With nothing unfinished
-        // left in reach, fly on right away
-        boolean unfinishedInReach = false;
-        if (inReach.isEmpty()) {
-            for (BlockPos pos : work) {
-                if (eye.distanceToSqr(Vec3.atCenterOf(pos)) <= (reach - 0.25) * (reach - 0.25)) {
-                    unfinishedInReach = true;
-                    break;
-                }
-            }
-        }
         // Also right after arriving: the water just put in lets the blocks around it go in a moment later (the
         // log showed it flying on to the next leaf every time, leaving the mud and dirt there for a second visit)
         if (inReach.isEmpty() && unfinishedInReach && (state == State.WORKING || state == State.IDLE)
-                && tick - lastWorkTick < 2L * AutoBuild.INSTANCE.speed.interval() + GRACE_EXTRA_TICKS) {
+                && tick - lastWorkTick < graceTicks()) {
             if (flying(player)) {
                 player.setDeltaMovement(Vec3.ZERO);
             }
@@ -365,16 +406,20 @@ public class Mover {
 
         // Only when nothing here waits for items (they're being bought or fetched: wait for them here)
         if (work.isEmpty() && !unloaded.isEmpty() && waitingForItems == 0) {
-            // The rest of the layer is too far away to be loaded: go there so it loads
-            List<BlockPos> notSkipped = unloaded.stream().filter(p -> !skipped.containsKey(p)).toList();
+            // The rest of the layer is too far away to be loaded: go there so it loads (not to parts no flight could
+            // get to a moment ago)
+            List<BlockPos> notSkipped = unloaded.stream()
+                    .filter(p -> !skipped.containsKey(p) && !areaUnreachable(areaKey(p))).toList();
             if (notSkipped.isEmpty()) {
                 halt(player);
                 state = State.IDLE;
+                retryLeftForLater();
                 return;
             }
             BlockPos far = nearest(player, notSkipped);
             if (target == null || !target.equals(far) || (state != State.WALKING && state != State.FLYING)) {
                 target = far;
+                spotFor = null;
                 PrinterAddon.debug("Going to {}, that part isn't loaded yet", far.toShortString());
                 plan(mc, player, far, mode, reach);
             }
@@ -386,25 +431,34 @@ public class Mover {
                 halt(player);
             }
             state = State.IDLE;
+            retryLeftForLater();
             return;
         }
 
         // Flying: go where the most blocks can be placed at once; walking: to the nearest one
-        BlockPos nearest = mode.canFly() && (!mode.canWalk() || flying(player))
-                ? bestSpot(mc, player, schematic, reach) : nearestDoable(mc, player, schematic);
+        boolean planned = mode.canFly() && (!mode.canWalk() || flying(player));
+        BlockPos nearest = planned ? bestSpot(mc, player, schematic, reach) : nearestDoable(mc, player, schematic);
+        if (!planned) {
+            spotFor = null;
+        }
         if (nearest == null) {
             // Nothing can be done right now (waiting for items, or for other blocks first)
             if (state == State.WALKING || state == State.FLYING) {
                 halt(player);
             }
             state = State.IDLE;
+            retryLeftForLater();
             return;
         }
-        // Already there (the same spot again): no flight, just keep placing here
-        if (state != State.WALKING && state != State.FLYING && mode.canFly() && flying(player)
-                && hoverPoint(mc, nearest).distanceToSqr(player.position()) < 1.6 * 1.6) {
-            target = nearest;
-            state = State.WORKING;
+        // The spot chosen is where the player already is, and still nothing is in the printer's reach: the block the
+        // spot is for can't be done from here after all. Leave it for a moment, so the next tick picks another spot
+        // (standing still here "placing within reach" with nothing in reach was the long stops in the logs)
+        if (state != State.WALKING && state != State.FLYING && hoverPoint(mc, nearest).distanceToSqr(player.position()) < 0.3 * 0.3) {
+            BlockPos block = spotFor != null ? spotFor : nearest;
+            skip(block, String.format("the spot planned for it is right where the player is, but it isn't in the printer's reach from here"
+                    + " (%.2f from the eye, printer range %.2f)", Math.sqrt(eye.distanceToSqr(Vec3.atCenterOf(block))), reach));
+            dropWork(block);
+            state = State.IDLE;
             return;
         }
         if (target == null || !target.equals(nearest) || (state != State.WALKING && state != State.FLYING)) {
@@ -414,6 +468,46 @@ public class Mover {
         }
 
         move(mc, player, mode);
+    }
+
+    /**
+     * How long to stay for blocks in reach that aren't placeable yet (the next block of a chain needs the server to
+     * have the last one): a server round trip and two printer turns.
+     */
+    private static long graceTicks() {
+        return 2L * ServerLag.pingTicks(Minecraft.getInstance()) + 2L * AutoBuild.INSTANCE.speed.ticksPerBlock() + GRACE_EXTRA_TICKS;
+    }
+
+    private long lastRetry = -100000;
+
+    /**
+     * Nothing to do but blocks left for later (no way there, nothing happened to them in reach): rather than waiting
+     * out their 30 s, they're tried again after a few seconds, from another spot (the build log showed the player
+     * waiting minutes for the last block of a layer).
+     */
+    private void retryLeftForLater() {
+        if (waitingForItems > 0 || tick - lastRetry < 20 * 5 || tick - lastWorkTick < 20 * 3) {
+            return;
+        }
+        boolean givenUp = AutoBuild.INSTANCE.hasGivenUp();
+        if (skipped.isEmpty() && unreachableAreas.isEmpty() && !givenUp) {
+            return;
+        }
+        lastRetry = tick;
+        StringBuilder which = new StringBuilder();
+        int listed = 0;
+        for (BlockPos pos : skipped.keySet()) {
+            if (listed++ < 6) {
+                which.append(which.isEmpty() ? "" : ", ").append(pos.toShortString());
+            }
+        }
+        BuildLog.line("RETRY", skipped.size() + " block(s) left for later" + (givenUp ? " (and blocks the printer gave up on)" : "")
+                + (unreachableAreas.isEmpty() ? "" : ", " + unreachableAreas.size() + " part(s) no flight got to")
+                + " and nothing else to do: trying them again now" + (which.isEmpty() ? "" : " (" + which + (skipped.size() > 6 ? ", ..." : "") + ")"));
+        skipped.clear();
+        unreachableAreas.clear();
+        AutoBuild.INSTANCE.forgetGivenUp();
+        ticksUntilScan = 0;
     }
 
     /** How many of the nearest unfinished blocks are asked "can this be done now?" when choosing where to go. */
@@ -529,8 +623,6 @@ public class Mover {
     @Nullable
     private BlockPos bestSpotNow(Minecraft mc, LocalPlayer player, WorldSchematic schematic, double reach) {
         Vec3 from = player.position();
-        List<BlockPos> sorted = new ArrayList<>(work);
-        sorted.sort(java.util.Comparator.comparingDouble(p -> from.distanceToSqr(Vec3.atCenterOf(p))));
 
         // Area by area: the layer is cut into 16x16 squares (chunks), done in snake order from the north-west corner.
         // It stays in a square until nothing in it can be placed, then goes to the first square in that order that has
@@ -544,10 +636,8 @@ public class Mover {
             area = null;
             sweep = 1;
         }
-        java.util.Map<Long, List<BlockPos>> workByArea = new HashMap<>();
-        for (BlockPos pos : sorted) {
-            workByArea.computeIfAbsent(areaKey(pos), k -> new ArrayList<>()).add(pos);
-        }
+        // Grouped once per change of the work list (a layer of 5000 blocks was sorted every tick before)
+        java.util.Map<Long, List<BlockPos>> workByArea = areaWork();
         if (area == null && tick - lastNothingDoable < 20) {
             // Searched every area a moment ago and nothing could be placed: don't search the whole layer every tick
             return null;
@@ -556,22 +646,17 @@ public class Mover {
             java.util.Set<Long> keys = new java.util.HashSet<>(workByArea.keySet());
             keys.addAll(unloadedAreas.keySet());
             keys.removeAll(unloadable);
-            // The nearest area with something placeable (nearest block in it), with a small extra cost for areas
+            keys.removeIf(this::areaUnreachable);
+            // The nearest area with something placeable (by how far its square is), with a small extra cost for areas
             // behind in the usual order (north-west to south-east, snaking), so it doesn't hop back and forth.
             // Areas that aren't loaded yet come when nothing loaded is left, nearest first: none is skipped
+            List<Long> byCost = new ArrayList<>(keys);
+            byCost.sort(java.util.Comparator.comparingDouble(key -> areaCost(key, from)));
             Long next = null;
-            double best = Double.MAX_VALUE;
-            for (Long key : keys) {
-                List<BlockPos> list = workByArea.get(key);
-                BlockPos first = firstDoable(mc, schematic, list);
-                if (first == null) {
-                    continue;
-                }
-                double cost = Math.sqrt(from.distanceToSqr(Vec3.atCenterOf(first)))
-                        + (lastAreaOrder != Long.MIN_VALUE && areaOrder(key) < lastAreaOrder ? BEHIND_AREA_COST : 0);
-                if (cost < best) {
-                    best = cost;
+            for (Long key : byCost) {
+                if (anyDoable(mc, schematic, workByArea.get(key))) {
                     next = key;
+                    break;
                 }
             }
             if (next == null) {
@@ -598,15 +683,16 @@ public class Mover {
                         nearUnloadedSince = -1;
                     }
                     area = null;
+                    spotFor = null;
                     return nearestUnloaded;
                 }
             }
             if (next == null) {
                 lastNothingDoable = tick;
-                if (tick - lastNothingDoableReport > 20 * 30 && !sorted.isEmpty()) {
+                if (tick - lastNothingDoableReport > 20 * 30 && !work.isEmpty()) {
                     lastNothingDoableReport = tick;
-                    PrinterAddon.debug("Nothing of the {} unfinished blocks can be placed now; nearest: {}",
-                            sorted.size(), Diagnose.explain(mc, schematic, sorted.getFirst()));
+                    BuildLog.line("WAIT", "nothing of the " + work.size() + " unfinished blocks can be placed now; nearest: "
+                            + Diagnose.explain(mc, schematic, nearest(player, work)));
                 }
                 area = null;
                 return null;
@@ -650,13 +736,17 @@ public class Mover {
         for (int step = 0; step < plan.size(); step++) {
             int i = (planIndex + step) % plan.size();
             BlockPos spot = plan.get(i).atY(y);
-            Vec3 eye = hoverPoint(mc, spot).add(0, eyeHeight, 0);
+            Vec3 feetAt = hoverPoint(mc, spot);
+            Vec3 eye = feetAt.add(0, eyeHeight, 0);
             BlockPos nearest = null;
             double nearestDistance = Double.MAX_VALUE;
             for (BlockPos pos : here) {
-                double d = eye.distanceToSqr(Vec3.atCenterOf(pos));
-                // Planned with a margin: the printer doesn't always manage at its full range
-                if (d < nearestDistance && reachable(mc, schematic, eye, pos, planR + 0.25)) {
+                Vec3 center = Vec3.atCenterOf(pos);
+                double d = eye.distanceToSqr(center);
+                // Planned with a margin: the printer doesn't always manage at its full range. Not a block right at
+                // the feet either: the printer never places within 1 block of the feet or the eye
+                if (d < nearestDistance && reachable(mc, schematic, eye, pos, planR + 0.25)
+                        && (d > 1 && feetAt.distanceToSqr(center) > 1 || BlockCheck.check(mc.level, schematic, pos) == BlockCheck.Result.BUCKET)) {
                     nearestDistance = d;
                     nearest = pos;
                 }
@@ -738,14 +828,13 @@ public class Mover {
     private static List<BlockPos> lawnPlan(long key, Vec3 from, int y, int spacing) {
         int minX = ((int) key) * 16;
         int minZ = ((int) (key >> 32)) * 16;
+        // As many rows and columns as the spacing needs, spread evenly over the 16 blocks (an extra column right next
+        // to the last one at the area's edge was the 1-block hops in the logs)
+        int n = Math.max(1, (int) Math.ceil(16.0 / spacing));
         List<Integer> offsets = new ArrayList<>();
-        for (int o = spacing / 2; o < 16; o += spacing) {
-            offsets.add(o);
+        for (int i = 0; i < n; i++) {
+            offsets.add((int) Math.round((i + 0.5) * 16.0 / n - 0.5));
         }
-        if (offsets.getLast() < 15 - spacing / 2) {
-            offsets.add(15 - spacing / 2);
-        }
-        int n = offsets.size();
         boolean westFirst = from.x < minX + 8;
         boolean northFirst = from.z < minZ + 8;
         List<BlockPos> spots = new ArrayList<>();
@@ -806,25 +895,65 @@ public class Mover {
         if (d > r * r) {
             return false;
         }
-        double bucket = mc.player.blockInteractionRange() - 0.5;
+        double bucket = bucketRange(mc);
         return d <= bucket * bucket || BlockCheck.check(mc.level, schematic, pos) != BlockCheck.Result.BUCKET;
+    }
+
+    /** How far a bucket reaches (as far as the player can use items, a little less to be safe). */
+    private static double bucketRange(Minecraft mc) {
+        return mc.player.blockInteractionRange() - 0.5;
     }
 
     /** Extra cost (blocks) for going back to an area behind in the usual order. */
     private static final double BEHIND_AREA_COST = 12;
 
-    /** The first (nearest, the lists are sorted by distance) block in the list that can be done now. */
-    @Nullable
-    private BlockPos firstDoable(Minecraft mc, WorldSchematic schematic, @Nullable List<BlockPos> positions) {
-        if (positions == null) {
-            return null;
-        }
-        for (BlockPos pos : positions) {
-            if (canDoNow(mc, schematic, pos)) {
-                return pos;
+    /** Bumped whenever the work list changes: the areas it's grouped into are worked out again then. */
+    private int workVersion;
+    private int areasVersion = -1;
+    private final Map<Long, List<BlockPos>> areaWork = new HashMap<>();
+
+    /** The work list by area (see areaKey), grouped again only when the work changed. */
+    private Map<Long, List<BlockPos>> areaWork() {
+        if (areasVersion != workVersion) {
+            areasVersion = workVersion;
+            areaWork.clear();
+            for (BlockPos pos : work) {
+                areaWork.computeIfAbsent(areaKey(pos), k -> new ArrayList<>()).add(pos);
             }
         }
-        return null;
+        return areaWork;
+    }
+
+    /** Takes a block out of the work (until the next scan). */
+    private void dropWork(BlockPos pos) {
+        if (work.remove(pos)) {
+            workVersion++;
+        }
+    }
+
+    /** How far the player is from an area's square, plus the extra cost for going back against the usual order. */
+    private double areaCost(long key, Vec3 from) {
+        double minX = ((int) key) * 16;
+        double minZ = ((int) (key >> 32)) * 16;
+        double dx = Math.max(0, Math.max(minX - from.x, from.x - (minX + 16)));
+        double dz = Math.max(0, Math.max(minZ - from.z, from.z - (minZ + 16)));
+        return Math.sqrt(dx * dx + dz * dz)
+                + (lastAreaOrder != Long.MIN_VALUE && areaOrder(key) < lastAreaOrder ? BEHIND_AREA_COST : 0);
+    }
+
+    /** Parts of the layer that aren't loaded yet and that no flight got to (area -> until when they're left alone). */
+    private final Map<Long, Long> unreachableAreas = new HashMap<>();
+
+    private boolean areaUnreachable(long key) {
+        Long until = unreachableAreas.get(key);
+        if (until == null) {
+            return false;
+        }
+        if (until < tick) {
+            unreachableAreas.remove(key);
+            return false;
+        }
+        return true;
     }
 
     private boolean anyDoable(Minecraft mc, WorldSchematic schematic, @Nullable List<BlockPos> positions) {
@@ -890,10 +1019,10 @@ public class Mover {
             player.setDeltaMovement(Vec3.ZERO);
         }
 
-        // The printer looks for a block every interval: when it found nothing for two of its turns (and nothing
-        // else is busy), the blocks here aren't going to happen now. Move on instead of hovering.
+        // The printer looks for a block every turn: when it found nothing for a few of its turns (and nothing else is
+        // busy), the blocks here aren't going to happen now. Move on instead of hovering.
         // (longer than a just-tried block is held back while the server answers: 2x ping + 6)
-        int idleLimit = Math.max(Math.max(MIN_IDLE_TICKS, 2 * AutoBuild.INSTANCE.speed.interval() + 4),
+        int idleLimit = Math.max(Math.max(MIN_IDLE_TICKS, 4 * AutoBuild.INSTANCE.speed.ticksPerBlock() + 4),
                 2 * ServerLag.pingTicks(Minecraft.getInstance()) + 10);
         int limit = Math.min(idleLimit, Configs.Movement.WORK_WAIT_SECONDS.getIntegerValue() * 20);
         if (workTicksWithoutProgress > limit) {
@@ -911,6 +1040,7 @@ public class Mover {
                 missedAt(Math.sqrt(eye.distanceToSqr(Vec3.atCenterOf(pos))));
             }
             work.removeAll(inReach);
+            workVersion++;
             workTicksWithoutProgress = 0;
             lastInReach = -1;
         }
@@ -940,7 +1070,7 @@ public class Mover {
                 BlockPos block = !work.contains(goalBlock) && spotFor != null ? spotFor : goalBlock;
                 PrinterAddon.debug("Can't do {} from where it can stand, skipping it for now", block.toShortString());
                 skip(block, "got to it over and over and still not done");
-                work.remove(block);
+                dropWork(block);
                 state = State.IDLE;
                 samePlans = 0;
                 lastGoal = null;
@@ -987,7 +1117,7 @@ public class Mover {
 
         PrinterAddon.debug("Can't get to {}, skipping it for now", goalBlock.toShortString());
         skip(goalBlock, "no way to get to it");
-        work.remove(goalBlock);
+        dropWork(goalBlock);
         state = State.IDLE;
     }
 
@@ -1039,6 +1169,13 @@ public class Mover {
      * or above the block itself if it's lower (a block placed later).
      */
     private Vec3 hoverPoint(Minecraft mc, BlockPos goalBlock) {
+        // Worked out once per scan (the same spot is asked for many times while choosing where to go)
+        return hoverCache.computeIfAbsent(goalBlock.immutable(), g -> hoverPointNow(mc, g));
+    }
+
+    private final Map<BlockPos, Vec3> hoverCache = new HashMap<>();
+
+    private Vec3 hoverPointNow(Minecraft mc, BlockPos goalBlock) {
         LayerManager layers = AutoBuild.INSTANCE.layers;
         int baseY = layers.isActive() && goalBlock.getY() >= layers.getLayer() && goalBlock.getY() <= layers.getLayerTop()
                 ? layers.getLayerTop() : goalBlock.getY();
@@ -1142,7 +1279,7 @@ public class Mover {
             if (++replans > 3 || target == null) {
                 if (target != null) {
                     skip(target, "stuck walking");
-                    work.remove(target);
+                    dropWork(target);
                 }
                 halt(player);
                 state = State.IDLE;
@@ -1179,45 +1316,18 @@ public class Mover {
         boolean targetLoaded = mc.level.isLoaded(BlockPos.containing(flyTarget));
         if (flyPath == null || !flyTarget.equals(flyPathFor) || (flyPathBlind && targetLoaded)) {
             long started = Perf.start();
-            flyPathFor = flyTarget;
-            flyIndex = 0;
-            flyPathBlind = false;
-            if (!targetLoaded) {
-                // Not loaded yet (far away): nothing is known there, so straight towards it; the way around
-                // anything is found as soon as it has loaded
-                flyPath = List.of(flyTarget);
-                flyPathBlind = true;
-                BuildLog.line("MOVE", "flying straight towards " + BlockPos.containing(flyTarget).toShortString()
-                        + " (not loaded yet; the way is worked out once it is)");
-            } else if (FlyPath.clear(mc.level, player.position(), flyTarget)) {
-                flyPath = List.of(flyTarget);
-            } else {
-                flyPath = FlyPath.find(mc.level, player.position(), flyTarget);
-                if (flyPath == null) {
-                    // No way there (the spot is inside something, or walled in): leave that block for later instead
-                    // of flying into a building and climbing it
-                    PrinterAddon.debug("No flight path from {} to {}", player.position(), flyTarget);
-                    BuildLog.line("MOVE", "no way to " + BlockPos.containing(flyTarget).toShortString()
-                            + (target != null ? " for " + target.toShortString() : "") + ": leaving it for later");
-                    if (target != null) {
-                        skip(target, "no flight path");
-                        work.remove(target);
-                        if (spotFor != null) {
-                            skip(spotFor, "no flight path");
-                            work.remove(spotFor);
-                        }
-                    }
-                    flyPath = null;
-                    flyTarget = null;
-                    player.setDeltaMovement(Vec3.ZERO);
-                    state = State.IDLE;
-                    return;
-                } else {
-                    BuildLog.line("MOVE", "way around what's in the way: " + flyPath.size() + " turns");
-                    PrinterAddon.debug("Flight path from {} to {}: {}", player.position(), flyTarget, flyPath);
-                }
-            }
+            boolean found = planFlight(mc, player, targetLoaded);
             Perf.end("movement: flight path", started);
+            if (!found) {
+                return;
+            }
+        }
+        // Flying blind towards a part that isn't loaded: something coming up ahead (a building) is flown around, not
+        // climbed (checked twice a second, the way around is worked out with what's loaded by now)
+        if (flyPathBlind && tick % 10 == 0 && tick - blindDetourFailed > 40
+                && !FlyPath.clearAsFarAsKnown(mc.level, player.position(), ahead(player.position(), flyTarget, 6))) {
+            flyPath = null;
+            return;
         }
         Vec3 waypoint = flyPath.get(Math.min(flyIndex, flyPath.size() - 1));
         // On to the next turn once it's reached, or as soon as the straight line there is free (never cut a corner)
@@ -1232,6 +1342,11 @@ public class Mover {
         double distance = to.length();
 
         if (distance < 0.2 && flyIndex >= flyPath.size() - 1) {
+            if (flyLeg) {
+                // The end of one part of a long way: the next part is worked out from here
+                flyPath = null;
+                return;
+            }
             player.setDeltaMovement(Vec3.ZERO);
             state = State.IDLE;
             logArrival(mc, player);
@@ -1252,13 +1367,14 @@ public class Mover {
                 return;
             }
             // Still stuck: leave that block for later (never climb blindly)
+            BlockPos block = spotFor != null ? spotFor : target;
             BuildLog.line("MOVE", "stuck at " + player.blockPosition().toShortString() + " on the way to "
-                    + BlockPos.containing(flyTarget).toShortString() + ": leaving " + (target != null ? target.toShortString() : "it") + " for later");
+                    + BlockPos.containing(flyTarget).toShortString() + ": leaving " + (block != null ? block.toShortString() : "it") + " for later");
             stuckTicks = 0;
             lastDistance = Double.MAX_VALUE;
-            if (target != null) {
-                skip(target, "stuck flying");
-                work.remove(target);
+            if (block != null) {
+                skip(block, "stuck flying");
+                dropWork(block);
             }
             flyPath = null;
             flyTarget = null;
@@ -1273,6 +1389,143 @@ public class Mover {
             motion = new Vec3(motion.x, Math.max(motion.y, 0.3), motion.z);
         }
         player.setDeltaMovement(motion);
+    }
+
+    /** Flights longer than this are flown in parts when the whole way can't be found at once. */
+    private static final double LEG_LENGTH = 40;
+    /** Flying towards a part that isn't loaded: how far ahead the line must be free (else around what's there). */
+    private static final double BLIND_LOOK_AHEAD = 12;
+    private long blindDetourFailed = -1000;
+
+    /** The point this far from {@code from} on the line to {@code to} (or {@code to}, if that's closer). */
+    private static Vec3 ahead(Vec3 from, Vec3 to, double distance) {
+        Vec3 d = to.subtract(from);
+        double length = d.length();
+        return length <= distance ? to : from.add(d.scale(distance / length));
+    }
+
+    /**
+     * Works out the way to flyTarget: straight when nothing is in the way, else around it (FlyPath). When the spot
+     * itself can't be got to, any other spot from where the block is in the printer's reach; a long way part by part.
+     * Returns false (and leaves the block for later) when there's no way at all.
+     */
+    private boolean planFlight(Minecraft mc, LocalPlayer player, boolean targetLoaded) {
+        Vec3 from = player.position();
+        flyPathFor = flyTarget;
+        flyIndex = 0;
+        flyPathBlind = false;
+        flyLeg = false;
+        if (!targetLoaded) {
+            // Not loaded yet (far away): nothing is known there, so towards it in a straight line; the way around
+            // anything is found as soon as it has loaded. Something in the way on the part that is loaded (a
+            // building): around it first
+            if (!FlyPath.clearAsFarAsKnown(mc.level, from, ahead(from, flyTarget, BLIND_LOOK_AHEAD))) {
+                List<Vec3> leg = FlyPath.leg(mc.level, from, flyTarget, BLIND_LOOK_AHEAD + 8);
+                if (leg != null) {
+                    flyPath = leg;
+                    flyLeg = true;
+                    BuildLog.line("MOVE", "something in the way towards " + BlockPos.containing(flyTarget).toShortString()
+                            + " (not loaded yet): around it first, to " + BlockPos.containing(leg.getLast()).toShortString()
+                            + " (" + leg.size() + " turns)");
+                    return true;
+                }
+                // No way around found with what's loaded: straight on for now, looked at again in a while
+                blindDetourFailed = tick;
+            }
+            flyPath = List.of(flyTarget);
+            flyPathBlind = true;
+            BuildLog.line("MOVE", "flying straight towards " + BlockPos.containing(flyTarget).toShortString()
+                    + " (not loaded yet; the way is worked out once it is)");
+            return true;
+        }
+        if (FlyPath.clear(mc.level, from, flyTarget)) {
+            flyPath = List.of(flyTarget);
+            return true;
+        }
+        List<Vec3> way = FlyPath.find(mc.level, from, flyTarget);
+        if (way != null) {
+            flyPath = way;
+            BuildLog.line("MOVE", "way around what's in the way: " + way.size() + " turns");
+            PrinterAddon.debug("Flight path from {} to {}: {}", from, flyTarget, way);
+            return true;
+        }
+        // The planned spot can't be got to (something is in the way there, or it's walled in): any spot from where the
+        // block is in the printer's reach will do, also one to the side or lower down
+        BlockPos block = spotFor != null ? spotFor : target;
+        boolean loose = target != null && isNotLoaded(mc, target);
+        if (block != null && !loose) {
+            double planR = planReach(reach(player));
+            List<Vec3> near = FlyPath.findNear(mc.level, from, block, planR, player.getEyeHeight(), reserved::contains);
+            if (near != null) {
+                Vec3 spot = near.getLast();
+                BuildLog.line("MOVE", String.format("the planned spot %s can't be got to: flying to %.1f %.1f %.1f instead, %.2f from %s (%d turns)",
+                        BlockPos.containing(flyTarget).toShortString(), spot.x, spot.y, spot.z,
+                        Math.sqrt(spot.add(0, player.getEyeHeight(), 0).distanceToSqr(Vec3.atCenterOf(block))), block.toShortString(), near.size()));
+                flyPath = near;
+                flyTarget = spot;
+                flyPathFor = spot;
+                return true;
+            }
+        }
+        // A long way that couldn't be found in one go: the first part of it, the rest from there
+        if (from.distanceTo(flyTarget) > LEG_LENGTH) {
+            List<Vec3> leg = FlyPath.leg(mc.level, from, flyTarget, LEG_LENGTH);
+            if (leg != null) {
+                flyPath = leg;
+                flyLeg = true;
+                BuildLog.line("MOVE", String.format("long way to %s (%.0f blocks): flying the first part to %s (%d turns)",
+                        BlockPos.containing(flyTarget).toShortString(), from.distanceTo(flyTarget),
+                        BlockPos.containing(leg.getLast()).toShortString(), leg.size()));
+                return true;
+            }
+        }
+        noWay(mc, player, block, loose);
+        return false;
+    }
+
+    /**
+     * No flight gets there. A part of the layer that isn't loaded yet: that whole area waits a while (instead of one
+     * block after the other, each with a full search: the start of a log had 33 of those in a row). A block: left for
+     * later (see skip: after the 4th time it's left out of this layer, so the layer goes on).
+     */
+    private void noWay(Minecraft mc, LocalPlayer player, @Nullable BlockPos block, boolean loose) {
+        PrinterAddon.debug("No flight path from {} to {}", player.position(), flyTarget);
+        BuildLog.line("MOVE", "no way to " + BlockPos.containing(flyTarget).toShortString() + " or any spot in reach of "
+                + (block != null ? block.toShortString() : "it") + " from " + player.blockPosition().toShortString());
+        if (loose && target != null) {
+            unreachableAreas.put(areaKey(target), tick + SKIP_TICKS);
+            BuildLog.line("SKIP", "area " + areaName(areaKey(target)) + " for 30 s: no flight path to the part that isn't loaded yet ("
+                    + target.toShortString() + ")");
+        } else if (block != null) {
+            skip(block, "no flight path to any spot in reach of it");
+            dropWork(block);
+            // The blocks right around it are most likely in the same closed-in spot (a room of a building): left for
+            // later too, without each costing a search (they're tried one by one when nothing else is left)
+            List<BlockPos> around = new ArrayList<>();
+            for (BlockPos pos : work) {
+                if (Math.abs(pos.getX() - block.getX()) <= 2 && Math.abs(pos.getY() - block.getY()) <= 2
+                        && Math.abs(pos.getZ() - block.getZ()) <= 2) {
+                    around.add(pos);
+                }
+            }
+            for (BlockPos pos : around) {
+                skipped.put(pos, tick + SKIP_TICKS);
+                dropWork(pos);
+            }
+            if (!around.isEmpty()) {
+                BuildLog.line("SKIP", around.size() + " blocks around " + block.toShortString() + " for 30 s too (most likely just as closed in)");
+            }
+        }
+        flyPath = null;
+        flyTarget = null;
+        player.setDeltaMovement(Vec3.ZERO);
+        state = State.IDLE;
+    }
+
+    /** True for a spot in a part of the layer that isn't loaded yet (only gone to so it loads). */
+    private static boolean isNotLoaded(Minecraft mc, BlockPos pos) {
+        WorldSchematic schematic = SchematicHelper.world();
+        return schematic == null || BlockCheck.check(mc.level, schematic, pos) == BlockCheck.Result.UNLOADED;
     }
 
     private void logArrival(Minecraft mc, LocalPlayer player) {
@@ -1369,14 +1622,26 @@ public class Mover {
         return best;
     }
 
+    private int scannedLayer = Integer.MIN_VALUE;
+
     /** Finds the unfinished positions in the current layer range. */
     private void scan(Minecraft mc, WorldSchematic schematic) {
         work.clear();
+        workVersion++;
+        hoverCache.clear();
         reserved.clear();
         unloaded.clear();
         unloadedAreas.clear();
         waitingForItems = 0;
         LayerManager layers = AutoBuild.INSTANCE.layers;
+        // Only the layer auto build is on (also if Litematica's layer view was changed by hand meanwhile)
+        boolean oneLayer = layers.isActive() && !layers.isFinishingDeferred();
+        if (layers.getLayer() != scannedLayer) {
+            // A new layer: what was left for later on the last one says nothing about this one
+            scannedLayer = layers.getLayer();
+            skipCounts.clear();
+            unreachableAreas.clear();
+        }
 
         LocalPlayer player = mc.player;
         boolean creative = player.getAbilities().instabuild;
@@ -1387,14 +1652,11 @@ public class Mover {
                 for (int x = area.minX(); x <= area.maxX(); x++) {
                     for (int z = area.minZ(); z <= area.maxZ(); z++) {
                         pos.set(x, y, z);
-                        if (!DataManager.getRenderLayerRange().isPositionWithinRange(pos)) {
+                        if (oneLayer ? y < layers.getLayer() || y > layers.getLayerTop()
+                                : !DataManager.getRenderLayerRange().isPositionWithinRange(pos)) {
                             continue;
                         }
                         BlockCheck.Result result = BlockCheck.check(mc.level, schematic, pos);
-                        if (result == BlockCheck.Result.UNLOADED && layers.isActive()
-                                && (y < layers.getLayer() || y > layers.getLayerTop())) {
-                            continue;
-                        }
                         if (result == BlockCheck.Result.UNLOADED) {
                             if (unloaded.size() < 512) {
                                 unloaded.add(pos.immutable());
@@ -1425,7 +1687,8 @@ public class Mover {
                         }
                         boolean protectedHere = result == BlockCheck.Result.PROTECTED
                                 && !AutoBuild.INSTANCE.placedDuringBuild(immutable);
-                        if (protectedHere || skipped.containsKey(immutable)) {
+                        // Left out of this layer (no spot in reach of it can be got to): listed at the end
+                        if (protectedHere || skipped.containsKey(immutable) || AutoBuild.INSTANCE.couldNotPlace.contains(immutable)) {
                             continue;
                         }
                         if (result == BlockCheck.Result.MISSING && !creative && !hasItemFor(player, target)) {
