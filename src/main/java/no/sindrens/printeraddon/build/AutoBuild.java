@@ -96,6 +96,10 @@ public class AutoBuild {
     /** The printer is paused while a block is being broken, so the two don't swap the held item. */
     public boolean shouldPausePrinter() {
         if (running) {
+            // Not while flying to the next spot: blocks placed on the move come out wrong
+            if (Minecraft.getInstance().player != null && mover.isTravelling(Minecraft.getInstance().player)) {
+                return true;
+            }
             // Optional cap for strict anticheats: no more than this many placements per second
             int cap = Configs.Speed.MAX_PLACEMENTS_PER_SECOND.getIntegerValue();
             if (cap > 0 && stats.placedInLastSecond() >= cap) {
@@ -246,7 +250,10 @@ public class AutoBuild {
                                     StateRules.itemFor(target);
                             item = stack.isEmpty() ? null : stack.getItem();
                         } else if (result == BlockCheck.Result.BUCKET) {
-                            item = Fluids.bucketFor(target);
+                            // One bucket does them all
+                            if (Fluids.bucketFor(target) != null) {
+                                needs.put(Fluids.bucketFor(target), 1);
+                            }
                         }
                         if (item != null) {
                             needs.merge(item, 1, Integer::sum);
@@ -318,7 +325,7 @@ public class AutoBuild {
             buyCooldown--;
             return false;
         }
-        // Buy when an item is (nearly) used up: less than a stack left, or less than the layer needs
+        // Buy when an item is (nearly) used up
         net.minecraft.world.entity.player.Inventory inventory = mc.player.getInventory();
         java.util.Map<net.minecraft.world.item.Item, Integer> list = new java.util.LinkedHashMap<>();
         boolean outOfSomething = false;
@@ -329,11 +336,16 @@ public class AutoBuild {
             if (have == 0) {
                 outOfSomething |= couldntBuy.contains(item) || !Configs.Shop.AUTO_BUY.getBooleanValue();
             }
-            if (!couldntBuy.contains(item) && have < Math.min(need, item.getDefaultMaxStackSize())
+            // Only once it's (nearly) used up: this many or fewer left
+            if (!couldntBuy.contains(item) && have <= Configs.Shop.BUY_WHEN_LEFT.getIntegerValue()
                     && no.sindrens.printeraddon.shop.ShopBuyer.room(mc, item) > 0) {
                 list.put(item, entry.getValue());
             }
         }
+        // Never more than fits: the free slots are shared between the items, a few always stay free
+        java.util.Map<net.minecraft.world.item.Item, Integer> fitted = InventoryBudget.fit(inventory, list);
+        list.clear();
+        list.putAll(fitted);
 
         if (list.isEmpty() || !Configs.Shop.AUTO_BUY.getBooleanValue()) {
             // Pause only when something is used up that can't be bought, and the layer can't go on
@@ -677,9 +689,10 @@ public class AutoBuild {
 
         airPlace.tick(mc, breaker.isBusy());
 
-        // The add-on's own placing (buckets, rails, minecarts) only when switched on; normally the printer places all
+        // Buckets (water in waterlogged blocks, so farmland is wet before it's tilled) always: the printer has no
+        // buckets. The add-on's own placing of rails and minecarts only when switched on
         boolean addonPlaces = Configs.Layers.ADDON_PLACES.getBooleanValue();
-        if (addonPlaces && !breaker.isBusy() && !airPlace.isActive() && !rails.isBusy() && (fluids.isBusy() || PrinterBridge.isIdle())) {
+        if (!breaker.isBusy() && !airPlace.isActive() && !rails.isBusy() && (fluids.isBusy() || PrinterBridge.isIdle())) {
             fluids.tick(mc);
         }
         if (addonPlaces && !breaker.isBusy() && !airPlace.isActive() && !fluids.isBusy() && (rails.isBusy() || PrinterBridge.isIdle())) {

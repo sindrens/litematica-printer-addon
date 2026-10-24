@@ -129,23 +129,81 @@ public class Fluids {
 
         BlockPos next = findNext(mc, player, schematic);
         if (next == null) {
-            return false;
+            return refill(mc, player);
         }
 
         // Put the bucket in hand now, use it next tick (switching items takes a moment to reach the server)
         Item bucket = bucketFor(schematic.getBlockState(next));
         Inventory inventory = player.getInventory();
-        int slot = inventory.findSlotMatchingItem(new ItemStack(bucket));
+        int slot = slotOf(inventory, bucket);
         if (slot == -1) {
             return false;
         }
         if (Inventory.isHotbarSlot(slot)) {
             inventory.setSelectedSlot(slot);
         } else {
-            InventoryUtils.setPickedItemToHand(slot, new ItemStack(bucket), mc);
+            InventoryUtils.setPickedItemToHand(slot, inventory.getItem(slot).copy(), mc);
         }
         pending = next;
         return true;
+    }
+
+    /**
+     * Out of water buckets but holding empty ones: fill one from water in reach that isn't part of the build (a
+     * pool or an infinite water source next to it).
+     */
+    private boolean refill(Minecraft mc, LocalPlayer player) {
+        Inventory inventory = player.getInventory();
+        if (inventory.contains(s -> s.is(Items.WATER_BUCKET)) || !inventory.contains(s -> s.is(Items.BUCKET))) {
+            return false;
+        }
+        WorldSchematic schematic = SchematicHelper.world();
+        List<SchematicHelper.Area> areas = SchematicHelper.areas();
+        double reach = player.blockInteractionRange() - 0.3;
+        Vec3 eye = player.getEyePosition();
+        BlockPos center = BlockPos.containing(eye);
+        int r = (int) Math.ceil(reach);
+        for (BlockPos pos : BlockPos.betweenClosed(center.offset(-r, -r, -r), center.offset(r, r, r))) {
+            if (eye.distanceToSqr(Vec3.atCenterOf(pos)) > reach * reach || !mc.level.getFluidState(pos).isSourceOfType(
+                    net.minecraft.world.level.material.Fluids.WATER) || !(mc.level.getBlockState(pos).getBlock() instanceof LiquidBlock)) {
+                continue;
+            }
+            if (schematic != null && SchematicHelper.isInAnyArea(areas, pos)) {
+                continue;
+            }
+            Vec3 point = Vec3.atCenterOf(pos);
+            BlockHitResult hit = mc.level.clip(new ClipContext(eye, eye.add(point.subtract(eye).normalize().scale(reach + 1)),
+                    ClipContext.Block.OUTLINE, ClipContext.Fluid.SOURCE_ONLY, player));
+            if (hit.getType() != HitResult.Type.BLOCK || !hit.getBlockPos().equals(pos)) {
+                continue;
+            }
+            int slot = slotOf(inventory, Items.BUCKET);
+            if (Inventory.isHotbarSlot(slot)) {
+                inventory.setSelectedSlot(slot);
+            } else {
+                InventoryUtils.setPickedItemToHand(slot, inventory.getItem(slot).copy(), mc);
+            }
+            PrinterBridge.releaseLook();
+            float oldYaw = player.getYRot();
+            float oldPitch = player.getXRot();
+            lookAt(player, point);
+            mc.gameMode.useItem(player, InteractionHand.MAIN_HAND);
+            Clicks.restoreView(player, oldYaw, oldPitch);
+            cooldown = COOLDOWN;
+            PrinterAddon.debug("Filled a bucket at {}", pos.toShortString());
+            return true;
+        }
+        return false;
+    }
+
+    /** The slot of a bucket by item only (an infinite water bucket from a plugin has its own name and lore). */
+    private static int slotOf(Inventory inventory, Item item) {
+        for (int slot = 0; slot < Inventory.INVENTORY_SIZE; slot++) {
+            if (inventory.getItem(slot).is(item)) {
+                return slot;
+            }
+        }
+        return -1;
     }
 
     @Nullable

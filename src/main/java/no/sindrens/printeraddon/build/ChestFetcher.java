@@ -47,8 +47,8 @@ public class ChestFetcher {
     private final Map<BlockPos, Map<Item, Integer>> known = new HashMap<>();
     private final Map<Item, Integer> wanted = new LinkedHashMap<>();
     private final List<BlockPos> toVisit = new ArrayList<>();
-    /** Items being put away (instead of taken). */
-    private final java.util.Set<Item> storing = new java.util.HashSet<>();
+    /** Items being put away (instead of taken), with how many stacks of each stay in the inventory. */
+    private final Map<Item, Integer> storing = new HashMap<>();
     @Nullable
     private BlockPos current;
     private Phase phase;
@@ -69,6 +69,16 @@ public class ChestFetcher {
 
     /** Puts every stack of these items into the nearest linked containers. Returns false if there are none. */
     public boolean startStore(Minecraft mc, java.util.Set<Item> items) {
+        Map<Item, Integer> keep = new HashMap<>();
+        items.forEach(item -> keep.put(item, 0));
+        return startStore(mc, keep);
+    }
+
+    /**
+     * Puts stacks of these items into the nearest linked containers until only the given number of stacks of each
+     * is left in the inventory. Returns false if there are no linked containers.
+     */
+    public boolean startStore(Minecraft mc, Map<Item, Integer> items) {
         if (!Configs.Shop.FETCH_FROM_CHESTS.getBooleanValue() || mc.player == null || isBusy() || items.isEmpty()) {
             return false;
         }
@@ -81,18 +91,25 @@ public class ChestFetcher {
         }
         wanted.clear();
         storing.clear();
-        storing.addAll(items);
+        storing.putAll(items);
         taken = 0;
         return true;
     }
 
     private boolean anyLeftToStore(Inventory inventory) {
-        for (int slot = 0; slot < 36; slot++) {
-            if (storing.contains(inventory.getItem(slot).getItem())) {
-                return true;
+        Map<Item, Integer> stacks = stacks(inventory);
+        return storing.entrySet().stream().anyMatch(e -> stacks.getOrDefault(e.getKey(), 0) > e.getValue());
+    }
+
+    private static Map<Item, Integer> stacks(Inventory inventory) {
+        Map<Item, Integer> stacks = new HashMap<>();
+        for (int slot = 0; slot < Inventory.INVENTORY_SIZE; slot++) {
+            ItemStack stack = inventory.getItem(slot);
+            if (!stack.isEmpty()) {
+                stacks.merge(stack.getItem(), 1, Integer::sum);
             }
         }
-        return false;
+        return stacks;
     }
 
     /**
@@ -205,10 +222,14 @@ public class ChestFetcher {
                 }
                 AbstractContainerMenu menu = player.containerMenu;
                 if (!storing.isEmpty()) {
+                    Map<Item, Integer> stacks = stacks(player.getInventory());
                     for (Slot slot : menu.slots) {
                         ItemStack stack = slot.getItem();
-                        if (slot.container instanceof Inventory && !stack.isEmpty() && storing.contains(stack.getItem())) {
+                        Integer keep = stack.isEmpty() ? null : storing.get(stack.getItem());
+                        // Smallest stacks are not picked first, but that's fine: whole stacks go either way
+                        if (slot.container instanceof Inventory && keep != null && stacks.getOrDefault(stack.getItem(), 0) > keep) {
                             taken += stack.getCount();
+                            stacks.merge(stack.getItem(), -1, Integer::sum);
                             mc.gameMode.handleContainerInput(menu.containerId, slot.index, 0, ContainerInput.QUICK_MOVE, player);
                         }
                     }

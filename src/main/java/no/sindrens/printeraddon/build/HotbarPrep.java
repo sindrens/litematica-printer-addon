@@ -32,6 +32,9 @@ public class HotbarPrep {
             return false;
         }
         Inventory inventory = player.getInventory();
+        if (mergeSmallStacks(mc, player, inventory)) {
+            return true;
+        }
 
         // The items this layer needs most, that are in the inventory at all
         List<Map.Entry<Item, Integer>> byNeed = new ArrayList<>(layerNeeds.entrySet());
@@ -67,6 +70,39 @@ public class HotbarPrep {
             AutoBuild.INSTANCE.inventory.moved();
             PrinterAddon.trace("Hotbar: moved {} to slot {} (the layer needs {})", item, to + 1, layerNeeds.get(item));
             return true;
+        }
+        return false;
+    }
+
+    /**
+     * Puts a small stack onto another stack of the same item (the refill before the last item leaves a single one
+     * behind every stack). Never the stack in hand.
+     */
+    private static boolean mergeSmallStacks(Minecraft mc, LocalPlayer player, Inventory inventory) {
+        int selected = inventory.getSelectedSlot();
+        for (int a = 0; a < Inventory.INVENTORY_SIZE; a++) {
+            ItemStack small = inventory.getItem(a);
+            if (a == selected || small.isEmpty() || small.getCount() >= small.getMaxStackSize() || small.isDamageableItem()) {
+                continue;
+            }
+            for (int b = 0; b < Inventory.INVENTORY_SIZE; b++) {
+                ItemStack other = inventory.getItem(b);
+                if (b == a || other.getCount() >= other.getMaxStackSize() || other.getCount() < small.getCount()
+                        || !ItemStack.isSameItemSameComponents(small, other)) {
+                    continue;
+                }
+                int id = player.inventoryMenu.containerId;
+                int from = a < 9 ? 36 + a : a;
+                int to = b < 9 ? 36 + b : b;
+                mc.gameMode.handleContainerInput(id, from, 0, ContainerInput.PICKUP, player);
+                mc.gameMode.handleContainerInput(id, to, 0, ContainerInput.PICKUP, player);
+                if (!player.inventoryMenu.getCarried().isEmpty()) {
+                    mc.gameMode.handleContainerInput(id, from, 0, ContainerInput.PICKUP, player);
+                }
+                AutoBuild.INSTANCE.inventory.moved();
+                PrinterAddon.trace("Merged {} {} from slot {} onto slot {}", small.getCount(), small.getItem(), a, b);
+                return true;
+            }
         }
         return false;
     }

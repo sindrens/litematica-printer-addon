@@ -81,7 +81,10 @@ public final class CostEstimate {
                         BlockCheck.Result result = BlockCheck.check(mc.level, schematic, pos);
                         Item item = null;
                         if (result == BlockCheck.Result.BUCKET) {
-                            item = Fluids.bucketFor(target);
+                            // One bucket does them all
+                            if (Fluids.bucketFor(target) != null) {
+                                needed.put(Fluids.bucketFor(target), 1);
+                            }
                         } else if (result != BlockCheck.Result.OK && result != BlockCheck.Result.EXTRA) {
                             ItemStack stack = StateRules.itemFor(target);
                             item = stack.isEmpty() ? null : stack.getItem();

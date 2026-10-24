@@ -129,15 +129,10 @@ public class Configs implements IConfigHandler {
                         + "Off: only blocks the schematic needs count. Use the 'Clear extra blocks' key to remove them.",
                 "Extra blocks keep layer open");
 
-        public static final ConfigBoolean PLANT_WITH_TILLING = new ConfigBoolean("plantWithTilling", true,
-                "When a layer has farmland, build it together with the layer above, so seeds and stems are planted\n"
-                        + "right after tilling. Farmland without a crop and without water dries back to dirt.",
-                "Plant right after tilling");
-
         public static final ConfigBoolean ADDON_PLACES = new ConfigBoolean("addonPlacesBlocks", false,
-                "Let the add-on place what Litematica Printer can't: water and lava with buckets, rails (with temporary\n"
-                        + "rails for the right shape) and minecarts. Off: the printer places everything and the add-on only moves,\n"
-                        + "breaks wrong blocks, gets the items and sets the printer's settings.",
+                "Let the add-on place what Litematica Printer can't: rails (with temporary rails for the right shape) and\n"
+                        + "minecarts. Off: the printer places every block and the add-on only moves, breaks wrong blocks, gets the\n"
+                        + "items and sets the printer's settings. Water (waterlogged blocks) is always put in with a bucket.",
                 "Add-on places blocks itself");
         public static final ConfigBoolean USE_AIR_PLACE = new ConfigBoolean("useAirPlaceForFloatingBlocks", false,
                 "When every missing block within reach floats (nothing next to it to place it against), turn on the\n"
@@ -147,7 +142,6 @@ public class Configs implements IConfigHandler {
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
                 AUTO_LAYER, ADDON_PLACES, LAYER_CHECK_INTERVAL, STUCK_REPORT_SECONDS, SKIP_STUCK_SECONDS, EXTRA_BLOCKS_BLOCK_LAYER,
-                PLANT_WITH_TILLING,
                 USE_AIR_PLACE);
     }
 
@@ -223,6 +217,10 @@ public class Configs implements IConfigHandler {
                 "During auto build, buy what the current layer is missing from the shop (as much as fits in the inventory).\n"
                         + "Needs a shop scan of the server first (J+S). No spending limit.",
                 "Buy missing items");
+        public static final ConfigInteger BUY_WHEN_LEFT = new ConfigInteger("buyWhenLeft", 8, 0, 64,
+                "Only get more of an item (from linked chests or the shop) once this many or fewer are left in the inventory.\n"
+                        + "How much is bought is shared between the items the layer needs, and a few slots always stay free.",
+                "Buy when this many are left");
         public static final ConfigString SHOP_SECTION = new ConfigString("shopSection", "minecraft:paper",
                 "Which button in the /shop main menu leads to the money shop. Only that one is opened.\n"
                         + "An item id (minecraft:paper) or part of the button's name. Empty = open every button.",
@@ -239,7 +237,7 @@ public class Configs implements IConfigHandler {
                 "Shop menu timeout (ticks)");
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                FETCH_FROM_CHESTS, AUTO_BUY, SHOP_COMMAND, SHOP_SECTION, PROBE_BUY_SCREEN, MAX_PAGES, WAIT_TIMEOUT_TICKS);
+                FETCH_FROM_CHESTS, AUTO_BUY, BUY_WHEN_LEFT, SHOP_COMMAND, SHOP_SECTION, PROBE_BUY_SCREEN, MAX_PAGES, WAIT_TIMEOUT_TICKS);
     }
 
     public static class Speed {

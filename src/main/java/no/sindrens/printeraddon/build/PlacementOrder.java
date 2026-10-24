@@ -59,6 +59,10 @@ public final class PlacementOrder {
         if (needsSupport(target) && !target.canSurvive(level, pos)) {
             return "needs the block it stands on or hangs from first";
         }
+        BlockPos water = waterFirst(level, schematic, pos, target);
+        if (water != null) {
+            return "tilling waits for the water at " + water.toShortString();
+        }
 
         // Rails wait until they'll get the right shape (see RailHelper; only when the add-on places rails itself)
         RailHelper.Plan plan = no.sindrens.printeraddon.config.Configs.Layers.ADDON_PLACES.getBooleanValue()
@@ -104,6 +108,26 @@ public final class PlacementOrder {
             }
         }
 
+        return null;
+    }
+
+    /**
+     * Farmland is tilled only once the water that keeps it wet is in (a waterlogged block or water within 4 blocks,
+     * as the game checks): tilled without water it dries back to dirt. The dirt itself may go in before.
+     * Returns the water still missing, or null.
+     */
+    @Nullable
+    public static BlockPos waterFirst(Level level, WorldSchematic schematic, BlockPos pos, BlockState target) {
+        if (target.getBlock() != net.minecraft.world.level.block.Blocks.FARMLAND || level.getBlockState(pos).isAir()) {
+            return null;
+        }
+        for (BlockPos near : BlockPos.betweenClosed(pos.offset(-4, 0, -4), pos.offset(4, 1, 4))) {
+            BlockState wanted = schematic.getBlockState(near);
+            if (wanted.getFluidState().isSource() && wanted.getFluidState().getType().isSame(net.minecraft.world.level.material.Fluids.WATER)
+                    && !level.getFluidState(near).isSource()) {
+                return near.immutable();
+            }
+        }
         return null;
     }
 

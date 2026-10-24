@@ -90,6 +90,9 @@ public class InventoryCleaner {
             cooldown = COOLDOWN;
             return true;
         }
+        if (store && leftovers.isEmpty() && makeRoomForMissing(mc, inventory, fetcher)) {
+            return true;
+        }
         if (store && !leftovers.isEmpty()) {
             sinceStored = 0;
             if (fetcher.startStore(mc, leftovers)) {
@@ -99,6 +102,55 @@ public class InventoryCleaner {
             // No linked chest: they're dropped on the next ticks
         }
         return false;
+    }
+
+    /**
+     * Full of things the layer needs while it also needs something that isn't here at all (and can't be bought for
+     * lack of room): the item with the most stacks gives up two, to the linked chests or else on the ground.
+     */
+    private boolean makeRoomForMissing(Minecraft mc, Inventory inventory, ChestFetcher fetcher) {
+        if (freeSlots(inventory) > 1) {
+            return false;
+        }
+        Map<Item, Integer> layerNeeds = AutoBuild.INSTANCE.layers.layerNeeds();
+        Item missing = layerNeeds.keySet().stream().filter(item -> inventory.countItem(item) == 0).findFirst().orElse(null);
+        if (missing == null) {
+            return false;
+        }
+        Map<Item, Integer> stacks = new java.util.HashMap<>();
+        for (int slot = 0; slot < 36; slot++) {
+            ItemStack stack = inventory.getItem(slot);
+            if (!stack.isEmpty() && !stack.isDamageableItem() && layerNeeds.containsKey(stack.getItem())) {
+                stacks.merge(stack.getItem(), 1, Integer::sum);
+            }
+        }
+        Item most = stacks.entrySet().stream().filter(e -> e.getValue() >= 3).max(Map.Entry.comparingByValue())
+                .map(Map.Entry::getKey).orElse(null);
+        if (most == null) {
+            return false;
+        }
+        String what = new ItemStack(most).getHoverName().getString();
+        String forWhat = new ItemStack(missing).getHoverName().getString();
+        sinceStored = 0;
+        if (fetcher.startStore(mc, Map.of(most, stacks.get(most) - 2))) {
+            no.sindrens.printeraddon.util.Chat.info("Inventory full: putting 2 stacks of " + what + " in your chest to make room for " + forWhat + ".");
+            return true;
+        }
+        // No linked chest: drop one stack (smallest first), the next round the other
+        int smallest = -1;
+        for (int slot = 0; slot < 36; slot++) {
+            ItemStack stack = inventory.getItem(slot);
+            if (stack.is(most) && (smallest == -1 || stack.getCount() < inventory.getItem(smallest).getCount())) {
+                smallest = slot;
+            }
+        }
+        no.sindrens.printeraddon.util.Chat.warn("Inventory full: dropping a stack of " + what + " to make room for " + forWhat
+                + ". Link a chest (J+B) to keep extras instead.");
+        mc.gameMode.handleContainerInput(mc.player.inventoryMenu.containerId, smallest < 9 ? 36 + smallest : smallest, 1,
+                ContainerInput.THROW, mc.player);
+        sinceStored = 20 * 60 + 1 - 20 * 5;
+        cooldown = COOLDOWN;
+        return true;
     }
 
     public static int freeSlots(Inventory inventory) {

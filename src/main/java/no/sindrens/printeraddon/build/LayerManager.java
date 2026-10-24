@@ -380,25 +380,8 @@ public class LayerManager {
         }
     }
 
-    /** The farmland layer is built together with the layer above it (seeds, stems), if enabled. */
+    /** One layer at a time, always (farmland stays wet from the water put in before it's tilled). */
     private int topFor(Level level, WorldSchematic schematic, List<SchematicHelper.Area> areas, int y) {
-        if (!Configs.Layers.PLANT_WITH_TILLING.getBooleanValue() || y >= maxY) {
-            return y;
-        }
-        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
-        for (SchematicHelper.Area area : areas) {
-            if (y < area.minY() || y > area.maxY()) {
-                continue;
-            }
-            for (int x = area.minX(); x <= area.maxX(); x++) {
-                for (int z = area.minZ(); z <= area.maxZ(); z++) {
-                    pos.set(x, y, z);
-                    if (schematic.getBlockState(pos).getBlock() == Blocks.FARMLAND) {
-                        return y + 1;
-                    }
-                }
-            }
-        }
         return y;
     }
 
@@ -584,11 +567,13 @@ public class LayerManager {
                             examples.add(pos.immutable());
                         }
                         if (findings != null && result == BlockCheck.Result.BUCKET && Fluids.bucketFor(schematic.getBlockState(pos)) != null) {
-                            findings.needs.merge(Fluids.bucketFor(schematic.getBlockState(pos)), 1, Integer::sum);
+                            // One bucket does them all (an infinite water bucket, or refilled from water nearby)
+                            findings.needs.put(Fluids.bucketFor(schematic.getBlockState(pos)), 1);
                         }
                         if (findings != null && result == BlockCheck.Result.MISSING) {
                             BlockState target = schematic.getBlockState(pos);
-                            if (!PlacementOrder.isReady(level, schematic, pos, target)) {
+                            if (!PlacementOrder.isReady(level, schematic, pos, target)
+                                    && PlacementOrder.waterFirst(level, schematic, pos, target) == null) {
                                 findings.waiting.add(pos.immutable());
                             }
                             ItemStack item = StateRules.itemFor(target);

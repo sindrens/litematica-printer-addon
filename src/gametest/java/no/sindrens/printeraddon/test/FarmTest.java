@@ -265,6 +265,10 @@ public class FarmTest implements FabricClientGameTest {
             }
         }
 
+        // Like the infinite water bucket players have: empty buckets go, full ones come back
+        if (needed.containsKey(Items.WATER_BUCKET)) {
+            commands.add("clear @p minecraft:bucket");
+        }
         for (Map.Entry<Item, Integer> entry : needed.entrySet()) {
             int missing = entry.getValue();
             if (missing <= 0 || freeSlots <= 0) {

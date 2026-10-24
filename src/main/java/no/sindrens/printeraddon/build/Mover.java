@@ -106,6 +106,21 @@ public class Mover {
     }
 
     /** What the player is doing now, for the build stats. */
+    /**
+     * True while flying or walking to the next spot, or still slowing down: the printer waits then, a block placed
+     * from a moving player is placed from where the server doesn't have the player yet (wrong facing, wrong spot).
+     */
+    public boolean isTravelling(LocalPlayer player) {
+        if (gliding) {
+            return false;
+        }
+        if (state == State.FLYING || state == State.WALKING) {
+            return true;
+        }
+        Vec3 motion = player.getDeltaMovement();
+        return motion.x * motion.x + motion.z * motion.z > 0.03 * 0.03 || Math.abs(motion.y) > 0.08;
+    }
+
     public BuildStats.Activity activity() {
         return switch (state) {
             case WORKING -> BuildStats.Activity.PLACING;
@@ -342,7 +357,7 @@ public class Mover {
                 return true;
             }
             if (result == BlockCheck.Result.BUCKET) {
-                return Configs.Layers.ADDON_PLACES.getBooleanValue() && Fluids.canDo(mc, schematic, p, schematic.getBlockState(p));
+                return Fluids.canDo(mc, schematic, p, schematic.getBlockState(p));
             }
             if (result != BlockCheck.Result.MISSING && result != BlockCheck.Result.PRINTER_FIXES) {
                 return false;
