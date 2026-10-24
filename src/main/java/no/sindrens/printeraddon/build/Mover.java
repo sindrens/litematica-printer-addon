@@ -68,6 +68,12 @@ public class Mover {
     private int pathIndex;
     @Nullable
     private Vec3 flyTarget;
+    /** The way to flyTarget around whatever is in the way (see FlyPath), and how far along it the player is. */
+    @Nullable
+    private List<Vec3> flyPath;
+    @Nullable
+    private Vec3 flyPathFor;
+    private int flyIndex;
 
     private int workTicksWithoutProgress;
     private int lastInReach = -1;
@@ -386,6 +392,11 @@ public class Mover {
             if (result != BlockCheck.Result.MISSING && result != BlockCheck.Result.PRINTER_FIXES) {
                 return false;
             }
+            // Held back by the add-on's own order (water first, what it stands on first...): the printer won't get
+            // it, so it doesn't count as something to place here
+            if (!PlacementOrder.isReady(mc.level, schematic, p, schematic.getBlockState(p))) {
+                return false;
+            }
             me.aleksilassila.litematica.printer.SchematicBlockState state =
                     new me.aleksilassila.litematica.printer.SchematicBlockState(mc.level, schematic, p);
             for (me.aleksilassila.litematica.printer.guides.Guide guide : printerGuides.getInteractionGuides(state)) {
@@ -491,36 +502,49 @@ public class Mover {
             java.util.Set<Long> keys = new java.util.HashSet<>(workByArea.keySet());
             keys.addAll(unloadedAreas.keySet());
             keys.removeAll(unloadable);
-            List<Long> order = new ArrayList<>(keys);
-            // Snake order, but going on from the last area: areas behind (that became doable again, e.g. when
-            // items arrived) come after the rest of the layer, not with a flight back across it
-            long here = lastAreaOrder;
-            order.sort(java.util.Comparator.comparingLong((Long key) -> areaOrder(key) >= here ? 0 : 1)
-                    .thenComparingLong(Mover::areaOrder));
+            // The nearest area with something placeable (nearest block in it), with a small extra cost for areas
+            // behind in the usual order (north-west to south-east, snaking), so it doesn't hop back and forth.
+            // Areas that aren't loaded yet come when nothing loaded is left, nearest first: none is skipped
             Long next = null;
-            for (Long key : order) {
-                if (anyDoable(mc, schematic, workByArea.get(key))) {
-                    next = key;
-                    break;
+            double best = Double.MAX_VALUE;
+            for (Long key : keys) {
+                List<BlockPos> list = workByArea.get(key);
+                BlockPos first = firstDoable(mc, schematic, list);
+                if (first == null) {
+                    continue;
                 }
-                BlockPos notLoaded = unloadedAreas.get(key);
-                if (notLoaded != null) {
-                    // An earlier area isn't loaded yet: go there first, so no area is skipped
-                    if (Vec3.atCenterOf(notLoaded).distanceToSqr(from) < 24 * 24) {
+                double cost = Math.sqrt(from.distanceToSqr(Vec3.atCenterOf(first)))
+                        + (lastAreaOrder != Long.MIN_VALUE && areaOrder(key) < lastAreaOrder ? BEHIND_AREA_COST : 0);
+                if (cost < best) {
+                    best = cost;
+                    next = key;
+                }
+            }
+            if (next == null) {
+                BlockPos nearestUnloaded = null;
+                Long unloadedKey = null;
+                for (Long key : keys) {
+                    BlockPos notLoaded = unloadedAreas.get(key);
+                    if (notLoaded != null && (nearestUnloaded == null
+                            || from.distanceToSqr(Vec3.atCenterOf(notLoaded)) < from.distanceToSqr(Vec3.atCenterOf(nearestUnloaded)))) {
+                        nearestUnloaded = notLoaded;
+                        unloadedKey = key;
+                    }
+                }
+                if (nearestUnloaded != null) {
+                    if (Vec3.atCenterOf(nearestUnloaded).distanceToSqr(from) < 24 * 24) {
                         if (nearUnloadedSince < 0) {
                             nearUnloadedSince = tick;
                         } else if (tick - nearUnloadedSince > 20 * 15) {
-                            PrinterAddon.debug("Area {} doesn't load: leaving it", areaName(key));
-                            unloadable.add(key);
+                            PrinterAddon.debug("Area {} doesn't load: leaving it", areaName(unloadedKey));
+                            unloadable.add(unloadedKey);
                             nearUnloadedSince = -1;
                         }
                     } else {
                         nearUnloadedSince = -1;
                     }
-                    if (!unloadable.contains(key)) {
-                        area = null;
-                        return notLoaded;
-                    }
+                    area = null;
+                    return nearestUnloaded;
                 }
             }
             if (next == null) {
@@ -645,6 +669,23 @@ public class Mover {
     private Long area;
 
     /** True if one of these unfinished blocks can be placed now (stops at the first). */
+    /** Extra cost (blocks) for going back to an area behind in the usual order. */
+    private static final double BEHIND_AREA_COST = 12;
+
+    /** The first (nearest, the lists are sorted by distance) block in the list that can be done now. */
+    @Nullable
+    private BlockPos firstDoable(Minecraft mc, WorldSchematic schematic, @Nullable List<BlockPos> positions) {
+        if (positions == null) {
+            return null;
+        }
+        for (BlockPos pos : positions) {
+            if (canDoNow(mc, schematic, pos)) {
+                return pos;
+            }
+        }
+        return null;
+    }
+
     private boolean anyDoable(Minecraft mc, WorldSchematic schematic, @Nullable List<BlockPos> positions) {
         if (positions == null) {
             return false;
@@ -948,10 +989,40 @@ public class Mover {
             return;
         }
 
-        Vec3 to = flyTarget.subtract(player.position());
+        // The way there, around buildings and anything else in the way (worked out once per target)
+        if (flyPath == null || !flyTarget.equals(flyPathFor)) {
+            long started = Perf.start();
+            flyPathFor = flyTarget;
+            flyIndex = 0;
+            if (FlyPath.clear(mc.level, player.position(), flyTarget)) {
+                flyPath = List.of(flyTarget);
+            } else {
+                flyPath = FlyPath.find(mc.level, player.position(), flyTarget);
+                if (flyPath == null) {
+                    PrinterAddon.debug("No flight path from {} to {}", player.position(), flyTarget);
+                    BuildLog.line("MOVE", "no way found around what's in the way to " + BlockPos.containing(flyTarget).toShortString()
+                            + ": flying straight, going up where blocked");
+                    flyPath = List.of(flyTarget);
+                } else {
+                    BuildLog.line("MOVE", "way around what's in the way: " + flyPath.size() + " turns");
+                    PrinterAddon.debug("Flight path from {} to {}: {}", player.position(), flyTarget, flyPath);
+                }
+            }
+            Perf.end("movement: flight path", started);
+        }
+        Vec3 waypoint = flyPath.get(Math.min(flyIndex, flyPath.size() - 1));
+        // On to the next turn once it's reached, or as soon as the straight line there is free (never cut a corner)
+        if (flyIndex < flyPath.size() - 1 && (waypoint.distanceToSqr(player.position()) < 0.15 * 0.15
+                || (tick % 4 == 0 && FlyPath.clear(mc.level, player.position(), flyPath.get(flyIndex + 1))))) {
+            flyIndex++;
+            waypoint = flyPath.get(flyIndex);
+            lastDistance = Double.MAX_VALUE;
+        }
+
+        Vec3 to = waypoint.subtract(player.position());
         double distance = to.length();
 
-        if (distance < 0.2) {
+        if (distance < 0.2 && flyIndex >= flyPath.size() - 1) {
             player.setDeltaMovement(Vec3.ZERO);
             state = State.IDLE;
             return;
@@ -961,8 +1032,15 @@ public class Mover {
             lastDistance = distance;
             stuckTicks = 0;
         } else if (++stuckTicks > STUCK_TICKS) {
-            // Something in the way: go a bit higher
-            PrinterAddon.debug("Stuck flying at {}, going up", player.blockPosition().toShortString());
+            // Something in the way after all (a block changed): find the way again first, then go higher
+            PrinterAddon.debug("Stuck flying at {}, finding the way again", player.blockPosition().toShortString());
+            if (replans < 2) {
+                flyPath = null;
+                replans++;
+                stuckTicks = 0;
+                lastDistance = Double.MAX_VALUE;
+                return;
+            }
             flyTarget = flyTarget.add(0, 1, 0);
             stuckTicks = 0;
             lastDistance = Double.MAX_VALUE;

@@ -54,6 +54,9 @@ public class FarmTest implements FabricClientGameTest {
 
     @Override
     public void runTest(ClientGameTestContext context) {
+        if (TestFilter.skip(getClass())) {
+            return;
+        }
         String file = System.getenv("PRINTER_ADDON_SCHEMATIC");
         if (file == null || file.isBlank()) {
             return;

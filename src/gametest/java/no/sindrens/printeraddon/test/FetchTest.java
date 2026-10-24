@@ -20,6 +20,9 @@ import java.util.Map;
 public class FetchTest implements FabricClientGameTest {
     @Override
     public void runTest(ClientGameTestContext context) {
+        if (TestFilter.skip(getClass())) {
+            return;
+        }
         if (System.getenv("PRINTER_ADDON_SCHEMATIC") != null) {
             return;
         }

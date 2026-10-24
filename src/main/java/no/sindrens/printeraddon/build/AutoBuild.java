@@ -129,23 +129,51 @@ public class AutoBuild {
     }
 
     /** The printer is paused while a block is being broken, so the two don't swap the held item. */
+    /** Why the printer was last paused (for the stats). */
+    public String pauseReason = "-";
+
     public boolean shouldPausePrinter() {
+        String why = pauseReasonNow();
+        if (why != null) {
+            pauseReason = why;
+        }
+        return why != null;
+    }
+
+    @javax.annotation.Nullable
+    private String pauseReasonNow() {
         if (running) {
             // Not while flying to the next spot: blocks placed on the move come out wrong
             if (Minecraft.getInstance().player != null && mover.isTravelling(Minecraft.getInstance().player)) {
-                return true;
+                return "flying";
             }
             // Optional cap for strict anticheats: no more than this many placements per second
             int cap = Configs.Speed.MAX_PLACEMENTS_PER_SECOND.getIntegerValue();
             if (cap > 0 && stats.placedInLastSecond() >= cap) {
-                return true;
+                return "placement cap";
             }
             // A swap still on its way to the server would make the printer click with the wrong item
             inventory.update(Minecraft.getInstance());
-            if (inventory.settling() || ServerLag.shouldWait(Minecraft.getInstance())) {
-                return true;
+            if (inventory.settling()) {
+                return "item swap settling";
+            }
+            if (ServerLag.shouldWait(Minecraft.getInstance())) {
+                return "server lag";
             }
         }
+        if (breaker.isBusy()) {
+            return "breaking";
+        }
+        if (eater.isBusy()) {
+            return "eating";
+        }
+        if (fluids.isBusy()) {
+            return "bucket";
+        }
+        return pausedByOthers() ? "chest/shop/crafting/rails" : null;
+    }
+
+    private boolean pausedByOthers() {
         return breaker.isBusy() || eater.isBusy() || fluids.isBusy() || rails.isBusy() || entities.isBusy() || crafter.isBusy() || fetcher.isBusy()
                 || no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.isRunning();
     }

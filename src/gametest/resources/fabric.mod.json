@@ -8,6 +8,7 @@
       "no.sindrens.printeraddon.test.TestCommands"
     ],
     "fabric-client-gametest": [
+      "no.sindrens.printeraddon.test.FlyTest",
       "no.sindrens.printeraddon.test.CraftTest",
       "no.sindrens.printeraddon.test.FetchTest",
       "no.sindrens.printeraddon.test.ResumeTest",

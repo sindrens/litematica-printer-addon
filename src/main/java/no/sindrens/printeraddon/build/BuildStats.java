@@ -83,7 +83,13 @@ public class BuildStats {
      * Counts the printer's free turns. Once a minute in the log: how many were used for a block, and why the others
      * weren't (paused by the add-on, nothing unfinished in reach, none ready, none a printer guide can place yet).
      */
+    /** Paused turns of the last minute by reason. */
+    private final java.util.Map<String, Integer> minutePauses = new java.util.TreeMap<>();
+
     public void printerTurn(Turn turn) {
+        if (turn == Turn.PAUSED) {
+            minutePauses.merge(AutoBuild.INSTANCE.pauseReason, 1, Integer::sum);
+        }
         minuteTurns[turn.ordinal()]++;
         recentTurns[turn.ordinal()]++;
         if (minuteStart < 0) {
@@ -98,6 +104,12 @@ public class BuildStats {
             }
             PrinterAddon.debug("[rate] last minute: {} placed; printer's free turns{}; {}", totalPlaced - minutePlaced,
                     sb, AutoBuild.INSTANCE.speed.describe());
+            if (!minutePauses.isEmpty()) {
+                StringBuilder pauses = new StringBuilder();
+                minutePauses.forEach((why, n) -> pauses.append(why).append(' ').append(n * 100 / all).append("%, "));
+                PrinterAddon.debug("[rate] paused because: {}", pauses.substring(0, pauses.length() - 2));
+                minutePauses.clear();
+            }
             String perf = Perf.report();
             BuildLog.line("PERF", "last minute, avg/max per tick: " + perf);
             PrinterAddon.trace("[perf] {}", perf);
