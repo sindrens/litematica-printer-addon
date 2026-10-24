@@ -89,6 +89,7 @@ public final class BuildHud {
         int busy = build.stats.printerBusyPercent();
         add(lines, colors, "Printer busy " + busy + "%" + (busy < 80 ? " (mostly idle because: " + build.stats.printerIdleReason() + ")" : ""), GREY);
         add(lines, colors, "Doing: " + build.doing(), GREY);
+        add(lines, colors, build.spendingLine(), GREY);
 
         Map<Item, Integer> missing = build.shoppingList;
         if (!missing.isEmpty()) {

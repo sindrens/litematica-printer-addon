@@ -44,7 +44,9 @@ public final class Resume {
         try {
             Files.createDirectories(file().getParent());
             // Line 1: what's being built; line 2: the player's own layer view, to put back at the end
-            Files.writeString(file(), key(mc) + "\n" + AutoBuild.INSTANCE.layers.savedRange(), StandardCharsets.UTF_8);
+            // Line 3: the spending limit and what was spent (resuming doesn't ask again)
+            Files.writeString(file(), key(mc) + "\n" + AutoBuild.INSTANCE.layers.savedRange() + "\n"
+                    + AutoBuild.INSTANCE.spendingText(), StandardCharsets.UTF_8);
         } catch (IOException e) {
             PrinterAddon.LOGGER.warn("Couldn't save the resume file", e);
         }
@@ -76,6 +78,9 @@ public final class Resume {
             if (saved[0].trim().equals(key(mc))) {
                 joinedTicks = WAIT_AFTER_JOIN + GIVE_UP_AFTER + 1;
                 Chat.info("Picking auto build up again where it stopped (J+Q to stop).");
+                if (saved.length > 2) {
+                    AutoBuild.INSTANCE.restoreSpending(saved[2]);
+                }
                 AutoBuild.INSTANCE.start(mc);
                 if (saved.length > 1) {
                     AutoBuild.INSTANCE.layers.useSavedRange(saved[1].trim());

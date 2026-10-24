@@ -38,7 +38,7 @@ It builds layer by layer from the bottom and carries on by itself after a restar
 ## Good to know
 
 - Don't click in the shop or `/pv` while it's buying.
-- There's no spending limit, so keep an eye on your money.
+- At start it asks how much it may spend in the shop (or click "No limit").
 - It uses `/feed` and `/craft` if you have permission.
 - It stops when you take damage or another player comes close.
 - With the add-on off, Litematica Printer works as normal.

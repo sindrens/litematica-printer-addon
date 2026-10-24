@@ -60,6 +60,60 @@ public final class CostEstimate {
     private record Price(double each, String how) {
     }
 
+    /** About what the rest of the build costs in the shop (null without a schematic or a shop scan). */
+    @Nullable
+    public static Double estimate(Minecraft mc) {
+        WorldSchematic schematic = SchematicHelper.world();
+        if (schematic == null || mc.player == null) {
+            return null;
+        }
+        ShopScanResult shop = loadShop(mc);
+        if (shop == null) {
+            return null;
+        }
+        double total = 0;
+        for (Map.Entry<Item, Integer> entry : needed(mc, schematic).entrySet()) {
+            int missing = entry.getValue() - mc.player.getInventory().countItem(entry.getKey());
+            Price price = missing <= 0 ? null : priceOf(shop, entry.getKey());
+            if (price != null) {
+                total += missing * price.each();
+            }
+        }
+        return total;
+    }
+
+    /** What the rest of the build needs (item -> count). */
+    private static Map<Item, Integer> needed(Minecraft mc, WorldSchematic schematic) {
+        Map<Item, Integer> needed = new LinkedHashMap<>();
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        for (SchematicHelper.Area area : SchematicHelper.areas()) {
+            for (int y = area.minY(); y <= area.maxY(); y++) {
+                for (int x = area.minX(); x <= area.maxX(); x++) {
+                    for (int z = area.minZ(); z <= area.maxZ(); z++) {
+                        pos.set(x, y, z);
+                        BlockState target = schematic.getBlockState(pos);
+                        if (target.isAir()) {
+                            continue;
+                        }
+                        BlockCheck.Result result = BlockCheck.check(mc.level, schematic, pos);
+                        if (result == BlockCheck.Result.BUCKET) {
+                            if (Fluids.bucketFor(target) != null) {
+                                needed.put(Fluids.bucketFor(target), 1);
+                            }
+                        } else if (result != BlockCheck.Result.OK && result != BlockCheck.Result.EXTRA) {
+                            ItemStack stack = StateRules.itemFor(target);
+                            if (!stack.isEmpty()) {
+                                needed.merge(stack.getItem(), 1, Integer::sum);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        EntityPlacer.missing(mc, schematic).forEach((item, count) -> needed.merge(item, count, Integer::sum));
+        return needed;
+    }
+
     public static void show(Minecraft mc) {
         WorldSchematic schematic = SchematicHelper.world();
         if (schematic == null || mc.player == null) {
@@ -246,18 +300,28 @@ public final class CostEstimate {
         if (objective == null) {
             return null;
         }
+        // "Balance: $9.9M" first, else any line with a $ amount (the lines come in no particular order)
+        Double anyDollar = null;
         for (PlayerScoreEntry entry : scoreboard.listPlayerScores(objective)) {
             PlayerTeam team = scoreboard.getPlayersTeam(entry.owner());
-            String line = PlayerTeam.formatNameForTeam(team, entry.ownerName()).getString();
-            String plain = ShopText.plain(line);
-            if (plain.contains("$") || plain.contains("bal") || plain.contains("money") || plain.contains("coins")) {
-                int dollar = line.indexOf('$');
-                Double value = ShopText.parseNumber(dollar >= 0 ? line.substring(dollar + 1) : line);
-                if (value != null) {
-                    return value;
-                }
+            // Read in plain letters: small-caps "ᴍ" is a million too
+            String plain = ShopText.plain(PlayerTeam.formatNameForTeam(team, entry.ownerName()).getString());
+            boolean named = plain.contains("bal") || plain.contains("money") || plain.contains("coins");
+            if (!named && !plain.contains("$")) {
+                continue;
+            }
+            int dollar = plain.indexOf('$');
+            Double value = ShopText.parseNumber(dollar >= 0 ? plain.substring(dollar + 1) : plain);
+            if (value == null) {
+                continue;
+            }
+            if (named) {
+                return value;
+            }
+            if (anyDollar == null) {
+                anyDollar = value;
             }
         }
-        return null;
+        return anyDollar;
     }
 }

@@ -834,7 +834,20 @@ public class AutoBuild {
             buyCooldown = 40;
             return crafter.isBusy();
         }
-        if (no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.start(mc, toBuy)) {
+        // Within the spending limit: what's left of it goes into this trip (the shop cuts the list to fit)
+        double budget = spendLimit < 0 ? Double.MAX_VALUE : spendLimit - spentTotal;
+        if (budget <= 1) {
+            if (!warnedLimit) {
+                warnedLimit = true;
+                Chat.warn(String.format("Spending limit reached ($%,.0f of $%,.0f): nothing more is bought. Start again (J+B) for a new limit,"
+                        + " or bring the items.", spentTotal, spendLimit));
+                BuildLog.line("SHOP", "spending limit reached: " + spendingLine());
+            }
+            cantBuy(toBuy.keySet());
+            craftAfterBuying = java.util.List.of();
+            return false;
+        }
+        if (no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.start(mc, toBuy, budget)) {
             buying = true;
             mover.stop(mc);
             return true;
@@ -937,6 +950,7 @@ public class AutoBuild {
         wholeByY.clear();
         wholePartial.clear();
         couldntBuy.clear();
+        warnedLimit = false;
         buying = false;
         buyCooldown = 0;
         cleaner.reset();
@@ -1011,7 +1025,7 @@ public class AutoBuild {
             String why = reason != null ? "stopped: " + reason
                     : resumeLater ? "disconnected" + (disconnectReason.isEmpty() ? "" : ": " + disconnectReason) + " (picks up again after rejoining)"
                     : "stopped by you";
-            BuildLog.line("END", why + " | " + stats.total());
+            BuildLog.line("END", why + " | " + stats.total() + " | " + spendingLine());
             disconnectReason = "";
             logIgnored(mc);
             BuildLog.line("PERF", Perf.report());
@@ -1119,6 +1133,54 @@ public class AutoBuild {
 
     private boolean resumeLater;
 
+    /** The most auto build may spend in the shop on this build (-1: no limit), and what it has spent on it. */
+    private double spendLimit = -1;
+    private double spentTotal;
+    private boolean warnedLimit;
+
+    /** Starting by hand: with buying on, the spending limit is asked first (see SpendingLimitGui). */
+    public void askAndStart(Minecraft mc) {
+        if (running) {
+            return;
+        }
+        if (!Configs.Shop.AUTO_BUY.getBooleanValue() || mc.player == null || mc.player.getAbilities().instabuild) {
+            spendLimit = -1;
+            start(mc);
+            return;
+        }
+        fi.dy.masa.malilib.gui.GuiBase.openGui(new no.sindrens.printeraddon.gui.SpendingLimitGui());
+    }
+
+    public void startWithLimit(Minecraft mc, double limit) {
+        spendLimit = limit;
+        spentTotal = 0;
+        start(mc);
+        if (running) {
+            Chat.info(limit < 0 ? "Spending limit: none." : String.format("Spending limit for this build: $%,.0f.", limit));
+        }
+    }
+
+    /** For the resume file: "limit spent". */
+    public String spendingText() {
+        return spendLimit + " " + spentTotal;
+    }
+
+    /** After rejoining: the same limit, with what was spent already. */
+    public void restoreSpending(String text) {
+        try {
+            String[] parts = text.trim().split(" ");
+            spendLimit = Double.parseDouble(parts[0]);
+            spentTotal = parts.length > 1 ? Double.parseDouble(parts[1]) : 0;
+        } catch (RuntimeException ignored) {
+        }
+    }
+
+    /** "Spent $1,234 of $50,000" for the on-screen display. */
+    public String spendingLine() {
+        return spendLimit < 0 ? String.format("Spent $%,.0f (no limit)", spentTotal)
+                : String.format("Spent $%,.0f of $%,.0f", spentTotal, spendLimit);
+    }
+
     /**
      * The whole add-on on or off (J+A, or the button in the J+B menu). Off: everything it does stops and every hook
      * into Litematica Printer passes straight through, so the printer works exactly as without the add-on.
@@ -1137,7 +1199,7 @@ public class AutoBuild {
         if (running) {
             stop(mc, null);
         } else {
-            start(mc);
+            askAndStart(mc);
         }
     }
 
@@ -1217,7 +1279,9 @@ public class AutoBuild {
             if (running) {
                 stop(mc, null);
             } else {
-                start(mc);
+                // Switched on in the settings: the spending limit is asked first, like with the Start button
+                Configs.Generic.AUTO_BUILD.setBooleanValue(false);
+                askAndStart(mc);
             }
         }
 
@@ -1287,9 +1351,16 @@ public class AutoBuild {
         }
         if (buying) {
             buying = false;
+            spentTotal += buyer.spent();
             cantBuy(buyer.notSold());
             cantBuy(buyer.notBought());
-            couldntBuy.keySet().removeAll(buyer.bought().keySet());
+            // Bought, and none of it failed: buyable again whenever needed (a purchase that stopped halfway, out
+            // of money, isn't tried again right away)
+            for (net.minecraft.world.item.Item item : buyer.bought().keySet()) {
+                if (!buyer.notBought().contains(item)) {
+                    couldntBuy.remove(item);
+                }
+            }
             if (!buyer.notBought().isEmpty()) {
                 // Bought part of the list: the rest (other items, or the same from what it's made of) right away
                 tripGoesOn = true;

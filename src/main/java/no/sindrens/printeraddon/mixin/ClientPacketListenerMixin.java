@@ -23,4 +23,12 @@ public class ClientPacketListenerMixin {
     private void printer_addon$clicksDone(ClientboundBlockChangedAckPacket packet, CallbackInfo ci) {
         no.sindrens.printeraddon.build.ServerAcks.acked(packet.sequence());
     }
+
+    /** Server messages in chat ("You purchased 64x Hopper", "You don't have enough money"): heard while buying. */
+    @Inject(method = "handleSystemChat", at = @At("TAIL"))
+    private void printer_addon$serverMessage(net.minecraft.network.protocol.game.ClientboundSystemChatPacket packet, CallbackInfo ci) {
+        if (!packet.overlay() && no.sindrens.printeraddon.config.Configs.enabled()) {
+            no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.serverMessage(packet.content().getString());
+        }
+    }
 }

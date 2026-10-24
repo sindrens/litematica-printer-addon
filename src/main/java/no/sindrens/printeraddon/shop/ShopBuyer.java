@@ -41,6 +41,8 @@ public class ShopBuyer {
     private static final int STABLE_TICKS = 5;
     /** How long a +amount click may take before it counts as "the amount can't go higher". */
     private static final int AMOUNT_TIMEOUT = 20;
+    /** Amount clicks for one purchase at most, whatever the screen does (then what's set is bought). */
+    private static final int MAX_AMOUNT_CLICKS = 40;
     private static final Pattern PLUS = Pattern.compile("^\\+\\s*(\\d+)$");
     private static final Pattern MINUS = Pattern.compile("^[-\u2212]\\s*(\\d+)$");
     private static final Pattern TIMES = Pattern.compile("^x\\s*(\\d+)$");
@@ -58,6 +60,16 @@ public class ShopBuyer {
         boolean noStacks;
         /** Bought of this order so far. */
         int got;
+        /** The amount screen doesn't go this high (a + to it changed nothing), in items. */
+        int below = Integer.MAX_VALUE;
+        /** Amount clicks in a row that changed nothing. */
+        int unchanged;
+        /** A + changed nothing: going up by one from then on, to find the most the screen takes. */
+        boolean probing;
+        /** Amount clicks since the last purchase. */
+        int amountClicks;
+        /** Times the shop was opened again because the amount screen couldn't be lowered. */
+        int reopened;
 
         Order(Item item, int left, ShopScanResult.Location location) {
             this.item = item;
@@ -99,6 +111,26 @@ public class ShopBuyer {
     @Nullable
     private String stacksTitle;
     private boolean confirmTried;
+    /**
+     * The open amount screen is the stacks screen with +1/+16/+32 buttons that count stacks and "purchase item"
+     * (the item shows the total, "x 64" for one stack), not one with a choice per number of stacks.
+     */
+    private boolean stacksScreen;
+    /** The last amount click was a + (so no change means the screen can't go higher). */
+    private boolean lastClickPlus;
+    /** The number on the last amount button clicked (+16 is 16), and the items one step was worth then. */
+    private int lastStep;
+    private int lastUnit = 1;
+    /** Items one step of the open amount screen's buttons is worth, as seen when a click changed it (0: not seen yet). */
+    private int stepItems;
+    /** What the server said in chat since the last purchase click (null: nothing). */
+    @Nullable
+    private String serverSaid;
+    /** Server messages written to the build log in this run. */
+    private int messagesLogged;
+    /** The -N buttons seen on the normal buy screen and on the stacks screen (shown only once the amount is above 1). */
+    private static final java.util.Set<Integer> MINUS_SEEN_NORMAL = new java.util.HashSet<>();
+    private static final java.util.Set<Integer> MINUS_SEEN_STACKS = new java.util.HashSet<>();
     /** Every different screen the stacks button led to is written to the build log once. */
     private final java.util.Set<String> loggedScreens = new java.util.HashSet<>();
 
@@ -117,6 +149,51 @@ public class ShopBuyer {
 
     public List<Item> missingFromScan() {
         return missingFromScan;
+    }
+
+    /** A chat message from the server: written to the build log while buying, and read after a purchase click. */
+    public void serverMessage(String text) {
+        String line = text.strip();
+        if (!running || line.isEmpty()) {
+            return;
+        }
+        if (messagesLogged++ < 60) {
+            no.sindrens.printeraddon.build.BuildLog.line("SHOP", "server: " + line);
+        }
+        serverSaid = line;
+    }
+
+    /**
+     * Why the server turned the last purchase down, from what it said after the click: "money", "space" (a full
+     * inventory), "limit" (a limit or cooldown), or null when it said nothing like that.
+     */
+    @Nullable
+    private String refusal() {
+        return refusalIn(serverSaid);
+    }
+
+    @Nullable
+    static String refusalIn(@Nullable String said) {
+        if (said == null) {
+            return null;
+        }
+        String p = ShopText.plain(said).replace('’', '\'');
+        if (p.contains("purchased") || p.contains("bought")) {
+            return null;
+        }
+        // Said as a "no" (a broadcast like "Earn enough money by voting!" or "Limited time offer" isn't one)
+        boolean no = p.contains("not ") || p.contains("n't") || p.contains("dont ") || p.contains("cannot") || p.contains("unable");
+        boolean money = p.contains("money") || p.contains("funds") || p.contains("balance") || p.contains("coins") || p.contains("$");
+        if (p.contains("insufficient") || (no && p.contains("afford")) || (no && p.contains("enough") && money)) {
+            return "money";
+        }
+        if (p.contains("inventory") && (p.contains("is full") || (no && (p.contains("space") || p.contains("room"))))) {
+            return "space";
+        }
+        if ((p.contains("limit") && (p.contains("reached") || no)) || p.contains("cooldown") || p.contains("too fast")) {
+            return "limit";
+        }
+        return null;
     }
 
     public List<Item> notSold() {
@@ -209,6 +286,19 @@ public class ShopBuyer {
      * server, nothing on the list sold there, or no room.
      */
     public boolean start(Minecraft mc, Map<Item, Integer> list) {
+        return start(mc, list, Double.MAX_VALUE);
+    }
+
+    /** What the last trip cost (from the scanned prices). */
+    public double spent() {
+        return spent;
+    }
+
+    /**
+     * Starts buying the list, for at most {@code budget} (the spending limit's rest): each item is cut to what the
+     * money still left pays for, in the list's order.
+     */
+    public boolean start(Minecraft mc, Map<Item, Integer> list, double budget) {
         if (running || mc.player == null) {
             return false;
         }
@@ -218,6 +308,8 @@ public class ShopBuyer {
         notBought.clear();
         spent = 0;
         error = null;
+        serverSaid = null;
+        messagesLogged = 0;
 
         Path file = scanFile(mc);
         if (file == null) {
@@ -251,7 +343,22 @@ public class ShopBuyer {
                 no.sindrens.printeraddon.build.BuildLog.line("SHOP", "can't buy " + names(List.of(entry.getKey())) + ": " + why
                         + " | the scan from " + shop.scannedAt + " has " + shop.categories.size() + " categories, " + shop.items.size() + " items");
             } else if (entry.getValue() > 0) {
-                orders.add(new Order(entry.getKey(), entry.getValue(), location));
+                int count = entry.getValue();
+                if (budget < Double.MAX_VALUE && location.buyPrice != null && location.buyPrice > 0) {
+                    double each = location.buyPrice / Math.max(1, location.amountShown);
+                    int affordable = (int) Math.floor(budget / each);
+                    if (affordable < count) {
+                        no.sindrens.printeraddon.build.BuildLog.line("SHOP", String.format("%s: %d wanted, %d within the spending limit ($%,.0f left)",
+                                names(List.of(entry.getKey())), count, affordable, budget));
+                        count = affordable;
+                    }
+                    budget -= count * each;
+                }
+                if (count > 0) {
+                    orders.add(new Order(entry.getKey(), count, location));
+                } else {
+                    notBought.add(entry.getKey());
+                }
             }
         }
         if (!notSold.isEmpty()) {
@@ -320,6 +427,11 @@ public class ShopBuyer {
                     return;
                 }
                 mc.player.connection.sendCommand(shop.shopCommand);
+                stacksScreen = false;
+                stepItems = 0;
+                // A fresh buy screen: the most it takes (if found) is kept, the clicks start over
+                order.amountClicks = 0;
+                order.probing = false;
                 navigation.clear();
                 navigation.addAll(order.location.path);
                 ShopScanResult.Category category = categoryOf(order.location.path);
@@ -414,12 +526,11 @@ public class ShopBuyer {
                     fail(order, "clicking " + order.location.name + " didn't open the buy screen");
                     return;
                 }
-                int amount = amountShown(snapshot, order.id);
                 int room = room(mc, order.item);
                 int stack = order.item.getDefaultMaxStackSize();
                 // A stack or more still to buy (and room for it): whole stacks in one purchase (a stack the normal way
                 // is 49 with the +32/+16 buttons and then 15 clicks on +1)
-                if (!stacksBroken && !order.noStacks && Math.min(order.left, room) >= stack && stack > 1) {
+                if (!stacksScreen && !stacksBroken && !order.noStacks && Math.min(order.left, room) >= stack && stack > 1) {
                     Integer stacks = stacksButton(snapshot);
                     if (stacks != null) {
                         PrinterAddon.debug("Buying {} by the stack ({} wanted, room for {})", order.location.name, order.left, room);
@@ -431,26 +542,63 @@ public class ShopBuyer {
                         logScreen("buy screen for " + order.location.name + " (no purchase stacks button found)", snapshot);
                     }
                 }
-                int want = Math.max(1, Math.min(64, Math.min(order.left, room)));
-                Integer button = null;
-                if (amount < want) {
-                    button = plusButton(snapshot, want - amount, PLUS);
-                    // Many +1 clicks for the last few aren't worth it: buy what's set, the rest next time
-                    if (button != null && stepOf(snapshot, button) == 1 && want - amount > 4 && amount >= 16) {
-                        button = null;
+                int amount = shownAmount(snapshot, order.id, stack, stacksScreen);
+                // On the stacks screen only whole stacks are bought, and its +N buttons add N stacks
+                int unit = stepItems > 0 ? stepItems : stacksScreen ? stack : 1;
+                // The most this screen takes (64 on the normal one; lower once a + changed nothing)
+                int most = Math.min(order.below - 1, stacksScreen ? Integer.MAX_VALUE : 64);
+                int want = stacksScreen ? Math.min(Math.min(order.left, room), most) / stack * stack
+                        : Math.max(1, Math.min(most, Math.min(order.left, room)));
+                if (stacksScreen && want < stack) {
+                    // Less than a stack left to buy (or room for): the rest on the normal buy screen
+                    order.noStacks = true;
+                    mc.player.closeContainer();
+                    phase = Phase.OPEN;
+                    waited = 0;
+                    delay = clickDelay();
+                    return;
+                }
+                // -N buttons seen on this kind of screen: they show up again once it's above 1
+                java.util.Set<Integer> minusSeen = stacksScreen ? MINUS_SEEN_STACKS : MINUS_SEEN_NORMAL;
+                minusSeen.addAll(buttonSteps(snapshot, MINUS).keySet());
+                AmountStep next = amountStep(snapshot, amount, want, unit, most, minusSeen);
+                Integer button = next == null ? null : next.slot();
+                // Many clicks for the last few aren't worth it: buy what's set, the rest next time
+                if (!stacksScreen && next != null && amount < want && amount >= 16 && next.clicks() > 4) {
+                    button = null;
+                }
+                if (order.probing && amount < want) {
+                    // A + went past what the screen takes: +1 at a time from here, to find where it stops
+                    button = buttonSteps(snapshot, PLUS).get(1);
+                }
+                if (order.unchanged > 3 || order.amountClicks >= MAX_AMOUNT_CLICKS) {
+                    // Clicks keep changing nothing (or far too many): buy what's set (or start over if that's too much)
+                    order.unchanged = 0;
+                    button = null;
+                }
+                if (button == null && amount > want) {
+                    // Can't get it down to what's wanted here: a fresh buy screen (it starts at 1), never more than asked
+                    minusSeen.clear();
+                    if (++order.reopened > 2) {
+                        if (!stacksScreen) {
+                            fail(order, "its buy screen can't be set lower than " + amount);
+                            return;
+                        }
+                        order.noStacks = true;
                     }
-                } else if (amount > want) {
-                    button = plusButton(snapshot, amount - want, MINUS);
-                    if (button == null && amount > room) {
-                        // Can't lower it here: start over with a fresh buy screen
-                        mc.player.closeContainer();
-                        phase = Phase.OPEN;
-                        delay = clickDelay();
-                        return;
-                    }
+                    PrinterAddon.debug("The buy screen for {} is at {} and can't go down to {}: opening it again", order.location.name, amount, want);
+                    mc.player.closeContainer();
+                    phase = Phase.OPEN;
+                    waited = 0;
+                    delay = clickDelay();
+                    return;
                 }
                 if (button != null) {
+                    order.amountClicks++;
                     lastAmount = amount;
+                    lastStep = stepOf(snapshot, button);
+                    lastClickPlus = ShopText.plain(itemAt(snapshot, button).name()).startsWith("+");
+                    lastUnit = unit;
                     before = snapshot.signature();
                     clickSlot(mc, snapshot, button);
                     phase = Phase.WAIT_AMOUNT;
@@ -461,12 +609,33 @@ public class ShopBuyer {
             }
             case WAIT_AMOUNT -> {
                 ScreenSnapshot snapshot = stableMenu(mc);
-                if (snapshot != null && amountShown(snapshot, order.id) != lastAmount) {
+                int stack = order.item.getDefaultMaxStackSize();
+                int amount = snapshot == null ? lastAmount : shownAmount(snapshot, order.id, stack, stacksScreen);
+                if (amount != lastAmount) {
+                    // What one step is worth here, as seen: an item, or a stack on the stacks screen
+                    int change = Math.abs(amount - lastAmount);
+                    if (lastStep > 0 && (change == lastStep || change == lastStep * stack)) {
+                        stepItems = change / lastStep;
+                    } else if (lastClickPlus && amount > lastAmount && amount - lastAmount < lastStep * lastUnit) {
+                        // A + that stopped short: this is the most the screen takes
+                        order.below = Math.min(order.below, amount + 1);
+                        order.probing = false;
+                        PrinterAddon.debug("The buy screen for {} stops at {}", order.location.name, amount);
+                    }
+                    order.unchanged = 0;
                     phase = Phase.AMOUNT;
                     delay = clickDelay();
-                } else if (waited > AMOUNT_TIMEOUT) {
-                    // The amount doesn't go higher: buy what's set
-                    phase = Phase.PURCHASE;
+                } else if (waited > AMOUNT_TIMEOUT + 2 * no.sindrens.printeraddon.build.ServerLag.pingTicks(mc)) {
+                    // Nothing changed: a + that goes past what the screen takes (or a lost click). From here up one
+                    // step at a time to find where it stops; buy what's set if it keeps not changing
+                    if (lastClickPlus) {
+                        order.below = Math.min(order.below, lastAmount + lastStep * lastUnit);
+                        // A +1 that changed nothing found the most; after a bigger one, look for it by +1
+                        order.probing = lastStep > 1;
+                        PrinterAddon.debug("The buy screen for {} doesn't go from {} to {}", order.location.name, lastAmount, lastAmount + lastStep * lastUnit);
+                    }
+                    order.unchanged++;
+                    phase = Phase.AMOUNT;
                 }
             }
             case PURCHASE -> {
@@ -477,7 +646,17 @@ public class ShopBuyer {
                     return;
                 }
                 countBefore = count(mc, order.item);
-                lastAmount = amountShown(snapshot, order.id);
+                order.amountClicks = 0;
+                int stack = order.item.getDefaultMaxStackSize();
+                lastAmount = shownAmount(snapshot, order.id, stack, stacksScreen);
+                if (stacksScreen) {
+                    // Checked like a purchase by the stack (a confirm screen once, a fall-back if nothing arrives)
+                    stacksPurchase = true;
+                    stacksTitle = snapshot.title();
+                    confirmTried = false;
+                    PrinterAddon.debug("Buying {} {} by the stack ({} stacks)", lastAmount, order.location.name, lastAmount / stack);
+                }
+                serverSaid = null;
                 clickSlot(mc, snapshot, button);
                 phase = Phase.VERIFY;
                 waited = 0;
@@ -489,6 +668,17 @@ public class ShopBuyer {
                     return;
                 }
                 logScreen("stacks screen for " + order.location.name, snapshot);
+                if (isStacksAmountScreen(snapshot)) {
+                    // Set like the normal buy screen, its +N adding N stacks, then "purchase item" (clicking the
+                    // item there does nothing)
+                    if (!stacksScreen) {
+                        stacksScreen = true;
+                        stepItems = 0;
+                    }
+                    stacksTitle = snapshot.title();
+                    phase = Phase.AMOUNT;
+                    return;
+                }
                 int stack = order.item.getDefaultMaxStackSize();
                 int want = Math.min(order.left, room(mc, order.item));
                 int bestSlot = -1;
@@ -528,6 +718,7 @@ public class ShopBuyer {
                 countBefore = count(mc, order.item);
                 lastAmount = bestAmount;
                 PrinterAddon.debug("Buying {} {} by the stack (slot {})", bestAmount, order.location.name, bestSlot);
+                serverSaid = null;
                 clickSlot(mc, snapshot, bestSlot);
                 phase = Phase.VERIFY;
                 waited = 0;
@@ -549,12 +740,13 @@ public class ShopBuyer {
                         return;
                     }
                 }
-                if (got > 0 && (got >= lastAmount || waited > 10)) {
+                // All of it, or what came (a big purchase may arrive over a few ticks)
+                if (got > 0 && (got >= lastAmount || waited > 10 + 2 * no.sindrens.printeraddon.build.ServerLag.pingTicks(mc))) {
                     order.left -= got;
                     order.got += got;
                     bought.merge(order.item, got, Integer::sum);
                     if (order.location.buyPrice != null) {
-                        spent += got * order.location.buyPrice;
+                        spent += got * order.location.buyPrice / Math.max(1, order.location.amountShown);
                     }
                     PrinterAddon.debug("Bought {} {}{}", got, order.location.name, stacksPurchase ? " (by the stack)" : "");
                     boolean byStack = stacksPurchase;
@@ -578,10 +770,22 @@ public class ShopBuyer {
                     }
                     waited = 0;
                     delay = clickDelay();
+                } else if (got == 0 && refusal() != null) {
+                    // The server said why not: no waiting, no trying again
+                    stacksPurchase = false;
+                    String why = "the server said \"" + serverSaid + "\"";
+                    if (refusal().equals("money")) {
+                        fail(order, "out of money (" + why + ")");
+                        orders.forEach(o -> notBought.add(o.item));
+                        orders.clear();
+                    } else {
+                        fail(order, why);
+                    }
                 } else if (waited > timeout() && stacksPurchase) {
                     // Nothing arrived by the stack: a stack at a time from now on (from the start)
                     stacksPurchase = false;
-                    stacksFailed(mc, order, "nothing arrived after choosing " + lastAmount + " by the stack");
+                    stacksFailed(mc, order, "nothing arrived after choosing " + lastAmount + " by the stack"
+                            + (serverSaid != null ? "; the server said \"" + serverSaid + "\"" : ""));
                 } else if (waited > timeout() && order.retries++ < 1) {
                     // Nothing arrived: once more from the start (the first purchase after opening sometimes gets lost)
                     PrinterAddon.debug("The purchase of {} didn't arrive: trying once more", order.location.name);
@@ -590,8 +794,11 @@ public class ShopBuyer {
                     waited = 0;
                     delay = 20 + clickDelay();
                 } else if (waited > timeout()) {
-                    // Nothing arrived again: most likely not enough money. Stop, don't keep clicking.
-                    fail(order, "the purchase of " + order.location.name + " didn't arrive (not enough money?)");
+                    // Nothing arrived again. Stop, don't keep clicking.
+                    Double balance = no.sindrens.printeraddon.build.CostEstimate.balance(mc);
+                    fail(order, "the purchase of " + lastAmount + " " + order.location.name + " didn't arrive"
+                            + (balance != null ? String.format(" (balance $%,.0f)", balance) : " (not enough money?)")
+                            + (serverSaid != null ? "; the server said \"" + serverSaid + "\"" : ""));
                     orders.forEach(o -> notBought.add(o.item));
                     orders.clear();
                 }
@@ -738,6 +945,100 @@ public class ShopBuyer {
         return 1;
     }
 
+    /**
+     * The amount the open buy screen is set to, in items. The stacks screen shows the total under its item ("x 64"
+     * for one stack) and the number of stacks as the item's count: whichever says more.
+     */
+    static int shownAmount(ScreenSnapshot snapshot, String itemId, int stack, boolean stacksScreen) {
+        int shown = amountShown(snapshot, itemId);
+        if (!stacksScreen) {
+            return shown;
+        }
+        for (ScreenSnapshot.Item item : snapshot.items()) {
+            if (item.itemId().equals(itemId)) {
+                return Math.max(shown, item.count() * stack);
+            }
+        }
+        return shown;
+    }
+
+    /** The first click on the way to the amount wanted, and how many clicks that way takes in all. */
+    record AmountStep(int slot, int clicks) {
+    }
+
+    /**
+     * The first click of the shortest way from {@code amount} to {@code want} (in items, each step of the buttons
+     * worth {@code unit}: a stack on the stacks screen), never past {@code most}. Going past what's wanted and back
+     * down is used when -N buttons are on the screen, or were seen on it before ({@code minusSeen}: they only show up
+     * above 1): 15 stacks is +16 -1 -1, not fourteen +1. Null when it's set, or can't be reached from here.
+     */
+    @Nullable
+    static AmountStep amountStep(ScreenSnapshot snapshot, int amount, int want, int unit, int most, java.util.Set<Integer> minusSeen) {
+        int from = Math.max(1, amount / unit);
+        int to = want / unit;
+        if (from == to || to < 1) {
+            return null;
+        }
+        Map<Integer, Integer> plus = buttonSteps(snapshot, PLUS);
+        Map<Integer, Integer> minus = buttonSteps(snapshot, MINUS);
+        java.util.Set<Integer> laterMinus = new java.util.TreeSet<>(minus.keySet());
+        laterMinus.addAll(minusSeen);
+        int top = Math.max(from, Math.min(Math.max(from, to) + 64, most / unit));
+        if (to > top) {
+            return null;
+        }
+        // Breadth-first over the amounts: firstStep[v] is the first click of the shortest way to v (+16, -1)
+        int[] firstStep = new int[top + 1];
+        int[] clicks = new int[top + 1];
+        boolean[] seen = new boolean[top + 1];
+        Deque<Integer> queue = new ArrayDeque<>();
+        seen[from] = true;
+        queue.add(from);
+        while (!queue.isEmpty()) {
+            int v = queue.poll();
+            List<Integer> moves = new ArrayList<>(plus.keySet());
+            // Only buttons on the screen now for the first click; the -N ones seen before for the rest
+            for (int d : v == from ? minus.keySet() : laterMinus) {
+                moves.add(-d);
+            }
+            for (int move : moves) {
+                int w = v + move;
+                if (w < 1 || w > top || seen[w]) {
+                    continue;
+                }
+                seen[w] = true;
+                firstStep[w] = v == from ? move : firstStep[v];
+                clicks[w] = clicks[v] + 1;
+                if (w == to) {
+                    Integer slot = firstStep[w] > 0 ? plus.get(firstStep[w]) : minus.get(-firstStep[w]);
+                    return slot == null ? null : new AmountStep(slot, clicks[w]);
+                }
+                queue.add(w);
+            }
+        }
+        return null;
+    }
+
+    /** The +N (or -N) buttons on the screen: N to its slot. */
+    private static Map<Integer, Integer> buttonSteps(ScreenSnapshot snapshot, Pattern pattern) {
+        Map<Integer, Integer> steps = new java.util.TreeMap<>();
+        for (ScreenSnapshot.Item item : snapshot.items()) {
+            Matcher m = pattern.matcher(ShopText.plain(item.name()));
+            if (m.find()) {
+                int step = Integer.parseInt(m.group(1));
+                if (step > 0) {
+                    steps.putIfAbsent(step, item.slot());
+                }
+            }
+        }
+        return steps;
+    }
+
+    /** A stacks screen set like the buy screen: +N buttons and "purchase item" (this server), not a choice per amount. */
+    static boolean isStacksAmountScreen(ScreenSnapshot snapshot) {
+        return purchaseButton(snapshot) != null && plusButton(snapshot, Integer.MAX_VALUE, PLUS) != null;
+    }
+
     /** The biggest +N (or -N) button that doesn't go past {@code missing}. */
     @Nullable
     private static Integer plusButton(ScreenSnapshot snapshot, int missing, Pattern pattern) {
@@ -808,6 +1109,7 @@ public class ShopBuyer {
     /** The stacks screen didn't work out: a stack at a time for the rest of the session, starting over for this one. */
     private void stacksFailed(Minecraft mc, Order order, String why) {
         stacksBroken = true;
+        stacksScreen = false;
         stacksBrokenAt = no.sindrens.printeraddon.build.AutoBuild.clientTicks;
         Chat.warn("Buying by the stack didn't work (" + why + "): buying a stack at a time. The build log has what the screen showed.");
         no.sindrens.printeraddon.build.BuildLog.line("SHOP", "buying by the stack stopped: " + why);
