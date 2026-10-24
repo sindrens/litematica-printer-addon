@@ -743,14 +743,20 @@ public class Mover {
     private static final int GRACE_EXTRA_TICKS = 8;
 
     /** Waits while the printer and breaker work; skips the blocks in reach if nothing happens for a while. */
+    private int lastPlacedCount = -1;
+
     private void waitForWork(LocalPlayer player, List<BlockPos> inReach) {
         // Paused printer (slot change settling, lag, eating...) isn't "nothing happening"
-        boolean busy = AutoBuild.INSTANCE.breaker.isBusy() || !PrinterBridge.isIdle() || AutoBuild.INSTANCE.shouldPausePrinter();
-        if (busy || inReach.size() < lastInReach) {
+        // Progress is a block placed here, not the printer looking busy: it can keep turning to a block it never
+        // places (the player then stood still for a minute)
+        boolean paused = AutoBuild.INSTANCE.breaker.isBusy() || AutoBuild.INSTANCE.shouldPausePrinter();
+        int placed = AutoBuild.INSTANCE.stats.totalPlaced();
+        if (paused || placed != lastPlacedCount || inReach.size() < lastInReach) {
             workTicksWithoutProgress = 0;
         } else {
             workTicksWithoutProgress++;
         }
+        lastPlacedCount = placed;
         lastInReach = inReach.size();
 
         if (flying(player)) {

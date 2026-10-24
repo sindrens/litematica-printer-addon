@@ -273,7 +273,9 @@ public class FarmTest implements FabricClientGameTest {
             commands.add("clear @p minecraft:bucket");
         }
         // Full, while something needed isn't there at all: make room like a player would (one stack of the most)
-        if (freeSlots == 0 && needed.entrySet().stream().anyMatch(e -> e.getValue() > 0 && inventory.countItem(e.getKey()) == 0)) {
+        java.util.Set<Item> current = AutoBuild.INSTANCE.layers.layerNeeds().keySet();
+        if (freeSlots == 0 && needed.entrySet().stream().anyMatch(e -> e.getValue() > 0 && current.contains(e.getKey())
+                && inventory.countItem(e.getKey()) < 64)) {
             Map<Item, Integer> stacks = new java.util.HashMap<>();
             for (int slot = 0; slot < 36; slot++) {
                 ItemStack stack = inventory.getItem(slot);
@@ -281,14 +283,18 @@ public class FarmTest implements FabricClientGameTest {
                     stacks.merge(stack.getItem(), 1, Integer::sum);
                 }
             }
-            stacks.entrySet().stream().filter(e -> e.getValue() >= 2).max(Map.Entry.comparingByValue()).ifPresent(e -> {
+            stacks.entrySet().stream().filter(e -> e.getValue() >= 2 && !current.contains(e.getKey()))
+                    .max(Map.Entry.comparingByValue()).ifPresent(e -> {
                 commands.add("clear @p " + BuiltInRegistries.ITEM.getKey(e.getKey()) + " " + 2 * e.getKey().getDefaultMaxStackSize());
             });
             freeSlots = 2;
         }
         // Fewest first, so every item the layer needs gets a slot before the big ones fill the inventory
         List<Map.Entry<Item, Integer>> byCount = new ArrayList<>(needed.entrySet());
-        byCount.sort(Map.Entry.comparingByValue());
+        // What the current layer needs first, then the rest; fewest first within each
+        java.util.Set<Item> layerNeeds = AutoBuild.INSTANCE.layers.layerNeeds().keySet();
+        byCount.sort(java.util.Comparator.<Map.Entry<Item, Integer>>comparingInt(e -> layerNeeds.contains(e.getKey()) ? 0 : 1)
+                .thenComparing(Map.Entry.comparingByValue()));
         for (Map.Entry<Item, Integer> entry : byCount) {
             int missing = entry.getValue();
             if (missing <= 0 || freeSlots <= 0) {
