@@ -65,7 +65,7 @@ public class HotbarPrep {
             // Swap: inventory slot <-> hotbar slot (inventory menu slots 9-35 are the same numbers)
             mc.gameMode.handleContainerInput(player.inventoryMenu.containerId, from, to, ContainerInput.SWAP, player);
             AutoBuild.INSTANCE.inventory.moved();
-            PrinterAddon.debug("Hotbar: moved {} to slot {} (the layer needs {})", item, to + 1, layerNeeds.get(item));
+            PrinterAddon.trace("Hotbar: moved {} to slot {} (the layer needs {})", item, to + 1, layerNeeds.get(item));
             return true;
         }
         return false;
@@ -80,18 +80,29 @@ public class HotbarPrep {
         return -1;
     }
 
-    /** A hotbar slot (1-7) that's empty or holds something this layer doesn't need much. */
+    /**
+     * A hotbar slot (1-7) that's empty or holds something this layer doesn't need much: other blocks first, then
+     * tools (they go to the inventory; breaking swaps the right one onto slot 9 when needed).
+     */
     private static int freeHotbarSlot(Inventory inventory, Set<Item> wanted) {
-        int fallback = -1;
+        int block = -1;
+        int tool = -1;
         for (int slot = 0; slot < SLOTS; slot++) {
             ItemStack stack = inventory.getItem(slot);
             if (stack.isEmpty()) {
                 return slot;
             }
-            if (fallback == -1 && !wanted.contains(stack.getItem()) && !stack.isDamageableItem()) {
-                fallback = slot;
+            if (wanted.contains(stack.getItem())) {
+                continue;
+            }
+            if (!stack.isDamageableItem()) {
+                if (block == -1) {
+                    block = slot;
+                }
+            } else if (tool == -1) {
+                tool = slot;
             }
         }
-        return fallback;
+        return block != -1 ? block : tool;
     }
 }

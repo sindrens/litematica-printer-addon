@@ -47,6 +47,7 @@ public class FarmTest implements FabricClientGameTest {
     private static final BlockPos ORIGIN = new BlockPos(2, -60, 2);
     private static final int MAX_TICKS = 20 * 60 * 60 * 4;
     private static final int SCREENSHOT_EVERY = 20;
+    private static final int SCREENSHOT_SAVE_EVERY = 60;
     private static final int RESTOCK_EVERY = 40;
     /** Stop and write the report if no layer has finished for this long. */
     private static final int STUCK_STOP_TICKS = 20 * 60 * 3;
@@ -136,6 +137,10 @@ public class FarmTest implements FabricClientGameTest {
                 Configs.Generic.DEBUG_LOG.setBooleanValue(true);
                 Configs.Generic.DETAILED_CHAT.setBooleanValue(true);
                 Configs.Generic.STATUS_FILE.setBooleanValue(true);
+                String minInterval = System.getenv("PRINTER_ADDON_MIN_INTERVAL");
+                if (minInterval != null) {
+                    Configs.Speed.AUTO_SPEED_MIN_INTERVAL.setIntegerValue(Integer.parseInt(minInterval));
+                }
                 AutoBuild.INSTANCE.start(mc);
             });
 
@@ -147,7 +152,10 @@ public class FarmTest implements FabricClientGameTest {
             while (ticks < MAX_TICKS && context.computeOnClient(mc -> AutoBuild.INSTANCE.isRunning())) {
                 context.waitTicks(SCREENSHOT_EVERY);
                 ticks += SCREENSHOT_EVERY;
-                context.takeScreenshot("rec");
+                // A picture every 3 seconds is plenty for the live view, and each one costs the slow test machine time
+                if (ticks % SCREENSHOT_SAVE_EVERY == 0) {
+                    context.takeScreenshot("rec");
+                }
                 if (ticks % RESTOCK_EVERY == 0) {
                     restock(context, server);
                 }

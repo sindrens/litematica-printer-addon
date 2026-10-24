@@ -94,7 +94,7 @@ public class AutoBuild {
         if (running) {
             // A swap still on its way to the server would make the printer click with the wrong item
             inventory.update(Minecraft.getInstance());
-            if (inventory.settling() || ServerLag.shouldWait(Minecraft.getInstance())) {
+            if (inventory.handSettling(Minecraft.getInstance()) || ServerLag.shouldWait(Minecraft.getInstance())) {
                 return true;
             }
         }

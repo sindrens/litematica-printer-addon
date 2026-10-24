@@ -296,7 +296,8 @@ public class BlockBreaker {
         int bestSlot = -1;
         float bestScore = -1;
 
-        for (int slot = 0; slot < Inventory.getSelectionSize(); slot++) {
+        // The whole inventory: the hotbar is kept for the layer's blocks, so tools may be in the inventory
+        for (int slot = 0; slot < Inventory.INVENTORY_SIZE; slot++) {
             ItemStack stack = inventory.getItem(slot);
 
             if (stack.isDamageableItem() && stack.getMaxDamage() - stack.getDamageValue() <= minDurability) {
@@ -316,6 +317,15 @@ public class BlockBreaker {
                 && selected.getMaxDamage() - selected.getDamageValue() <= minDurability;
 
         if (bestSlot != -1 && (selectedProtected || bestScore > scoreOf(selected, state) + 0.001f)) {
+            if (!Inventory.isHotbarSlot(bestSlot)) {
+                // Swap the tool onto the last hotbar slot (the one left free for tools)
+                int toolSlot = Inventory.getSelectionSize() - 1;
+                Minecraft mc = Minecraft.getInstance();
+                mc.gameMode.handleContainerInput(player.inventoryMenu.containerId, bestSlot, toolSlot,
+                        net.minecraft.world.inventory.ContainerInput.SWAP, player);
+                AutoBuild.INSTANCE.inventory.moved();
+                bestSlot = toolSlot;
+            }
             inventory.setSelectedSlot(bestSlot);
         }
     }

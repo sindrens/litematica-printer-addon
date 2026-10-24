@@ -195,11 +195,7 @@ public class QuickPlace {
             return false;
         }
 
-        // Items just moved: wait until the server has the same in each slot
         AutoBuild.INSTANCE.inventory.update(mc);
-        if (AutoBuild.INSTANCE.inventory.settling()) {
-            return false;
-        }
 
         BlockPos next = findNext(mc, player, schematic);
         if (next == null) {
@@ -220,6 +216,10 @@ public class QuickPlace {
                 return false;
             }
             if (Inventory.isHotbarSlot(slot)) {
+                // Just moved there: wait until the server has it there too
+                if (AutoBuild.INSTANCE.inventory.settling(slot)) {
+                    return false;
+                }
                 inventory.setSelectedSlot(slot);
             } else {
                 InventoryUtils.setPickedItemToHand(slot, item, mc);
@@ -228,6 +228,11 @@ public class QuickPlace {
                 cooldown = 1;
                 return true;
             }
+        }
+
+        // The hand slot itself just changed (a stack ran out and another came in): wait for the server
+        if (AutoBuild.INSTANCE.inventory.handSettling(mc)) {
+            return false;
         }
 
         // Look the way that gives the right direction, then click the face of the empty spot

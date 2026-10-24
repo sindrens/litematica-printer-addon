@@ -248,8 +248,10 @@ public class Configs implements IConfigHandler {
                 "Find the fastest printer interval that still places right: start at the preset's interval, go one tick\n"
                         + "faster after a run of correct blocks, two ticks slower as soon as a block comes out wrong.",
                 "Automatic speed");
-        public static final ConfigInteger AUTO_SPEED_MIN_INTERVAL = new ConfigInteger("autoSpeedMinInterval", 4, 1, 40,
-                "Automatic speed never goes below this printer interval.",
+        public static final ConfigInteger AUTO_SPEED_MIN_INTERVAL = new ConfigInteger("autoSpeedMinInterval", 2, 1, 40,
+                "Automatic speed never goes below this printer interval. It only gets there while every block comes out\n"
+                        + "right, and slows down again at the first wrong one. At 2 it places at most about 5 blocks a second\n"
+                        + "(every block takes at least two printer actions), like holding right-click. Raise it if a server complains.",
                 "Automatic speed: fastest interval");
         public static final ConfigInteger LAG_PAUSE_TPS = new ConfigInteger("lagPauseTps", 12, 0, 19,
                 "On a server: stop placing while the server runs below this many ticks per second (20 is normal),\n"

@@ -327,6 +327,11 @@ public class Mover {
         return sorted.isEmpty() ? null : sorted.getFirst();
     }
 
+    /** Sweep direction along the rows: +1 east, -1 west. */
+    private int sweep = 1;
+    /** Score taken off spots behind the sweep direction (more than any spot ahead can have). */
+    private static final double BEHIND_PENALTY = 10000;
+
     /** How many unfinished blocks near the player are looked at when choosing where to fly. */
     private static final int NEARBY_FOR_SPOT = 400;
 
@@ -376,10 +381,19 @@ public class Mover {
                 }
             }
             double score = inReach - 0.25 * from.distanceTo(eye);
+            // Snake along the band: keep going the same way (east or west) and only turn back when nothing is
+            // left ahead, instead of zig-zagging to the best spot anywhere in the band
+            if ((eye.x - from.x) * sweep < -r) {
+                score -= BEHIND_PENALTY;
+            }
             if (score > bestScore) {
                 bestScore = score;
                 best = candidate;
             }
+        }
+        if (best != null && (Vec3.atCenterOf(best).x - from.x) * sweep < -r) {
+            sweep = -sweep;
+            PrinterAddon.debug("Nothing left ahead in these rows: turning {}", sweep > 0 ? "east" : "west");
         }
         return best != null ? best : (sorted.isEmpty() ? null : sorted.getFirst());
     }

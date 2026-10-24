@@ -1,8 +1,6 @@
 package no.sindrens.printeraddon.build;
 
 import com.google.gson.Gson;
-import fi.dy.masa.litematica.data.DataManager;
-import fi.dy.masa.litematica.schematic.placement.SchematicPlacement;
 import fi.dy.masa.litematica.world.WorldSchematic;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
@@ -48,11 +46,11 @@ public final class CostEstimate {
         if (++ticks % 40 != 0 || mc.player == null) {
             return;
         }
-        SchematicPlacement placement = DataManager.getSchematicPlacementManager().getSelectedSchematicPlacement();
-        String key = placement == null ? "" : placement.getName() + "@" + placement.getOrigin().toShortString();
+        // Any placement counts (the same ones auto build uses), not only the selected one
+        String key = SchematicHelper.world() == null ? "" : SchematicHelper.areas().toString();
         if (!key.equals(lastPlacement)) {
             lastPlacement = key;
-            if (placement != null && SchematicHelper.world() != null) {
+            if (!key.isEmpty() && !SchematicHelper.areas().isEmpty()) {
                 show(mc);
             }
         }

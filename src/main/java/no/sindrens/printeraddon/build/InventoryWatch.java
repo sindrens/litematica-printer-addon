@@ -17,6 +17,8 @@ public class InventoryWatch {
     private static final int SETTLE_TICKS = 4;
 
     private final Item[] last = new Item[Inventory.INVENTORY_SIZE];
+    /** When each slot last changed (what's in it, not how many). */
+    private final long[] slotChangedAt = new long[Inventory.INVENTORY_SIZE];
     private long changedAt = -1000;
     private long updatedAt = -1;
     private String lastChange = "";
@@ -40,13 +42,14 @@ public class InventoryWatch {
                 }
                 changes.append(slot).append(": ").append(name(last[slot])).append(" -> ").append(name(now));
                 last[slot] = now;
+                slotChangedAt[slot] = AutoBuild.clientTicks;
             }
         }
         if (changes != null) {
             changedAt = AutoBuild.clientTicks;
             lastChange = changes.toString();
             if (AutoBuild.INSTANCE.isRunning()) {
-                PrinterAddon.debug("Inventory slots changed ({}), waiting {} ticks before placing", lastChange, SETTLE_TICKS);
+                PrinterAddon.trace("Inventory slots changed ({}), waiting {} ticks before placing", lastChange, SETTLE_TICKS);
             }
         }
     }
@@ -54,11 +57,32 @@ public class InventoryWatch {
     /** The add-on itself just moved an item: same wait, without waiting a tick to notice. */
     public void moved() {
         changedAt = AutoBuild.clientTicks;
+        movedAt = AutoBuild.clientTicks;
     }
 
-    /** True while the slots changed too recently to trust what the server has in the hand. */
+    /** The add-on's last own item move (a swap click changes two slots at once; wait for both). */
+    private long movedAt = -1000;
+
+    /** True while any slot changed too recently (for the add-on's own item moves). */
     public boolean settling() {
         return AutoBuild.clientTicks - changedAt < SETTLE_TICKS;
+    }
+
+    /**
+     * True while this slot changed too recently to trust what the server has in it. Only the slot a click uses
+     * matters: other slots changing (a stack used up elsewhere, items arriving in the inventory) can't make a
+     * click place the wrong thing, so they don't hold anything up.
+     */
+    public boolean settling(int slot) {
+        if (slot < 0 || slot >= slotChangedAt.length) {
+            return false;
+        }
+        return AutoBuild.clientTicks - slotChangedAt[slot] < SETTLE_TICKS || AutoBuild.clientTicks - movedAt < SETTLE_TICKS;
+    }
+
+    /** The selected hotbar slot changed too recently (what the printer's next click uses). */
+    public boolean handSettling(Minecraft mc) {
+        return mc.player != null && settling(mc.player.getInventory().getSelectedSlot());
     }
 
     /** For the wrong-block report: how long ago the slots last changed, and how. */

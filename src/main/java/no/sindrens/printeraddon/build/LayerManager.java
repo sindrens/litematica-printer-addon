@@ -128,6 +128,28 @@ public class LayerManager {
         active = false;
     }
 
+    /** The player's own layer view from before auto build changed it, as text (for the resume file). */
+    public String savedRange() {
+        return previousMode == null ? "" : previousMode.name() + "|" + previousAxis.name() + "|" + previousSingle;
+    }
+
+    /**
+     * After resuming: the view Litematica loaded on rejoining is the one auto build had set (it saved its settings
+     * while building), so put back the player's own view from the resume file when the build ends.
+     */
+    public void useSavedRange(String text) {
+        String[] parts = text.split("\\|");
+        if (!active || parts.length != 3) {
+            return;
+        }
+        try {
+            previousMode = LayerMode.valueOf(parts[0]);
+            previousAxis = Direction.Axis.valueOf(parts[1]);
+            previousSingle = Integer.parseInt(parts[2]);
+        } catch (IllegalArgumentException ignored) {
+        }
+    }
+
     private void restoreLayerRange() {
         if (previousMode == null) {
             return;

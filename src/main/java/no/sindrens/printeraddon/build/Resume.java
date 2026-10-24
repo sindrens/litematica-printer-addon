@@ -1,7 +1,5 @@
 package no.sindrens.printeraddon.build;
 
-import fi.dy.masa.litematica.data.DataManager;
-import fi.dy.masa.litematica.schematic.placement.SchematicPlacement;
 import fi.dy.masa.malilib.util.FileUtils;
 import net.minecraft.client.Minecraft;
 import no.sindrens.printeraddon.PrinterAddon;
@@ -21,6 +19,7 @@ import java.nio.file.Path;
  */
 public final class Resume {
     private static final int WAIT_AFTER_JOIN = 20 * 10;
+    private static final int GIVE_UP_AFTER = 20 * 60;
     private static int joinedTicks;
     private static int saveTicks;
 
@@ -31,9 +30,9 @@ public final class Resume {
         return FileUtils.getConfigDirectory().resolve(PrinterAddon.MOD_ID).resolve("resume.txt");
     }
 
+    /** The server plus where the schematic blocks are (all placements auto build uses, selected or not). */
     private static String key(Minecraft mc) {
-        SchematicPlacement placement = DataManager.getSchematicPlacementManager().getSelectedSchematicPlacement();
-        String place = placement == null ? "-" : placement.getName() + "@" + placement.getOrigin().toShortString();
+        String place = SchematicHelper.world() == null || SchematicHelper.areas().isEmpty() ? "-" : SchematicHelper.areas().toString();
         return ServerName.current(mc) + "|" + place;
     }
 
@@ -44,7 +43,8 @@ public final class Resume {
         }
         try {
             Files.createDirectories(file().getParent());
-            Files.writeString(file(), key(mc), StandardCharsets.UTF_8);
+            // Line 1: what's being built; line 2: the player's own layer view, to put back at the end
+            Files.writeString(file(), key(mc) + "\n" + AutoBuild.INSTANCE.layers.savedRange(), StandardCharsets.UTF_8);
         } catch (IOException e) {
             PrinterAddon.LOGGER.warn("Couldn't save the resume file", e);
         }
@@ -65,14 +65,21 @@ public final class Resume {
 
     /** In game and not building: start again if this is what was being built before. */
     public static void whileIdle(Minecraft mc) {
-        if (!Configs.Generic.RESUME_AFTER_REJOIN.getBooleanValue() || ++joinedTicks != WAIT_AFTER_JOIN || !Files.isRegularFile(file())) {
+        // From 10 seconds after joining, once a second for a minute: Litematica may load the placements a bit later
+        joinedTicks++;
+        if (!Configs.Generic.RESUME_AFTER_REJOIN.getBooleanValue() || joinedTicks < WAIT_AFTER_JOIN
+                || joinedTicks > WAIT_AFTER_JOIN + GIVE_UP_AFTER || joinedTicks % 20 != 0 || !Files.isRegularFile(file())) {
             return;
         }
         try {
-            String saved = Files.readString(file(), StandardCharsets.UTF_8).trim();
-            if (saved.equals(key(mc))) {
+            String[] saved = Files.readString(file(), StandardCharsets.UTF_8).split("\n");
+            if (saved[0].trim().equals(key(mc))) {
+                joinedTicks = WAIT_AFTER_JOIN + GIVE_UP_AFTER + 1;
                 Chat.info("Picking auto build up again where it stopped (J+B to stop).");
                 AutoBuild.INSTANCE.start(mc);
+                if (saved.length > 1) {
+                    AutoBuild.INSTANCE.layers.useSavedRange(saved[1].trim());
+                }
             }
         } catch (IOException e) {
             PrinterAddon.LOGGER.warn("Couldn't read the resume file", e);
