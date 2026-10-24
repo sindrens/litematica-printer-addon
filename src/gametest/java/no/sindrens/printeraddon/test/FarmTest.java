@@ -269,6 +269,20 @@ public class FarmTest implements FabricClientGameTest {
         if (needed.containsKey(Items.WATER_BUCKET)) {
             commands.add("clear @p minecraft:bucket");
         }
+        // Full, while something needed isn't there at all: make room like a player would (one stack of the most)
+        if (freeSlots == 0 && needed.entrySet().stream().anyMatch(e -> e.getValue() > 0 && inventory.countItem(e.getKey()) == 0)) {
+            Map<Item, Integer> stacks = new java.util.HashMap<>();
+            for (int slot = 0; slot < 36; slot++) {
+                ItemStack stack = inventory.getItem(slot);
+                if (!stack.isEmpty() && !stack.isDamageableItem()) {
+                    stacks.merge(stack.getItem(), 1, Integer::sum);
+                }
+            }
+            stacks.entrySet().stream().filter(e -> e.getValue() >= 2).max(Map.Entry.comparingByValue()).ifPresent(e -> {
+                commands.add("clear @p " + BuiltInRegistries.ITEM.getKey(e.getKey()) + " " + 2 * e.getKey().getDefaultMaxStackSize());
+            });
+            freeSlots = 2;
+        }
         // Fewest first, so every item the layer needs gets a slot before the big ones fill the inventory
         List<Map.Entry<Item, Integer>> byCount = new ArrayList<>(needed.entrySet());
         byCount.sort(Map.Entry.comparingByValue());

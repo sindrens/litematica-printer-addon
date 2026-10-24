@@ -36,7 +36,7 @@ import java.util.regex.Pattern;
 public class ShopBuyer {
     public static final ShopBuyer INSTANCE = new ShopBuyer();
 
-    private static final int STABLE_TICKS = 3;
+    private static final int STABLE_TICKS = 5;
     /** How long a +amount click may take before it counts as "the amount can't go higher". */
     private static final int AMOUNT_TIMEOUT = 20;
     private static final Pattern PLUS = Pattern.compile("^\\+\\s*(\\d+)$");
@@ -50,6 +50,8 @@ public class ShopBuyer {
         final String id;
         int left;
         final ShopScanResult.Location location;
+        /** Tries from the start (/shop again) after something didn't look right. */
+        int retries;
 
         Order(Item item, int left, ShopScanResult.Location location) {
             this.item = item;
@@ -255,6 +257,7 @@ public class ShopBuyer {
                 Integer slot = navigation.pollFirst();
                 if (slot == null) {
                     phase = Phase.OPEN_ITEM;
+                    waited = 0;
                     return;
                 }
                 click(mc, slot, Phase.NAVIGATE);
@@ -262,15 +265,44 @@ public class ShopBuyer {
             case OPEN_ITEM -> {
                 ScreenSnapshot snapshot = ScreenSnapshot.capture(mc);
                 ScreenSnapshot.Item item = snapshot == null ? null : itemAt(snapshot, order.location.slot);
+                int slot = order.location.slot;
                 if (item == null || !item.itemId().equals(order.id)) {
-                    fail(order, "the shop has changed (" + order.location.name + " isn't where it was). Scan the shop again (J+S)");
-                    return;
+                    // The page may still be filling in (lag): give it time before deciding anything
+                    if (waited < 40 + 2 * no.sindrens.printeraddon.build.ServerLag.pingTicks(mc)) {
+                        return;
+                    }
+                    // Moved on the page? Take it where it is now
+                    ScreenSnapshot.Item elsewhere = snapshot == null ? null : snapshot.items().stream()
+                            .filter(i -> i.itemId().equals(order.id) && i.slot() < snapshot.size()).findFirst().orElse(null);
+                    if (elsewhere != null) {
+                        PrinterAddon.debug("{} moved from slot {} to {} in the shop", order.location.name, slot, elsewhere.slot());
+                        slot = elsewhere.slot();
+                    } else if (order.retries++ < 2) {
+                        // Once more from the start, slowly
+                        PrinterAddon.debug("{} isn't where it was: opening the shop again (try {})", order.location.name, order.retries + 1);
+                        mc.player.closeContainer();
+                        phase = Phase.OPEN;
+                        waited = 0;
+                        delay = 20 + clickDelay();
+                        return;
+                    } else {
+                        fail(order, "the shop has changed (" + order.location.name + " isn't where it was). Scan the shop again (J+S)");
+                        return;
+                    }
                 }
-                click(mc, order.location.slot, Phase.AMOUNT);
+                click(mc, slot, Phase.AMOUNT);
             }
             case AMOUNT -> {
                 ScreenSnapshot snapshot = ScreenSnapshot.capture(mc);
                 if (snapshot == null || !snapshot.looksLikeBuyScreen()) {
+                    if (order.retries++ < 2) {
+                        PrinterAddon.debug("Clicking {} didn't open the buy screen: opening the shop again", order.location.name);
+                        mc.player.closeContainer();
+                        phase = Phase.OPEN;
+                        waited = 0;
+                        delay = 20 + clickDelay();
+                        return;
+                    }
                     fail(order, "clicking " + order.location.name + " didn't open the buy screen");
                     return;
                 }
@@ -399,7 +431,8 @@ public class ShopBuyer {
             stable = 0;
             lastSignature = signature;
         }
-        return stable >= STABLE_TICKS && !signature.equals(before) ? snapshot : null;
+        // Unchanged for a few ticks (more with a high ping): shop plugins often fill a page in several steps
+        return stable >= STABLE_TICKS + no.sindrens.printeraddon.build.ServerLag.pingTicks(Minecraft.getInstance()) / 2 && !signature.equals(before) ? snapshot : null;
     }
 
     private void skip(Order order, String why) {
@@ -551,8 +584,9 @@ public class ShopBuyer {
         return Configs.Shop.WAIT_TIMEOUT_TICKS.getIntegerValue();
     }
 
+    /** Between clicks: never faster than 8 ticks, plus half the ping (servers drop clicks that come too fast). */
     private static int clickDelay() {
-        return Configs.Speed.shopClickDelayTicks();
+        return Math.max(8, Configs.Speed.shopClickDelayTicks()) + no.sindrens.printeraddon.build.ServerLag.pingTicks(Minecraft.getInstance()) / 2;
     }
 
     private static String names(List<Item> items) {

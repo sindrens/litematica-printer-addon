@@ -121,14 +121,25 @@ public class LayerManager {
     }
 
     /**
-     * True while the current layer has water still to go in (waterlogged blocks, water): on such a layer the water
-     * blocks come first, everything else after (farmland is wet from the start, no water flows over placed blocks).
+     * True while water still has to go in near this block of the current layer (waterlogged blocks, water, within
+     * 8 to 16 blocks): the water blocks come first, everything around them after (farmland is wet from the start,
+     * no water flows over placed blocks). Water far away doesn't hold anything up here.
      */
     public boolean waterFirst(BlockPos pos) {
-        return active && waterPending != 0 && pos.getY() >= layer && pos.getY() <= layerTop;
+        if (!active || pos.getY() < layer || pos.getY() > layerTop) {
+            return false;
+        }
+        return waterPending < 0 || waterCells.contains(waterCell(pos.getX() >> 3, pos.getZ() >> 3));
     }
 
+    private static long waterCell(int cx, int cz) {
+        return ((long) cx << 32) | (cz & 0xFFFFFFFFL);
+    }
+
+    /** -1 until the layer was checked once; else the unfinished water blocks of the layer. */
     private int waterPending;
+    /** 8x8 cells with unfinished water in or next to them. */
+    private java.util.Set<Long> waterCells = java.util.Set.of();
 
     public boolean stalledFor(int ticks) {
         return active && ticksWithoutProgress >= ticks;
@@ -208,6 +219,7 @@ public class LayerManager {
             Chat.info("The water on " + describeLayers() + " is in: now the rest of the layer.");
         }
         waterPending = findings.water;
+        waterCells = findings.waterCells;
         if (findings.needsHoe && mc.player != null && !mc.player.getInventory().contains(net.minecraft.tags.ItemTags.HOES)) {
             findings.needs.put(net.minecraft.world.item.Items.IRON_HOE, 1);
         }
@@ -553,6 +565,7 @@ public class LayerManager {
         boolean needsHoe;
         /** Unfinished blocks that hold water (waterlogged or water): they go first. */
         int water;
+        final java.util.Set<Long> waterCells = new java.util.HashSet<>();
     }
 
     /**
@@ -590,6 +603,13 @@ public class LayerManager {
                         remaining++;
                         if (findings != null && PlacementOrder.holdsWater(schematic.getBlockState(pos))) {
                             findings.water++;
+                            if (result != BlockCheck.Result.UNLOADED) {
+                                for (int dx = -1; dx <= 1; dx++) {
+                                    for (int dz = -1; dz <= 1; dz++) {
+                                        findings.waterCells.add(waterCell((x >> 3) + dx, (z >> 3) + dz));
+                                    }
+                                }
+                            }
                         }
                         if (examples != null && examples.size() < MAX_REPORTED) {
                             examples.add(pos.immutable());
