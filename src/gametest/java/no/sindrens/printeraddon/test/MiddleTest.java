@@ -122,8 +122,10 @@ public class MiddleTest implements FabricClientGameTest {
                     + String.format(java.util.Locale.ROOT, ", highest on a lane %.1f (hover height %d), up over the walls %d times",
                     highestOnLane, Y + 2, overWalls);
             System.out.println("MIDDLE TEST: " + result);
-            // Along a lane at most a little over the hover height; over the walls only to get to the other side
-            if (!finished || !problems.isEmpty() || highestOnLane > Y + 2 + 2.5 || overWalls > 4) {
+            // In lanes at all (after another test on the same Y the old plan said "all flown", and it went spot by
+            // spot); along a lane at most a little over the hover height; over the walls only to get to the other side
+            if (!finished || !problems.isEmpty() || highestOnLane == Double.NEGATIVE_INFINITY || highestOnLane > Y + 2 + 2.5
+                    || overWalls > 4) {
                 throw new AssertionError("Middle test: " + result);
             }
         }

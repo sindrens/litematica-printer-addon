@@ -417,6 +417,19 @@ public class Mover {
     public void reset() {
         state = State.IDLE;
         sweepLayer = Integer.MIN_VALUE;
+        // The lanes from scratch: started again on the same layer (after a resume, or another build on the same Y)
+        // the old plan said "all lanes flown" and the whole layer went spot by spot
+        sweepFor = Integer.MIN_VALUE;
+        sweepPlanned = false;
+        sweepDone = false;
+        laneEnd = null;
+        laneStart = null;
+        lanes = List.of();
+        flownParts.clear();
+        tallCache.clear();
+        scannedLayer = Integer.MIN_VALUE;
+        scannedTop = Integer.MIN_VALUE;
+        sweepRetryAfterScan = -1;
         unloadable.clear();
         unreachableAreas.clear();
         skipCounts.clear();
@@ -531,7 +544,12 @@ public class Mover {
         List<BlockPos> inReach = new ArrayList<>();
         List<BlockPos> tooClose = new ArrayList<>();
         Vec3 eye = player.getEyePosition();
+        java.util.Set<BlockPos> printerSees = AutoBuild.INSTANCE.printerReachNow();
+        notTaken.values().removeIf(until -> until < tick);
         for (BlockPos pos : work) {
+            if (notTaken.containsKey(pos)) {
+                continue;
+            }
             double dx = pos.getX() + 0.5 - eye.x;
             double dy = pos.getY() + 0.5 - eye.y;
             double dz = pos.getZ() + 0.5 - eye.z;
@@ -545,18 +563,38 @@ public class Mover {
             }
             BlockCheck.Result result = BlockCheck.check(mc.level, schematic, pos);
             boolean printerPlaces = result == BlockCheck.Result.MISSING || result == BlockCheck.Result.PRINTER_FIXES;
+            if (printerPlaces && printerSees != null && !printerSees.contains(pos) && d > 1) {
+                // Not in the printer's own reach from here (it measures a little differently): nothing to wait for
+                continue;
+            }
             if (printerPlaces && (d <= 1 || player.position().distanceToSqr(center) <= 1)) {
                 tooClose.add(pos);
             } else if (result != BlockCheck.Result.BUCKET || d <= bucketRange(mc) * bucketRange(mc)) {
                 inReach.add(pos);
             }
         }
-        lastPrinterReach = inReach.size();
         int placedCount = AutoBuild.INSTANCE.stats.totalPlaced();
         if (placedCount != lastPlacementCount) {
             lastPlacementCount = placedCount;
             lastPlacementTick = tick;
         }
+        // Never waiting for good on blocks the printer doesn't take: 3 s in reach, nothing placed, nothing else going
+        // on (no breaking, no bucket, no lag), and they're left out for 30 s. A lane stood still for minutes on
+        // "placing 10 in reach" that the printer called not ready (a test of two layers at once)
+        if (!inReach.isEmpty() && tick - lastPlacementTick > 60 && tick - lastNotTakenAt > 60 && PrinterBridge.isIdle()
+                && !AutoBuild.INSTANCE.breaker.isBusy() && !AutoBuild.INSTANCE.fluids.isBusy() && !ServerLag.shouldWait(mc)) {
+            lastNotTakenAt = tick;
+            StringBuilder why = new StringBuilder();
+            for (BlockPos pos : inReach.subList(0, Math.min(5, inReach.size()))) {
+                why.append(" | ").append(Diagnose.explain(mc, schematic, pos));
+            }
+            BuildLog.line("STALL", inReach.size() + " block(s) in reach, nothing placed for 3 s: left out for 30 s, going on" + why);
+            for (BlockPos pos : inReach) {
+                notTaken.put(pos.immutable(), tick + 600);
+            }
+            inReach.clear();
+        }
+        lastPrinterReach = inReach.size();
         boolean keepMoving = Configs.Movement.KEEP_MOVING.getBooleanValue() && mode.canFly() && flying(player);
 
         // Full layers: straight lanes over the whole layer, the printer placing all the way (see sweepTick)
@@ -765,6 +803,11 @@ public class Mover {
     /** A layer with fewer unfinished blocks than this isn't worth lanes. */
     private static final int SWEEP_MIN_BLOCKS = 40;
 
+    private long lastLaneStallNote = -100000;
+    /** Blocks the printer didn't take while in reach (see tickNow), until when they're left out. */
+    private final Map<BlockPos, Long> notTaken = new HashMap<>();
+    private long lastNotTakenAt = -100000;
+
     private boolean sweeping() {
         return state == State.FLYING && laneEnd != null && !sweepDone && sweepFor == AutoBuild.INSTANCE.layers.getLayer();
     }
@@ -845,6 +888,17 @@ public class Mover {
         }
         gliding = true;
         glideSpeed = sweepSpeed(mc, player, inReach, reach);
+        // Never stood still on a lane for good: nothing placed for 2 s while it waits, it goes on (what's left there
+        // is done spot by spot after the lanes)
+        if (glideSpeed <= 0 && tick - lastPlacementTick > 40 && !AutoBuild.INSTANCE.breaker.isBusy()
+                && !AutoBuild.INSTANCE.fluids.isBusy()) {
+            glideSpeed = SWEEP_MAX / 4;
+            if (tick - lastLaneStallNote > 20 * 10) {
+                lastLaneStallNote = tick;
+                BuildLog.line("SWEEP", "lane " + (laneIndex + 1) + ": waited 2 s with nothing placed for " + inReach.size()
+                        + " block(s) in reach; going on (they're done after the lanes)");
+            }
+        }
         learnRate(inReach);
         move(mc, player, mode);
         return true;
@@ -855,6 +909,7 @@ public class Mover {
      * there are too few blocks to do yet but many more waiting (for items, or not loaded): planned later.
      */
     private int planLanes(LocalPlayer player, WorldSchematic schematic, double reach) {
+        tallCache.clear();
         int minX = Integer.MAX_VALUE;
         int maxX = Integer.MIN_VALUE;
         int minZ = Integer.MAX_VALUE;
@@ -1067,7 +1122,10 @@ public class Mover {
             }
             int c = laneOf(lanesAlongX ? pos.getZ() : pos.getX());
             int along = lanesAlongX ? pos.getX() : pos.getZ();
-            if (c != Integer.MIN_VALUE && !flown(c, along, along)) {
+            // Not where a wall stands on the lane's line (blocks beside it in the lane): no part may reach over the
+            // wall, the printer gets those from the part's end next to it (a test lane ran along a row the walls
+            // cross, with blocks beside them, and went 10 up over each wall)
+            if (c != Integer.MIN_VALUE && !flown(c, along, along) && !tallOnLine(player, c, along, along)) {
                 spans.computeIfAbsent(c, k -> new ArrayList<>()).add(new int[]{along, along, pos.getY(), 1, 0});
             }
         }
@@ -1148,19 +1206,27 @@ public class Mover {
         int hoverY = (int) Math.floor(laneHover(lanePos(c, from, 0)).y);
         for (int along = from; along <= to; along++) {
             BlockPos feet = lanePos(c, along, hoverY);
-            if (!level.isLoaded(feet)) {
-                continue;
+            Boolean known = tallCache.get(feet);
+            if (known == null) {
+                if (!level.isLoaded(feet)) {
+                    continue;
+                }
+                boolean over = false;
+                for (int up = 0; up < LANE_TALL && !over; up++) {
+                    over = FlyPath.fits(level, feet.above(up));
+                }
+                known = !over;
+                tallCache.put(feet, known);
             }
-            boolean over = false;
-            for (int up = 0; up < LANE_TALL && !over; up++) {
-                over = FlyPath.fits(level, feet.above(up));
-            }
-            if (!over) {
+            if (known) {
                 return true;
             }
         }
         return false;
     }
+
+    /** What tallOnLine found, per place on a lane's line at the hover height (walls don't move during a layer). */
+    private final Map<BlockPos, Boolean> tallCache = new HashMap<>();
 
     /**
      * The parts of the current layers that aren't loaded yet (and weren't seen finished): x and z from-to of each,

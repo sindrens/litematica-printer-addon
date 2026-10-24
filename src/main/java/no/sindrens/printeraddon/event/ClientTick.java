@@ -22,6 +22,8 @@ public class ClientTick implements IClientTickHandler {
         if (mc.player == null || mc.level == null) {
             ShopScanner.INSTANCE.cancel(null);
             ShopBuyer.INSTANCE.cancel(null);
+            // Why it ended, and joining again planned (also when the game's own hook didn't tell)
+            AutoBuild.INSTANCE.outOfWorld(mc);
             // Lost the connection or logged out: stop, but keep the resume file
             AutoBuild.INSTANCE.stopForDisconnect(mc);
             no.sindrens.printeraddon.build.Resume.onDisconnect();
@@ -30,6 +32,7 @@ public class ClientTick implements IClientTickHandler {
             no.sindrens.printeraddon.build.Reconnect.whileOut(mc);
             return;
         }
+        AutoBuild.INSTANCE.inWorld(mc);
         no.sindrens.printeraddon.build.Reconnect.whileIn(mc);
 
         if (ShopScanner.INSTANCE.isRunning()) {

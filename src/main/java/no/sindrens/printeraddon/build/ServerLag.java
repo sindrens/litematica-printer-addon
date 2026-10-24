@@ -20,6 +20,11 @@ public final class ServerLag {
     /** Called for every time update from the server. */
     public static void onTime(long gameTime) {
         long now = System.nanoTime();
+        // A long silence (the server stuck): in the build log, to tell its "Timed out" from the add-on's doing
+        if (lastGameTime >= 0 && now - lastNanos > 2_500_000_000L) {
+            BuildLog.line("LAG", String.format(java.util.Locale.ROOT, "no word from the server for %.1f s (it ran at %.0f ticks per second before)",
+                    (now - lastNanos) / 1e9, tps));
+        }
         if (lastGameTime >= 0 && gameTime > lastGameTime) {
             double seconds = (now - lastNanos) / 1e9;
             if (seconds > 0.2) {
@@ -63,6 +68,15 @@ public final class ServerLag {
             }
         }
         return wait;
+    }
+
+    /** The server's state just now, for the build log when the connection ends. */
+    public static String describe() {
+        if (lastGameTime < 0) {
+            return "no time updates from the server yet";
+        }
+        return String.format(java.util.Locale.ROOT, "server at %.0f ticks per second, its last time update %.1f s before", tps,
+                (System.nanoTime() - lastNanos) / 1e9);
     }
 
     public static void reset() {

@@ -39,6 +39,27 @@ public final class Reconnect {
     private static final Deque<Long> rejoins = new ArrayDeque<>();
     /** When it last joined again by itself (-1: not since the game started). */
     private static long joinedAt = -1;
+    /** The server of the world the player is in (the game forgets it as the connection ends). */
+    @Nullable
+    private static ServerData current;
+
+    /** Every tick in a world: the server to join again if the connection ends. */
+    public static void remember(Minecraft mc) {
+        if (mc.getCurrentServer() != null) {
+            current = mc.getCurrentServer();
+        }
+    }
+
+    /** A reason that isn't a kick: the connection or the server gave out (these don't count as kicked). */
+    private static boolean connectionLost(String reason) {
+        return reason.toLowerCase(Locale.ROOT).matches("(?s).*(timed out|timeout|connection (reset|lost|refused|closed)|server closed"
+                + "|restart|end of stream|disconnected|\\?).*");
+    }
+
+    /** A join again is planned (or under way). */
+    public static boolean planned() {
+        return server != null;
+    }
 
     private Reconnect() {
     }
@@ -49,8 +70,9 @@ public final class Reconnect {
         if (!Configs.Generic.RECONNECT.getBooleanValue() || mc.isLocalServer()) {
             return;
         }
-        ServerData data = mc.getCurrentServer();
+        ServerData data = mc.getCurrentServer() != null ? mc.getCurrentServer() : current;
         if (data == null || data.ip == null || data.ip.isBlank()) {
+            BuildLog.lineOrKeep("RECONNECT", "not joining again: the server's address isn't known");
             return;
         }
         if (reason.toLowerCase(Locale.ROOT).matches("(?s).*\\bban(ned)?\\b.*")) {
@@ -59,7 +81,10 @@ public final class Reconnect {
         }
         long now = AutoBuild.clientTicks;
         rejoins.removeIf(at -> now - at > KICKS_WINDOW);
-        if (rejoins.size() >= MAX_KICKS) {
+        if (connectionLost(reason)) {
+            // Timed out (the server stuck for a while), not kicked: always joined again
+            rejoins.clear();
+        } else if (rejoins.size() >= MAX_KICKS) {
             BuildLog.lineOrKeep("RECONNECT", "not joining again: kicked " + rejoins.size() + " times within 10 minutes of joining again");
             return;
         }

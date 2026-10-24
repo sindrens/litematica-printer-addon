@@ -26,7 +26,8 @@ import java.util.Locale;
  * build finished) removes the file.
  */
 public final class Resume {
-    private static final int WAIT_AFTER_JOIN = 20 * 10;
+    /** After joining a world: a moment for the chunks around to load, then back at the build or the command there. */
+    private static final int WAIT_AFTER_JOIN = 20 * 5;
     private static final int GIVE_UP_AFTER = 20 * 60 * 30;
     /** Between the commands back to the build, and between rounds of them. */
     private static final int COMMAND_GAP = 20 * 8;
@@ -105,6 +106,17 @@ public final class Resume {
         }
     }
 
+    /**
+     * A server message while a build waits to go on (the network moving the player: "You timed out", "sent to the
+     * lobby"): into the build log, to see later why it left the build.
+     */
+    public static void serverMessage(String text) {
+        if (!AutoBuild.INSTANCE.isRunning() && pending() && !gaveUp && text.toLowerCase(Locale.ROOT)
+                .matches("(?s).*(timed out|timeout|kick|lobby|hub|fallback|disconnect|restart|went down|could not connect|unable to connect).*")) {
+            BuildLog.lineOrKeep("SERVER", text.replace('\n', ' '));
+        }
+    }
+
     /** Out of the world (disconnected, or the server moving you to another of its servers). */
     public static void onDisconnect() {
         joinedTicks = 0;
@@ -126,10 +138,19 @@ public final class Resume {
         }
         try {
             String[] saved = Files.readString(file(), StandardCharsets.UTF_8).split("\n");
-            if (!saved[0].trim().equals(key(mc))) {
+            // The same server (address); the network's lobby has no schematic loaded: that's away from the build, not
+            // another build. It waited there for good: after "timed out" the network moved the player to its lobby,
+            // and nothing happened until they typed /server Skyblock themselves
+            if (!saved[0].trim().split("\\|", 2)[0].equals(ServerName.current(mc))) {
                 return;
             }
-            String away = saved.length > 3 ? awayFromBuild(mc, saved[3].trim()) : null;
+            boolean placed = SchematicHelper.world() != null && !SchematicHelper.areas().isEmpty();
+            if (placed && !saved[0].trim().equals(key(mc))) {
+                // Another build is placed here now: not this one to go on with
+                return;
+            }
+            String away = !placed ? "the build isn't here (no schematic loaded: another of the network's servers, a lobby?)"
+                    : saved.length > 3 ? awayFromBuild(mc, saved[3].trim()) : null;
             if (away == null) {
                 gaveUp = true;
                 BuildLog.lineOrKeep("RESUME", "back at the build: going on");

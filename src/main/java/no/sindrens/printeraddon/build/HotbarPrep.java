@@ -69,7 +69,7 @@ public class HotbarPrep {
                     from = slot;
                 }
             }
-            int to = freeHotbarSlot(inventory, wantedSet);
+            int to = freeHotbarSlot(inventory, wantedSet, AutoBuild.INSTANCE.layers.tillingLeft() > 0);
             if (from == -1 || to == -1) {
                 continue;
             }
@@ -93,20 +93,31 @@ public class HotbarPrep {
     }
 
     /**
-     * A hotbar slot (1-7) that's empty or holds a block this layer doesn't need much. Tools stay where they are:
-     * swapping a tool away and back (the hoe on farmland layers) is a slot change right where the printer clicks.
+     * A hotbar slot (1-7) that's empty or holds a block this layer doesn't need much; else one with a tool the layer
+     * doesn't use all the time. Three netherite tools on slots 1-3 left 4 slots for a farmland layer's 5 items: dirt,
+     * mud and hoppers were swapped in from the inventory 46 times a minute, each followed by a pause (11% of the
+     * printer's time). The hoe stays while there's tilling (swapping it away and back is a slot change right where the
+     * printer clicks); a pickaxe, axe or shovel is only for breaking, and the breaker takes it from anywhere.
      */
-    private static int freeHotbarSlot(Inventory inventory, Set<Item> wanted) {
+    private static int freeHotbarSlot(Inventory inventory, Set<Item> wanted, boolean hoeInUse) {
         int fallback = -1;
+        int toolFallback = -1;
         for (int slot = 0; slot < SLOTS; slot++) {
             ItemStack stack = inventory.getItem(slot);
             if (stack.isEmpty()) {
                 return slot;
             }
-            if (fallback == -1 && !wanted.contains(stack.getItem()) && !stack.isDamageableItem()) {
-                fallback = slot;
+            if (wanted.contains(stack.getItem())) {
+                continue;
+            }
+            if (!stack.isDamageableItem()) {
+                if (fallback == -1) {
+                    fallback = slot;
+                }
+            } else if (toolFallback == -1 && !(hoeInUse && Tools.isHoe(stack))) {
+                toolFallback = slot;
             }
         }
-        return fallback;
+        return fallback != -1 ? fallback : toolFallback;
     }
 }

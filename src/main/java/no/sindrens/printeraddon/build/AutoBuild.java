@@ -105,6 +105,56 @@ public class AutoBuild {
     }
 
     /**
+     * Whole stacks take a slot each (the rest of a part-used stack only fills that one up): rounded up, the orders may
+     * not all fit together. Then the biggest orders give up their last stack (rounded down) until they do, so every
+     * item still gets its stacks: the cherry leaves didn't fit after the mud and the dirt, and got a trip of their
+     * own 25 s later.
+     */
+    private void fitWholeStacks(Minecraft mc, net.minecraft.world.entity.player.Inventory inventory,
+                                java.util.Map<net.minecraft.world.item.Item, Integer> toBuy) {
+        int over = -(InventoryCleaner.freeSlots(inventory) - InventoryBudget.KEEP_FREE);
+        for (var entry : toBuy.entrySet()) {
+            over += newSlots(inventory, entry.getKey(), entry.getValue());
+        }
+        java.util.Map<net.minecraft.world.item.Item, Integer> trimmed = new java.util.LinkedHashMap<>();
+        while (over > 0) {
+            net.minecraft.world.item.Item best = null;
+            for (var entry : toBuy.entrySet()) {
+                net.minecraft.world.item.Item item = entry.getKey();
+                int stack = item.getDefaultMaxStackSize();
+                if (stack <= 1 || entry.getValue() < 2 * stack || !no.sindrens.printeraddon.shop.ShopBuyer.buysWholeStacks(mc, item)) {
+                    continue;
+                }
+                if (best == null || entry.getValue() > toBuy.get(best)) {
+                    best = item;
+                }
+            }
+            if (best == null) {
+                break;
+            }
+            int stack = best.getDefaultMaxStackSize();
+            int before = newSlots(inventory, best, toBuy.get(best));
+            toBuy.put(best, toBuy.get(best) - stack);
+            trimmed.merge(best, stack, Integer::sum);
+            over -= before - newSlots(inventory, best, toBuy.get(best));
+        }
+        if (!trimmed.isEmpty()) {
+            BuildLog.line("PLAN", "whole stacks to fit the free slots: " + trimmed + " less, buying " + toBuy);
+        }
+    }
+
+    /** The empty slots buying this many of the item takes (a part-used stack of it is filled first). */
+    private static int newSlots(net.minecraft.world.entity.player.Inventory inventory, net.minecraft.world.item.Item item, int count) {
+        int stack = item.getDefaultMaxStackSize();
+        if (stack <= 1) {
+            return count;
+        }
+        int have = inventory.countItem(item);
+        int partRoom = have % stack == 0 ? 0 : stack - have % stack;
+        return (Math.max(0, count - partRoom) + stack - 1) / stack;
+    }
+
+    /**
      * The last trip for this layer (what's left of it fits in with this trip): the room left over goes to what the next
      * layer starts with, in whole stacks, so the next layer needs no trip at its start (when in the shop anyway).
      */
@@ -434,7 +484,25 @@ public class AutoBuild {
     public int lastUnfinishedCount;
     public int lastHeldCount;
 
+    /** What the printer reached on its last turn (its own list, its own measure of range), and when. */
+    private java.util.Set<net.minecraft.core.BlockPos> printerReach = java.util.Set.of();
+    private long printerReachTick = -100;
+
+    /**
+     * The positions the printer reached a moment ago, or null when that's not known (no recent turn). The mover
+     * counts on these only: it measured a little further than the printer, stopped a lane for two blocks at the
+     * edge that the printer never took from there, and stood still for minutes (a test of two layers at once).
+     */
+    @javax.annotation.Nullable
+    public java.util.Set<net.minecraft.core.BlockPos> printerReachNow() {
+        return clientTicks - printerReachTick <= 4 ? printerReach : null;
+    }
+
     public java.util.List<net.minecraft.core.BlockPos> filterPrinterPositions(java.util.List<net.minecraft.core.BlockPos> positions) {
+        if (running) {
+            printerReach = new java.util.HashSet<>(positions);
+            printerReachTick = clientTicks;
+        }
         long started = Perf.start();
         java.util.List<net.minecraft.core.BlockPos> result = filterPositions(positions);
         if (running) {
@@ -1105,6 +1173,8 @@ public class AutoBuild {
             toBuy.put(item, want);
         }
 
+        fitWholeStacks(mc, inventory, toBuy);
+
         // Rails, powered rails and seeds are crafted: buy what they're made of, then craft them
         java.util.Map<net.minecraft.world.item.Item, Integer> toCraft = new java.util.LinkedHashMap<>();
         toBuy.entrySet().removeIf(entry -> {
@@ -1452,7 +1522,8 @@ public class AutoBuild {
         }
         if (wasRunning) {
             String why = reason != null ? "stopped: " + reason
-                    : resumeLater ? "disconnected" + (disconnectReason.isEmpty() ? "" : ": " + disconnectReason) + " (picks up again after rejoining)"
+                    : resumeLater ? (disconnectReason.isEmpty() ? "left the build's world (disconnected, or moved to another of the network's servers)"
+                    : "disconnected: " + disconnectReason) + " (picks up again once back at the build)"
                     : "stopped by you";
             BuildLog.line("END", why + " | " + stats.total() + " | " + spendingLine());
             disconnectReason = "";
@@ -1521,14 +1592,51 @@ public class AutoBuild {
 
     /** The connection ended (see ClientCommonPacketListenerMixin): the reason goes into the build log at once. */
     public void disconnected(String reason) {
-        disconnectReason = reason;
-        if (running) {
-            BuildLog.line("DISCONNECT", "the connection ended: " + reason);
+        if (disconnectTold) {
+            return;
         }
+        disconnectTold = true;
+        disconnectReason = reason;
+        BuildLog.lineOrKeep("DISCONNECT", "the connection ended: " + reason + " | " + ServerLag.describe());
         // Kicked or the server restarting while building, or on the way back to it: join again by itself
-        if (running || Resume.pending()) {
+        if (running || buildingWhenLeft || Resume.pending()) {
             Reconnect.connectionEnded(Minecraft.getInstance(), reason);
         }
+    }
+
+    /** Told already why this connection ended (by the game's hook, or from the "Disconnected" screen). */
+    private boolean disconnectTold;
+    /** When the world was left (-1: in one), and whether auto build was running (or on its way back to the build). */
+    private long leftAt = -1;
+    private boolean buildingWhenLeft;
+
+    /** Every tick in a world: the server is remembered for joining again. */
+    public void inWorld(Minecraft mc) {
+        leftAt = -1;
+        disconnectTold = false;
+        Reconnect.remember(mc);
+    }
+
+    /**
+     * Every tick out of a world, before auto build stops for it. When the game's own hook didn't say why the
+     * connection ended (the player's logs had no reason and no joining again after "Timed out", three times), the
+     * reason is read from the "Disconnected" screen and joining again is planned from here.
+     */
+    public void outOfWorld(Minecraft mc) {
+        if (leftAt < 0) {
+            leftAt = clientTicks;
+            buildingWhenLeft = running || Resume.pending();
+        }
+        if (disconnectTold || !buildingWhenLeft) {
+            return;
+        }
+        // Only on the "Disconnected" screen: out of a world for a moment is also the network moving you to another
+        // of its servers (/server Skyblock), and that's no reason to join again
+        if (!(mc.gui.screen() instanceof net.minecraft.client.gui.screens.DisconnectedScreen screen)) {
+            return;
+        }
+        net.minecraft.network.DisconnectionDetails details = ((no.sindrens.printeraddon.mixin.DisconnectedScreenAccessor) screen).printer_addon$details();
+        disconnected(details == null || details.reason() == null ? "?" : details.reason().getString());
     }
 
     /** Errors already written, so one that repeats every tick isn't written every tick. */

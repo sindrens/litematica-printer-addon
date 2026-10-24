@@ -7,6 +7,7 @@
     "ClientPacketListenerMixin",
     "ClientCommonPacketListenerMixin",
     "ClientLevelAccessor",
+    "DisconnectedScreenAccessor",
     "GuideMixin",
     "GuideExecuteMixin",
     "GuideToolMixin",

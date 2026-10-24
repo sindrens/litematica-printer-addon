@@ -43,6 +43,7 @@ public class ClientPacketListenerMixin {
     private void printer_addon$serverMessage(net.minecraft.network.protocol.game.ClientboundSystemChatPacket packet, CallbackInfo ci) {
         if (!packet.overlay() && no.sindrens.printeraddon.config.Configs.enabled()) {
             no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.serverMessage(packet.content().getString());
+            no.sindrens.printeraddon.build.Resume.serverMessage(packet.content().getString());
         }
     }
 }

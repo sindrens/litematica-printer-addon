@@ -21,7 +21,7 @@ import java.nio.file.Path;
 public class Configs implements IConfigHandler {
     private static final String CONFIG_FILE_NAME = PrinterAddon.MOD_ID + ".json";
     /** 2: the fastest automatic interval went from 2 to 1. */
-    private static final int CONFIG_VERSION = 2;
+    private static final int CONFIG_VERSION = 3;
 
     public static class Generic {
         public static final ConfigBoolean ADDON_ENABLED = new ConfigBoolean("addonEnabled", true,
@@ -51,11 +51,11 @@ public class Configs implements IConfigHandler {
                         + "to cancel. Never after a ban, nor when you leave yourself; it stops after 3 kicks in 10 minutes.\n"
                         + "Once back at the build, it goes on (see 'Go on after a restart or disconnect').",
                 "Join again after a kick or restart");
-        public static final ConfigString BACK_COMMANDS = new ConfigString("backToBuildCommands", "server skyblock, is go",
+        public static final ConfigString BACK_COMMANDS = new ConfigString("backToBuildCommands", "server Skyblock",
                 "Commands that take you back to the build after joining again, or when the server moved you away (to a\n"
                         + "hub): run one by one, 8 seconds apart, then again every minute until you're back at the build (for\n"
-                        + "half an hour). Comma between them, no /. Empty: none. Stop auto build first (J+Q) when you leave on\n"
-                        + "purpose, or it brings you back.",
+                        + "half an hour). Comma between them, no /. Empty: none. On mythian, /server Skyblock puts you back\n"
+                        + "exactly where you logged out. Stop auto build first (J+Q) when you leave on purpose, or it brings you back.",
                 "Commands back to the build");
         public static final ConfigInteger BUILD_RENDER_DISTANCE = new ConfigInteger("buildRenderDistance", 0, 0, 32,
                 "Render distance (chunks) while auto build runs, for less lag on a slow computer. Your own setting comes\n"
@@ -138,10 +138,11 @@ public class Configs implements IConfigHandler {
                         + "that the game always connects), go on to the next layer and list them at the end to do by hand.\n"
                         + "Blocks you don't have the items for are waited for.",
                 "Skip unplaceable blocks after (seconds)");
-        public static final ConfigBoolean LAYERS_TOGETHER = new ConfigBoolean("buildLayersTogether", true,
+        public static final ConfigBoolean LAYERS_TOGETHER = new ConfigBoolean("buildLayersTogether", false,
                 "Build the layer above together with the one below when what goes there stands on the blocks below (seeds and\n"
                         + "stems on farmland, redstone dust on observers and pistons): placed right behind the block under them, in the\n"
-                        + "same lanes, instead of flying over the whole build again for them. Off: always one layer at a time.",
+                        + "same lanes, instead of flying over the whole build again for them. Off: always one layer at a time.\n"
+                        + "Off by default for now: in a test the seeds waited for tilling that waited for water in the next lane.",
                 "Build layers together");
         public static final ConfigBoolean EXTRA_BLOCKS_BLOCK_LAYER = new ConfigBoolean("extraBlocksBlockLayer", false,
                 "Count blocks where the schematic has air (terrain, stray blocks) as unfinished.\n"
@@ -426,6 +427,14 @@ public class Configs implements IConfigHandler {
                     // The fastest interval is 1 now (the player's server takes it): an older setting of 2 goes down
                     if (Speed.AUTO_SPEED_MIN_INTERVAL.getIntegerValue() == 2) {
                         Speed.AUTO_SPEED_MIN_INTERVAL.setIntegerValue(1);
+                    }
+                }
+                if (version < 3) {
+                    // /server Skyblock alone puts the player back where they logged out; /is go after it took them
+                    // to the island's spawn, away from the build
+                    String back = Generic.BACK_COMMANDS.getStringValue().replaceAll("\\s+", " ").trim();
+                    if (back.equalsIgnoreCase("server skyblock, is go") || back.equalsIgnoreCase("server skyblock,is go")) {
+                        Generic.BACK_COMMANDS.setValueFromString("server Skyblock");
                     }
                 }
             }
