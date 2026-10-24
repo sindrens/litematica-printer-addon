@@ -52,6 +52,8 @@ public class Mover {
     /** Areas (see areaKey) with blocks that aren't loaded yet, with one such block each. */
     private final Map<Long, BlockPos> unloadedAreas = new HashMap<>();
     private long lastNothingDoable = -100;
+    /** Snake position of the last area worked in (Long.MIN_VALUE at the start of a layer). */
+    private long lastAreaOrder = Long.MIN_VALUE;
     /** Unloaded areas that stayed unloaded with the player right there (never flown to again). */
     private final java.util.Set<Long> unloadable = new java.util.HashSet<>();
     private long nearUnloadedSince = -1;
@@ -470,6 +472,7 @@ public class Mover {
         if (layer != sweepLayer) {
             sweepLayer = layer;
             unloadable.clear();
+            lastAreaOrder = Long.MIN_VALUE;
             area = null;
             sweep = 1;
         }
@@ -486,7 +489,11 @@ public class Mover {
             keys.addAll(unloadedAreas.keySet());
             keys.removeAll(unloadable);
             List<Long> order = new ArrayList<>(keys);
-            order.sort(java.util.Comparator.comparingLong(Mover::areaOrder));
+            // Snake order, but going on from the last area: areas behind (that became doable again, e.g. when
+            // items arrived) come after the rest of the layer, not with a flight back across it
+            long here = lastAreaOrder;
+            order.sort(java.util.Comparator.comparingLong((Long key) -> areaOrder(key) >= here ? 0 : 1)
+                    .thenComparingLong(Mover::areaOrder));
             Long next = null;
             for (Long key : order) {
                 if (anyDoable(mc, schematic, workByArea.get(key))) {
@@ -527,6 +534,7 @@ public class Mover {
                 PrinterAddon.debug("Next area: {}", areaName(next));
             }
             area = next;
+            lastAreaOrder = areaOrder(next);
             // Back and forth inside the square starts at its west side on even area rows, east side on odd ones
             sweep = Math.floorMod((int) (area >> 32), 2) == 0 ? 1 : -1;
         }
