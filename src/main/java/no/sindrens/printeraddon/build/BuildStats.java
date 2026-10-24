@@ -72,7 +72,12 @@ public class BuildStats {
     }
 
     /** What the printer did with a free turn (nothing queued, looking for the next block). */
-    public enum Turn { PLACED, PAUSED, NOTHING_IN_REACH, NONE_READY, CANT_PLACE_YET, SKIPPED }
+    /**
+     * PLACED; PAUSED (by the add-on); NOTHING_IN_REACH (everything in range placed); JUST_TRIED (the unfinished ones
+     * in range were all clicked a moment ago, waiting for the server); NONE_READY (held back by the order rules:
+     * water first, what they stand on...); CANT_PLACE_YET (none of the printer's guides can place them from here).
+     */
+    public enum Turn { PLACED, PAUSED, NOTHING_IN_REACH, JUST_TRIED, NONE_READY, CANT_PLACE_YET, SKIPPED }
 
     private final int[] minuteTurns = new int[Turn.values().length];
     private final int[] recentTurns = new int[Turn.values().length];

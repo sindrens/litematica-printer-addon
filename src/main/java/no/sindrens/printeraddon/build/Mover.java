@@ -239,7 +239,7 @@ public class Mover {
         List<BlockPos> inReach = new ArrayList<>();
         Vec3 eye = player.getEyePosition();
         for (BlockPos pos : work) {
-            if (eye.distanceToSqr(Vec3.atCenterOf(pos)) <= (reach - 0.25) * (reach - 0.25) && canDoNow(mc, schematic, pos)) {
+            if (reachable(mc, schematic, eye, pos, reach) && canDoNow(mc, schematic, pos)) {
                 inReach.add(pos);
             }
         }
@@ -598,7 +598,7 @@ public class Mover {
             double nearestDistance = Double.MAX_VALUE;
             for (BlockPos pos : here) {
                 double d = eye.distanceToSqr(Vec3.atCenterOf(pos));
-                if (d <= r * r && d < nearestDistance) {
+                if (d < nearestDistance && reachable(mc, schematic, eye, pos, reach)) {
                     nearestDistance = d;
                     nearest = pos;
                 }
@@ -683,6 +683,20 @@ public class Mover {
     private Long area;
 
     /** True if one of these unfinished blocks can be placed now (stops at the first). */
+    /**
+     * In reach from there: the printer's range, but a bucket (water in the leaves) only as far as the player can
+     * use items on blocks, which is less: the player has to come closer for those.
+     */
+    private static boolean reachable(Minecraft mc, WorldSchematic schematic, Vec3 eye, BlockPos pos, double reach) {
+        double d = eye.distanceToSqr(Vec3.atCenterOf(pos));
+        double r = reach - 0.25;
+        if (d > r * r) {
+            return false;
+        }
+        double bucket = mc.player.blockInteractionRange() - 0.5;
+        return d <= bucket * bucket || BlockCheck.check(mc.level, schematic, pos) != BlockCheck.Result.BUCKET;
+    }
+
     /** Extra cost (blocks) for going back to an area behind in the usual order. */
     private static final double BEHIND_AREA_COST = 12;
 
@@ -1093,7 +1107,7 @@ public class Mover {
             double reach = reach(player);
             Vec3 eye = player.getEyePosition();
             for (BlockPos pos : work) {
-                if (eye.distanceToSqr(Vec3.atCenterOf(pos)) <= (reach - 0.25) * (reach - 0.25) && canDoNow(mc, schematic, pos)) {
+                if (reachable(mc, schematic, eye, pos, reach) && canDoNow(mc, schematic, pos)) {
                     placeable++;
                 }
             }

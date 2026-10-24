@@ -186,6 +186,10 @@ public class AutoBuild {
      * What the printer gets to see: during auto build only blocks that are ready, full blocks first, plus deferred
      * blocks within reach that have become ready. During air place only the one block it's meant for.
      */
+    /** Of the printer's last offer: unfinished blocks in its range, and of those held back as just tried. */
+    public int lastUnfinishedCount;
+    public int lastHeldCount;
+
     public java.util.List<net.minecraft.core.BlockPos> filterPrinterPositions(java.util.List<net.minecraft.core.BlockPos> positions) {
         long started = Perf.start();
         java.util.List<net.minecraft.core.BlockPos> result = filterPositions(positions);
@@ -221,14 +225,25 @@ public class AutoBuild {
         // block next to it (the wrong blocks seen at fast intervals)
         long now = AutoBuild.clientTicks;
         // Long enough for the server's answer to arrive, also with a high ping
-        long holdBack = Math.max(20, 2L * ServerLag.pingTicks(mc) + 6);
+        // (the client shows a placed block at once, so this only matters for clicks that didn't work out; on farmland
+        // the same spot is clicked twice: dirt, then tilling)
+        long holdBack = Math.max(8, 2L * ServerLag.pingTicks(mc) + 6);
         recentlyTried.values().removeIf(at -> now - at > holdBack);
+        int unfinished = 0;
+        int held = 0;
         for (net.minecraft.core.BlockPos pos : all) {
+            if (schematic.getBlockState(pos).isAir() || BlockCheck.check(mc.level, schematic, pos) == BlockCheck.Result.OK) {
+                continue;
+            }
+            unfinished++;
             if (recentlyTried.containsKey(pos) || givenUp(pos)) {
+                held++;
                 continue;
             }
             forPrinter.add(pos);
         }
+        lastUnfinishedCount = unfinished;
+        lastHeldCount = held;
         lastOfferedTick = clientTicks;
         lastRawCount = all.size();
         java.util.List<net.minecraft.core.BlockPos> ordered = PlacementOrder.order(mc.level, schematic, forPrinter, mc.player.position(),

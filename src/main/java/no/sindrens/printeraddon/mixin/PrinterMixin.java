@@ -44,8 +44,11 @@ public class PrinterMixin {
             no.sindrens.printeraddon.build.BuildStats.Turn turn;
             if (cir.getReturnValueZ()) {
                 turn = no.sindrens.printeraddon.build.BuildStats.Turn.PLACED;
-            } else if (build.lastOfferedTick != AutoBuild.clientTicks || build.lastRawCount == 0) {
+            } else if (build.lastOfferedTick != AutoBuild.clientTicks || build.lastRawCount == 0 || build.lastUnfinishedCount == 0) {
+                // Nothing left to place in the printer's range (all placed here)
                 turn = no.sindrens.printeraddon.build.BuildStats.Turn.NOTHING_IN_REACH;
+            } else if (build.lastOfferedCount == 0 && build.lastHeldCount > 0) {
+                turn = no.sindrens.printeraddon.build.BuildStats.Turn.JUST_TRIED;
             } else if (build.lastOfferedCount == 0) {
                 turn = no.sindrens.printeraddon.build.BuildStats.Turn.NONE_READY;
             } else if (build.lastExecutableCount == 0) {
