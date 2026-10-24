@@ -25,7 +25,6 @@ public class AutoBuild {
     /** Temporary rails are removed through the same list as misplaced air-placed blocks. */
     public final RailHelper rails = new RailHelper(airPlace.misplaced());
     public final EntityPlacer entities = new EntityPlacer();
-    public final QuickPlace quickPlace = new QuickPlace();
     public final Crafter crafter = new Crafter();
     public final ChestFetcher fetcher = new ChestFetcher();
     public final InventoryWatch inventory = new InventoryWatch();
@@ -97,6 +96,11 @@ public class AutoBuild {
     /** The printer is paused while a block is being broken, so the two don't swap the held item. */
     public boolean shouldPausePrinter() {
         if (running) {
+            // Optional cap for strict anticheats: no more than this many placements per second
+            int cap = Configs.Speed.MAX_PLACEMENTS_PER_SECOND.getIntegerValue();
+            if (cap > 0 && stats.placedInLastSecond() >= cap) {
+                return true;
+            }
             // A swap still on its way to the server would make the printer click with the wrong item
             inventory.update(Minecraft.getInstance());
             if (inventory.settling() || ServerLag.shouldWait(Minecraft.getInstance())) {
@@ -136,20 +140,18 @@ public class AutoBuild {
                 }
             }
         }
-        // Blocks QuickPlace does with one click aren't the printer's: it spends its turns on the rest
         java.util.List<net.minecraft.core.BlockPos> forPrinter = new java.util.ArrayList<>(all.size());
         // A spot tried a moment ago may just not have the server's answer yet: trying it again places a second
         // block next to it (the wrong blocks seen at fast intervals)
         long now = AutoBuild.clientTicks;
-        recentlyTried.values().removeIf(at -> now - at > 20);
+        // Long enough for the server's answer to arrive, also with a high ping
+        long holdBack = Math.max(20, 2L * ServerLag.pingTicks(mc) + 6);
+        recentlyTried.values().removeIf(at -> now - at > holdBack);
         for (net.minecraft.core.BlockPos pos : all) {
             if (recentlyTried.containsKey(pos)) {
                 continue;
             }
-            if (Configs.quickPlace() != no.sindrens.printeraddon.config.QuickPlaceMode.ALL
-                    || !QuickPlace.isCandidate(mc, pos, schematic.getBlockState(pos))) {
-                forPrinter.add(pos);
-            }
+            forPrinter.add(pos);
         }
         lastOfferedTick = clientTicks;
         lastRawCount = all.size();
@@ -161,10 +163,12 @@ public class AutoBuild {
         lastOfferedCount = ordered.size();
         // For the idle analysis: how many of them a printer guide can actually do now
         lastExecutableCount = 0;
-        if (Configs.Generic.DEBUG_LOG.getBooleanValue()) {
+        {
+            // Only whether there's at least one (cheap: stops at the first)
             for (net.minecraft.core.BlockPos pos : ordered) {
-                if (QuickPlace.printerCan(mc, pos)) {
+                if (Clicks.printerCan(mc, pos)) {
                     lastExecutableCount++;
+                    break;
                 }
             }
         }
@@ -448,7 +452,6 @@ public class AutoBuild {
         fluids.reset();
         rails.reset();
         entities.reset();
-        quickPlace.reset();
         breaker.setForced(airPlace.misplaced());
 
         if (Configs.Layers.AUTO_LAYER.getBooleanValue() && !layers.start(mc)) {
@@ -602,8 +605,7 @@ public class AutoBuild {
 
         PrinterBridge.applySettings(mc.player);
         stats.tick(activity());
-        stats.printerTick(PrinterBridge.isIdle(), shouldPausePrinter(), clientTicks - lastOfferedTick <= 1 ? lastOfferedCount : -1,
-                lastRawCount, lastExecutableCount);
+
         speed.tick(mc);
 
         // Eating: nothing else happens meanwhile (only between other jobs, never in the middle of one)
@@ -689,9 +691,7 @@ public class AutoBuild {
         }
         if (!breaker.isBusy() && !airPlace.isActive() && !fluids.isBusy() && !rails.isBusy() && !entities.isBusy()
                 && PrinterBridge.isIdle()) {
-            if (!hotbar.tick(mc, layers.layerNeeds()) && !ServerLag.shouldWait(mc)) {
-                quickPlace.tick(mc);
-            }
+            hotbar.tick(mc, layers.layerNeeds());
         }
 
         if (layers.isActive() && !layers.tick(mc)) {
@@ -699,9 +699,8 @@ public class AutoBuild {
             return;
         }
 
-        if (PrinterBridge.isIdle() && !breaker.isBusy() && !fluids.isBusy() && !rails.isBusy() && !entities.isBusy()
-                && !false) {
-            if (cleaner.tick(mc, neededWhole)) {
+        if (PrinterBridge.isIdle() && !breaker.isBusy() && !fluids.isBusy() && !rails.isBusy() && !entities.isBusy()) {
+            if (cleaner.tick(mc, neededWhole, fetcher)) {
                 return;
             }
             if (buyMissing(mc)) {

@@ -47,6 +47,8 @@ public final class BuildHud {
         String eta = rate > 0.5 ? BuildStats.time((long) (left / rate * 60_000)) : "-";
         add(lines, colors, String.format("%,d blocks left in the build, about %s to go", left, eta), TEXT);
         add(lines, colors, String.format("%.0f blocks/min, %s", rate, build.speed.describe()), GREY);
+        int busy = build.stats.printerBusyPercent();
+        add(lines, colors, "Printer busy " + busy + "%" + (busy < 80 ? " (mostly idle because: " + build.stats.printerIdleReason() + ")" : ""), GREY);
         add(lines, colors, "Doing: " + build.doing(), GREY);
 
         Map<Item, Integer> missing = build.shoppingList;

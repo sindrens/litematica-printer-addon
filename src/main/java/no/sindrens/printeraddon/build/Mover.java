@@ -46,6 +46,11 @@ public class Mover {
     private final List<BlockPos> work = new ArrayList<>();
     /** Parts of the layer too far away to be loaded yet: flown to when nothing else is left. */
     private final List<BlockPos> unloaded = new ArrayList<>();
+    /** Areas (see areaKey) with blocks that aren't loaded yet, with one such block each. */
+    private final Map<Long, BlockPos> unloadedAreas = new HashMap<>();
+    /** Unloaded areas that stayed unloaded with the player right there (never flown to again). */
+    private final java.util.Set<Long> unloadable = new java.util.HashSet<>();
+    private long nearUnloadedSince = -1;
     /** Unfinished positions the player must not stand in. */
     private final Set<BlockPos> reserved = new HashSet<>();
     private final Map<BlockPos, Long> skipped = new HashMap<>();
@@ -113,6 +118,8 @@ public class Mover {
     public void reset() {
         state = State.IDLE;
         sweepLayer = Integer.MIN_VALUE;
+        unloadable.clear();
+        nearUnloadedSince = -1;
         errand = null;
         work.clear();
         reserved.clear();
@@ -228,9 +235,19 @@ public class Mover {
         if (!inReach.isEmpty() || !PrinterBridge.isIdle()) {
             lastWorkTick = tick;
         }
-        // Just placed something: the next block of a chain only counts as placeable once the server has the last
-        // one. Stay for two printer turns instead of flying off after every block or two
-        if (inReach.isEmpty() && state == State.WORKING && !work.isEmpty()
+        // Just placed something and an unfinished block of a chain is still in reach: its next block only counts as
+        // placeable once the server has the last one. Stay for two printer turns for it. With nothing unfinished
+        // left in reach, fly on right away
+        boolean unfinishedInReach = false;
+        if (inReach.isEmpty()) {
+            for (BlockPos pos : work) {
+                if (eye.distanceToSqr(Vec3.atCenterOf(pos)) <= (reach - 0.25) * (reach - 0.25)) {
+                    unfinishedInReach = true;
+                    break;
+                }
+            }
+        }
+        if (inReach.isEmpty() && unfinishedInReach && state == State.WORKING
                 && tick - lastWorkTick < 2L * AutoBuild.INSTANCE.speed.interval() + GRACE_EXTRA_TICKS) {
             if (flying(player)) {
                 player.setDeltaMovement(Vec3.ZERO);
@@ -345,10 +362,6 @@ public class Mover {
                     && AutoBuild.INSTANCE.rails.selfPlaceFacing(mc.level, schematic, p, schematic.getBlockState(p)) != null) {
                 return true;
             }
-            // Blocks with nothing to place them against: the add-on clicks the right face itself
-            if (result == BlockCheck.Result.MISSING && QuickPlace.isCandidate(mc, p, schematic.getBlockState(p))) {
-                return true;
-            }
             // Air place does floating blocks and chains the printer can't do the normal way
             return Configs.Layers.USE_AIR_PLACE.getBooleanValue() && result == BlockCheck.Result.MISSING
                     && AirPlace.isCandidate(mc.level, p, schematic.getBlockState(p));
@@ -407,69 +420,94 @@ public class Mover {
         List<BlockPos> sorted = new ArrayList<>(work);
         sorted.sort(java.util.Comparator.comparingDouble(p -> from.distanceToSqr(Vec3.atCenterOf(p))));
 
-        // What can be placed right now, nearest first. Chains (hoppers pointing into each other, rails...) can only
-        // be built from where they end, so the sweep starts where blocks are placeable, not just at the north edge:
-        // otherwise it creeps along a part where nothing can be placed yet
-        // The nearest ones first; when none of those can be placed, keep looking further out until some are found
-        // (a chain's start can be on the far side of the layer), so it flies straight there instead of inching
-        List<BlockPos> doable = new ArrayList<>();
-        int checked = 0;
+        // Area by area: the layer is cut into 16x16 squares (chunks), done in snake order from the north-west corner.
+        // It stays in a square until nothing in it can be placed, then goes to the first square in that order that has
+        // something placeable (every square is checked, near or far). Chains (hoppers) are so followed from where they
+        // start, in small areas, back and forth, never in long lines
+        int layer = AutoBuild.INSTANCE.layers.getLayer();
+        if (layer != sweepLayer) {
+            sweepLayer = layer;
+            unloadable.clear();
+            area = null;
+            sweep = 1;
+        }
+        java.util.Map<Long, List<BlockPos>> workByArea = new HashMap<>();
         for (BlockPos pos : sorted) {
-            if (checked++ >= DOABLE_CHECKS && doable.size() >= ENOUGH_DOABLE) {
-                break;
+            workByArea.computeIfAbsent(areaKey(pos), k -> new ArrayList<>()).add(pos);
+        }
+        if (area == null || !anyDoable(mc, schematic, workByArea.get(area))) {
+            java.util.Set<Long> keys = new java.util.HashSet<>(workByArea.keySet());
+            keys.addAll(unloadedAreas.keySet());
+            keys.removeAll(unloadable);
+            List<Long> order = new ArrayList<>(keys);
+            order.sort(java.util.Comparator.comparingLong(Mover::areaOrder));
+            Long next = null;
+            for (Long key : order) {
+                if (anyDoable(mc, schematic, workByArea.get(key))) {
+                    next = key;
+                    break;
+                }
+                BlockPos notLoaded = unloadedAreas.get(key);
+                if (notLoaded != null) {
+                    // An earlier area isn't loaded yet: go there first, so no area is skipped
+                    if (Vec3.atCenterOf(notLoaded).distanceToSqr(from) < 24 * 24) {
+                        if (nearUnloadedSince < 0) {
+                            nearUnloadedSince = tick;
+                        } else if (tick - nearUnloadedSince > 20 * 15) {
+                            PrinterAddon.debug("Area {} doesn't load: leaving it", areaName(key));
+                            unloadable.add(key);
+                            nearUnloadedSince = -1;
+                        }
+                    } else {
+                        nearUnloadedSince = -1;
+                    }
+                    if (!unloadable.contains(key)) {
+                        area = null;
+                        return notLoaded;
+                    }
+                }
             }
+            if (next == null) {
+                if (tick - lastNothingDoableReport > 20 * 30 && !sorted.isEmpty()) {
+                    lastNothingDoableReport = tick;
+                    PrinterAddon.debug("Nothing of the {} unfinished blocks can be placed now; nearest: {}",
+                            sorted.size(), Diagnose.explain(mc, schematic, sorted.getFirst()));
+                }
+                area = null;
+                return null;
+            }
+            if (!next.equals(area)) {
+                PrinterAddon.debug("Next area: {}", areaName(next));
+            }
+            area = next;
+            // Back and forth inside the square starts at its west side on even area rows, east side on odd ones
+            sweep = Math.floorMod((int) (area >> 32), 2) == 0 ? 1 : -1;
+        }
+        List<BlockPos> here = new ArrayList<>();
+        for (BlockPos pos : workByArea.get(area)) {
             if (canDoNow(mc, schematic, pos)) {
-                doable.add(pos);
+                here.add(pos);
             }
         }
-        if (doable.isEmpty()) {
-            if (tick - lastNothingDoableReport > 20 * 30 && !sorted.isEmpty()) {
-                lastNothingDoableReport = tick;
-                PrinterAddon.debug("Nothing of the {} unfinished blocks can be placed now; nearest: {}",
-                        sorted.size(), Diagnose.explain(mc, schematic, sorted.getFirst()));
-            }
-            return null;
-        }
-        if (checked > DOABLE_CHECKS && doable.getFirst().distToCenterSqr(from) > 64 * 64) {
-            PrinterAddon.debug("Nothing placeable nearby: the nearest placeable block is {} ({} blocks away)",
-                    doable.getFirst().toShortString(), (int) Math.sqrt(doable.getFirst().distToCenterSqr(from)));
-        }
+        List<BlockPos> doable = here;
 
-        // Sweep from the most northern placeable row, so no holes are left behind
-        int northRow = Integer.MAX_VALUE;
-        for (BlockPos pos : doable) {
-            northRow = Math.min(northRow, pos.getZ());
-        }
-        int bandEnd = northRow + 3;
         double r = reach - 0.25;
         double eyeHeight = player.getEyeHeight();
         List<BlockPos> near = sorted.subList(0, Math.min(NEARBY_FOR_SPOT, sorted.size()));
+        java.util.Set<BlockPos> doableSet = new java.util.HashSet<>(doable);
+
+        // Inside the square: the northern-most placeable row band first, along it in the sweep direction
+        int northRow = Integer.MAX_VALUE;
+        for (BlockPos pos : here) {
+            northRow = Math.min(northRow, pos.getZ());
+        }
+        int bandEnd = northRow + 3;
 
         BlockPos best = null;
         double bestScore = -Double.MAX_VALUE;
         int candidates = 0;
-        // A new layer starts at its north-west corner and sweeps east, not wherever the player happens to be
-        int layer = AutoBuild.INSTANCE.layers.getLayer();
-        if (layer != sweepLayer) {
-            sweepLayer = layer;
-            sweep = 1;
-            int west = Integer.MAX_VALUE;
-            BlockPos corner = null;
-            for (BlockPos pos : doable) {
-                if (pos.getZ() <= bandEnd && pos.getX() < west) {
-                    west = pos.getX();
-                    corner = pos;
-                }
-            }
-            if (corner != null) {
-                PrinterAddon.debug("New layer: starting at the north-west corner, {}", corner.toShortString());
-                spotFor = corner;
-                return corner;
-            }
-        }
-
         BlockPos bestCandidate = null;
-        for (BlockPos candidate : doable) {
+        for (BlockPos candidate : here) {
             if (candidate.getZ() > bandEnd) {
                 continue;
             }
@@ -484,22 +522,17 @@ public class Mover {
                 if (eye.distanceToSqr(Vec3.atCenterOf(candidate)) > r * r) {
                     continue;
                 }
-                // Placeable blocks in reach count most; the rest too (they become placeable while there)
-                int placeable = 0;
-                for (BlockPos pos : doable) {
-                    if (eye.distanceToSqr(Vec3.atCenterOf(pos)) <= r * r) {
-                        placeable++;
-                    }
-                }
-                int unfinished = 0;
+                // What can be placed from there: now, plus what becomes placeable there once the block it hangs on
+                // (the hopper a hopper points into) is placed. The rest of the unfinished blocks count a little
+                List<BlockPos> inReach = new ArrayList<>();
                 for (BlockPos pos : near) {
                     if (eye.distanceToSqr(Vec3.atCenterOf(pos)) <= r * r) {
-                        unfinished++;
+                        inReach.add(pos);
                     }
                 }
-                double score = 2 * placeable + unfinished - 0.25 * from.distanceTo(eye);
-                // Snake along the band: keep going the same way (east or west) and only turn back when nothing is
-                // left ahead, instead of zig-zagging to the best spot anywhere in the band
+                int placeable = chainClosure(mc, schematic, inReach, doableSet);
+                double score = 2 * placeable + 0.5 * inReach.size() - 0.25 * from.distanceTo(eye);
+                // Back and forth: keep going the same way and only turn when nothing is left ahead
                 if ((eye.x - from.x) * sweep < -r) {
                     score -= BEHIND_PENALTY;
                 }
@@ -513,9 +546,72 @@ public class Mover {
         spotFor = bestCandidate;
         if (best != null && (Vec3.atCenterOf(best).x - from.x) * sweep < -r) {
             sweep = -sweep;
-            PrinterAddon.debug("Nothing left ahead in these rows: turning {}", sweep > 0 ? "east" : "west");
+            PrinterAddon.debug("Nothing left ahead in this area's rows: turning {}", sweep > 0 ? "east" : "west");
         }
         return best;
+    }
+
+    /**
+     * How many of these blocks can be placed one after the other from one spot: the ones placeable now, then every
+     * hopper whose target (the block it points into) is among those, and so on.
+     */
+    private static int chainClosure(Minecraft mc, WorldSchematic schematic, List<BlockPos> inReach, java.util.Set<BlockPos> doable) {
+        java.util.Set<BlockPos> done = new java.util.HashSet<>();
+        for (BlockPos pos : inReach) {
+            if (doable.contains(pos)) {
+                done.add(pos);
+            }
+        }
+        boolean grew = true;
+        for (int round = 0; grew && round < 16; round++) {
+            grew = false;
+            for (BlockPos pos : inReach) {
+                if (done.contains(pos)) {
+                    continue;
+                }
+                net.minecraft.world.level.block.state.BlockState target = schematic.getBlockState(pos);
+                if (target.getBlock() instanceof net.minecraft.world.level.block.HopperBlock) {
+                    net.minecraft.core.Direction facing = target.getValue(net.minecraft.world.level.block.HopperBlock.FACING);
+                    BlockPos into = pos.relative(facing);
+                    if (facing != net.minecraft.core.Direction.DOWN && done.contains(into)) {
+                        done.add(pos);
+                        grew = true;
+                    }
+                }
+            }
+        }
+        return done.size();
+    }
+
+    @Nullable
+    private Long area;
+
+    /** True if one of these unfinished blocks can be placed now (stops at the first). */
+    private boolean anyDoable(Minecraft mc, WorldSchematic schematic, @Nullable List<BlockPos> positions) {
+        if (positions == null) {
+            return false;
+        }
+        for (BlockPos pos : positions) {
+            if (canDoNow(mc, schematic, pos)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static long areaKey(BlockPos pos) {
+        return ((long) (pos.getZ() >> 4) << 32) | ((pos.getX() >> 4) & 0xFFFFFFFFL);
+    }
+
+    /** Snake order of areas: area rows north to south, west to east on even rows and east to west on odd ones. */
+    private static long areaOrder(long key) {
+        int row = (int) (key >> 32);
+        int column = (int) key;
+        return (long) row * 100000L + (Math.floorMod(row, 2) == 0 ? column : -column) + 50000L;
+    }
+
+    private static String areaName(@Nullable Long key) {
+        return key == null ? "-" : "x " + ((int) (long) key) * 16 + " z " + ((int) (key >> 32)) * 16;
     }
 
 
@@ -897,6 +993,7 @@ public class Mover {
         work.clear();
         reserved.clear();
         unloaded.clear();
+        unloadedAreas.clear();
 
         LocalPlayer player = mc.player;
         boolean creative = player.getAbilities().instabuild;
@@ -915,6 +1012,7 @@ public class Mover {
                             if (unloaded.size() < 512) {
                                 unloaded.add(pos.immutable());
                             }
+                            unloadedAreas.putIfAbsent(areaKey(pos), pos.immutable());
                             continue;
                         }
                         if (result == BlockCheck.Result.MISSING && mc.level.getBlockState(pos).isAir()) {

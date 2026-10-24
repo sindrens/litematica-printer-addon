@@ -41,6 +41,19 @@ public class BuildStats {
     /** Times of recent placements, for the blocks-per-minute on screen. */
     private final java.util.ArrayDeque<Long> recent = new java.util.ArrayDeque<>();
 
+    /** Placements in the last second (for the optional cap). */
+    public int placedInLastSecond() {
+        long now = System.currentTimeMillis();
+        int count = 0;
+        for (java.util.Iterator<Long> it = recent.descendingIterator(); it.hasNext(); ) {
+            if (now - it.next() > 1000) {
+                break;
+            }
+            count++;
+        }
+        return count;
+    }
+
     /** Blocks placed per real minute over the last minute (or since the start, if shorter). */
     public double recentRate() {
         long now = System.currentTimeMillis();
@@ -58,49 +71,58 @@ public class BuildStats {
         totalPlaced++;
     }
 
-    private int minuteTicks;
-    private int minuteIdle;
+    /** What the printer did with a free turn (nothing queued, looking for the next block). */
+    public enum Turn { PLACED, PAUSED, NOTHING_IN_REACH, NONE_READY, CANT_PLACE_YET, SKIPPED }
+
+    private final int[] minuteTurns = new int[Turn.values().length];
+    private final int[] recentTurns = new int[Turn.values().length];
+    private long minuteStart = -1;
     private int minutePlaced;
 
     /**
-     * Once a minute in the log: blocks placed, and how often the printer had nothing queued. Rarely idle means the
-     * printer is the limit; often idle means it waits for the player to get somewhere.
+     * Counts the printer's free turns. Once a minute in the log: how many were used for a block, and why the others
+     * weren't (paused by the add-on, nothing unfinished in reach, none ready, none a printer guide can place yet).
      */
-    private int idleNothingInReach;
-    private int idleAllFiltered;
-    private int idleOffered;
+    public void printerTurn(Turn turn) {
+        minuteTurns[turn.ordinal()]++;
+        recentTurns[turn.ordinal()]++;
+        if (minuteStart < 0) {
+            minuteStart = AutoBuild.clientTicks;
+        }
+        if (AutoBuild.clientTicks - minuteStart >= 20 * 60) {
+            int all = Math.max(1, java.util.Arrays.stream(minuteTurns).sum());
+            StringBuilder sb = new StringBuilder();
+            for (Turn t : Turn.values()) {
+                sb.append(", ").append(t.name().toLowerCase().replace('_', ' ')).append(' ')
+                        .append(minuteTurns[t.ordinal()] * 100 / all).append('%');
+            }
+            PrinterAddon.debug("[rate] last minute: {} placed; printer's free turns{}; {}", totalPlaced - minutePlaced,
+                    sb, AutoBuild.INSTANCE.speed.describe());
+            java.util.Arrays.fill(minuteTurns, 0);
+            minuteStart = AutoBuild.clientTicks;
+            minutePlaced = totalPlaced;
+        }
+    }
 
-    private int idleExecutable;
+    /** Share of the printer's free turns (recently) that placed a block, for the on-screen display. */
+    public int printerBusyPercent() {
+        int all = java.util.Arrays.stream(recentTurns).sum();
+        int percent = all == 0 ? 0 : recentTurns[Turn.PLACED.ordinal()] * 100 / all;
+        if (all > 400) {
+            java.util.Arrays.fill(recentTurns, 0);
+        }
+        return percent;
+    }
 
-    public void printerTick(boolean idle, boolean paused, int offered, int raw, int executable) {
-        minuteTicks++;
-        if (idle && !paused) {
-            minuteIdle++;
-            // Why: nothing unfinished in reach at all / some, but none ready / ready ones the printer didn't take
-            if (raw == 0) {
-                idleNothingInReach++;
-            } else if (offered <= 0) {
-                idleAllFiltered++;
-            } else if (executable == 0) {
-                idleOffered++;
-            } else {
-                idleExecutable++;
+    /** The most common reason the printer had nothing to do, recently. */
+    public String printerIdleReason() {
+        Turn worst = null;
+        for (Turn t : Turn.values()) {
+            if (t != Turn.PLACED && (worst == null || recentTurns[t.ordinal()] > recentTurns[worst.ordinal()])) {
+                worst = t;
             }
         }
-        if (minuteTicks >= 20 * 60) {
-            PrinterAddon.debug("[rate] last minute: {} placed, printer idle {}% of ticks (nothing unfinished in reach {}%,"
-                            + " none ready {}%, ready but no guide can place them yet {}%, placeable but the printer skipped them {}%), {}",
-                    totalPlaced - minutePlaced, minuteIdle * 100 / minuteTicks, idleNothingInReach * 100 / minuteTicks,
-                    idleAllFiltered * 100 / minuteTicks, idleOffered * 100 / minuteTicks, idleExecutable * 100 / minuteTicks,
-                    AutoBuild.INSTANCE.speed.describe());
-            minutePlaced = totalPlaced;
-            minuteTicks = 0;
-            minuteIdle = 0;
-            idleNothingInReach = 0;
-            idleAllFiltered = 0;
-            idleOffered = 0;
-            idleExecutable = 0;
-        }
+        return worst == null || recentTurns[worst.ordinal()] == 0 ? "-" : worst.name().toLowerCase().replace('_', ' ');
     }
 
     public void tick(Activity activity) {

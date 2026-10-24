@@ -358,7 +358,7 @@ public class RailHelper {
         BlockPos below = at.below();
         mc.gameMode.useItemOn(player, InteractionHand.MAIN_HAND,
                 new BlockHitResult(Vec3.atCenterOf(below).add(0, 0.5, 0), Direction.UP, below, false));
-        QuickPlace.restoreView(player, oldYaw, oldPitch);
+        Clicks.restoreView(player, oldYaw, oldPitch);
         AutoBuild.INSTANCE.stats.placed();
         PrinterAddon.debug("Placed {} at {} myself (facing {}), the printer wouldn't", target.getBlock().getName().getString(),
                 at.toShortString(), eastWest ? "east-west" : "north-south");
@@ -453,7 +453,7 @@ public class RailHelper {
                 new BlockHitResult(Vec3.atCenterOf(below).add(0, 0.5, 0), Direction.UP, below, false));
         if (facing != null) {
             // Only for the click: the camera stays the player's
-            QuickPlace.restoreView(player, oldYaw, oldPitch);
+            Clicks.restoreView(player, oldYaw, oldPitch);
         }
         BlockPos rail = temps.get(at);
         PrinterAddon.debug("Temporary rail at {} so the rail at {} gets the right shape", at.toShortString(),

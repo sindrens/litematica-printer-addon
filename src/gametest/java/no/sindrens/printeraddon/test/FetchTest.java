@@ -61,6 +61,19 @@ public class FetchTest implements FabricClientGameTest {
             int[] counts = context.computeOnClient(mc -> new int[]{mc.player.getInventory().countItem(Items.IRON_BLOCK),
                     mc.player.getInventory().countItem(Items.GOLD_BLOCK), mc.player.getInventory().countItem(Items.DIAMOND),
                     mc.player.getInventory().countItem(Items.REDSTONE)});
+            // Leftovers go back into the nearest linked chest
+            boolean storing = context.computeOnClient(mc -> fetcher.startStore(mc, java.util.Set.of(Items.IRON_BLOCK)));
+            ticks = 0;
+            while (storing && ticks < 20 * 60 && context.computeOnClient(mc -> fetcher.isBusy())) {
+                context.runOnClient(mc -> fetcher.tick(mc, mover));
+                context.waitTicks(1);
+                ticks++;
+            }
+            int ironLeft = context.computeOnClient(mc -> mc.player.getInventory().countItem(Items.IRON_BLOCK));
+            System.out.println("FETCH TEST: stored iron, " + ironLeft + " left after " + ticks + " ticks");
+            if (!storing || ironLeft != 0) {
+                throw new AssertionError("Fetch test: storing leftovers, started=" + storing + " iron left=" + ironLeft);
+            }
             context.runOnClient(ChestLinks::clear);
             String have = "started=" + started + " iron_block=" + counts[0] + " gold_block=" + counts[1] + " diamond=" + counts[2]
                     + " redstone from the unlinked chest=" + counts[3];

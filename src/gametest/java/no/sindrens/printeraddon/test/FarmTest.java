@@ -118,7 +118,6 @@ public class FarmTest implements FabricClientGameTest {
                     return a.minX() + " " + a.minZ() + " " + a.maxX() + " " + a.maxZ();
                 });
                 server.runCommand("forceload add " + area);
-                context.waitTicks(40);
                 List<String> commands = context.computeOnClient(mc -> prebuildCommands(prebuilt, part));
                 for (String command : commands) {
                     server.runCommand(command);
@@ -417,20 +416,31 @@ public class FarmTest implements FabricClientGameTest {
 
     /**
      * setblock commands (without block updates) for every block of the bottom layers of the schematic, and (with
-     * part > 1) of everything south of the northern 1/part of it.
+     * part > 1) of everything south of the northern 1/part of it. Read from the schematic itself: Litematica's
+     * schematic world only has the chunks near the player.
      */
     private static List<String> prebuildCommands(int layers, int part) {
-        WorldSchematic schematic = SchematicWorldHandler.getSchematicWorld();
+        SchematicPlacement placement = DataManager.getSchematicPlacementManager().getAllSchematicsPlacements().getFirst();
+        LitematicaSchematic schematic = placement.getSchematic();
+        BlockPos origin = placement.getOrigin();
+        SchematicHelper.Area whole = SchematicHelper.areas().getFirst();
+        int keepUntilZ = whole.minZ() + (whole.maxZ() - whole.minZ() + 1) / part;
         List<String> commands = new ArrayList<>();
-        for (SchematicHelper.Area area : SchematicHelper.areas()) {
-            int keepUntilZ = area.minZ() + (area.maxZ() - area.minZ() + 1) / part;
-            for (int y = area.minY(); y <= area.maxY(); y++) {
-                for (int x = area.minX(); x <= area.maxX(); x++) {
-                    for (int z = area.minZ(); z <= area.maxZ(); z++) {
-                        if (y >= area.minY() + layers && z < keepUntilZ) {
+        for (String region : schematic.getAreas().keySet()) {
+            BlockPos at = schematic.getSubRegionPosition(region);
+            BlockPos size = schematic.getAreaSize(region);
+            BlockPos min = origin.offset(at.getX() + Math.min(0, size.getX() + 1), at.getY() + Math.min(0, size.getY() + 1),
+                    at.getZ() + Math.min(0, size.getZ() + 1));
+            var container = schematic.getSubRegionContainer(region);
+            net.minecraft.core.Vec3i dims = container.getSize();
+            for (int dy = 0; dy < dims.getY(); dy++) {
+                for (int dx = 0; dx < dims.getX(); dx++) {
+                    for (int dz = 0; dz < dims.getZ(); dz++) {
+                        int x = min.getX() + dx, y = min.getY() + dy, z = min.getZ() + dz;
+                        if (y >= whole.minY() + layers && z < keepUntilZ) {
                             continue;
                         }
-                        BlockState target = schematic.getBlockState(new BlockPos(x, y, z));
+                        BlockState target = container.get(dx, dy, dz);
                         if (!target.isAir() && target.getBlock() != net.minecraft.world.level.block.Blocks.MOVING_PISTON) {
                             commands.add("setblock " + x + " " + y + " " + z + " "
                                     + net.minecraft.commands.arguments.blocks.BlockStateParser.serialize(target) + " strict");

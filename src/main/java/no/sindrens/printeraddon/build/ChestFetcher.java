@@ -33,9 +33,9 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Takes missing items from chests, barrels and shulker boxes near the player (within the set radius, in loaded
- * chunks, never containers that are part of the schematic) before anything is bought. Flies to a container, opens
- * it, takes what's needed, and remembers what's in each one so it doesn't open them again for nothing.
+ * Takes missing items from the chests, barrels and shulker boxes the player linked before anything is bought, and
+ * puts leftovers the build no longer needs back into them. Flies to a container, opens it, takes or stores, and
+ * remembers what's in each one so it doesn't open them again for nothing.
  */
 public class ChestFetcher {
     private static final int TIMEOUT = 20 * 20;
@@ -47,6 +47,8 @@ public class ChestFetcher {
     private final Map<BlockPos, Map<Item, Integer>> known = new HashMap<>();
     private final Map<Item, Integer> wanted = new LinkedHashMap<>();
     private final List<BlockPos> toVisit = new ArrayList<>();
+    /** Items being put away (instead of taken). */
+    private final java.util.Set<Item> storing = new java.util.HashSet<>();
     @Nullable
     private BlockPos current;
     private Phase phase;
@@ -60,8 +62,37 @@ public class ChestFetcher {
     public void reset() {
         known.clear();
         wanted.clear();
+        storing.clear();
         toVisit.clear();
         current = null;
+    }
+
+    /** Puts every stack of these items into the nearest linked containers. Returns false if there are none. */
+    public boolean startStore(Minecraft mc, java.util.Set<Item> items) {
+        if (!Configs.Shop.FETCH_FROM_CHESTS.getBooleanValue() || mc.player == null || isBusy() || items.isEmpty()) {
+            return false;
+        }
+        toVisit.clear();
+        toVisit.addAll(containersNearby(mc));
+        Vec3 from = mc.player.position();
+        toVisit.sort(java.util.Comparator.comparingDouble(p -> from.distanceToSqr(Vec3.atCenterOf(p))));
+        if (toVisit.isEmpty()) {
+            return false;
+        }
+        wanted.clear();
+        storing.clear();
+        storing.addAll(items);
+        taken = 0;
+        return true;
+    }
+
+    private boolean anyLeftToStore(Inventory inventory) {
+        for (int slot = 0; slot < 36; slot++) {
+            if (storing.contains(inventory.getItem(slot).getItem())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -110,7 +141,18 @@ public class ChestFetcher {
             reset();
             return false;
         }
-        if (current == null) {
+        if (current == null && !storing.isEmpty()) {
+            if (!anyLeftToStore(player.getInventory()) || toVisit.isEmpty()) {
+                Chat.info("Put " + taken + " leftover items in your chests.");
+                storing.clear();
+                toVisit.clear();
+                mover.goTo(null);
+                return false;
+            }
+            current = toVisit.removeFirst();
+            phase = Phase.GO;
+            waited = 0;
+        } else if (current == null) {
             wanted.values().removeIf(count -> count <= 0);
             if (wanted.isEmpty() || toVisit.isEmpty()) {
                 if (!toVisit.isEmpty() || taken > 0) {
@@ -162,6 +204,19 @@ public class ChestFetcher {
                     return true;
                 }
                 AbstractContainerMenu menu = player.containerMenu;
+                if (!storing.isEmpty()) {
+                    for (Slot slot : menu.slots) {
+                        ItemStack stack = slot.getItem();
+                        if (slot.container instanceof Inventory && !stack.isEmpty() && storing.contains(stack.getItem())) {
+                            taken += stack.getCount();
+                            mc.gameMode.handleContainerInput(menu.containerId, slot.index, 0, ContainerInput.QUICK_MOVE, player);
+                        }
+                    }
+                    // Read again the next time it's opened
+                    known.remove(current);
+                    phase = Phase.CLOSE;
+                    return true;
+                }
                 Map<Item, Integer> contents = new HashMap<>();
                 for (Slot slot : menu.slots) {
                     if (slot.container instanceof Inventory) {

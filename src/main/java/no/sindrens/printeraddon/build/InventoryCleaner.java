@@ -14,8 +14,9 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Makes room in the inventory when it's (almost) full: drops leftover building materials of this schematic that
- * no block still needs. Never drops anything else (tools, food, valuables, items the build still needs).
+ * Makes room in the inventory when it's (almost) full: puts leftover building materials of this schematic that
+ * no block still needs into the linked chests, or drops them when there are none (or they're full). Never touches
+ * anything else (tools, food, valuables, items the build still needs).
  */
 public class InventoryCleaner {
     /** Below this many free slots, leftovers are dropped. */
@@ -27,10 +28,13 @@ public class InventoryCleaner {
     /** Every item this schematic has needed during the build. */
     private final Set<Item> materials = new HashSet<>();
     private int cooldown;
+    /** Ticks since leftovers were last put in chests: if the inventory is still full soon after, they're full. */
+    private int sinceStored = Integer.MAX_VALUE;
 
     public void reset() {
         materials.clear();
         cooldown = 0;
+        sinceStored = Integer.MAX_VALUE;
     }
 
     /** Called with what the whole schematic still needs (item -> count). */
@@ -39,7 +43,7 @@ public class InventoryCleaner {
     }
 
     /** Returns true if it dropped something this tick. */
-    public boolean tick(Minecraft mc, Map<Item, Integer> neededWhole) {
+    public boolean tick(Minecraft mc, Map<Item, Integer> neededWhole, ChestFetcher fetcher) {
         LocalPlayer player = mc.player;
         if (player == null || mc.gameMode == null || player.getAbilities().instabuild) {
             return false;
@@ -48,11 +52,16 @@ public class InventoryCleaner {
             cooldown--;
             return false;
         }
+        if (sinceStored < Integer.MAX_VALUE) {
+            sinceStored++;
+        }
         Inventory inventory = player.getInventory();
         if (freeSlots(inventory) >= MIN_FREE_SLOTS) {
             return false;
         }
 
+        Set<Item> leftovers = new HashSet<>();
+        boolean store = sinceStored > 20 * 60;
         for (int slot = 0; slot < 36; slot++) {
             ItemStack stack = inventory.getItem(slot);
             if (stack.isEmpty() || !materials.contains(stack.getItem())) {
@@ -69,6 +78,10 @@ public class InventoryCleaner {
             if (inventory.countItem(item) - stack.getCount() < keep) {
                 continue;
             }
+            if (store) {
+                leftovers.add(item);
+                continue;
+            }
             // Throw the whole stack, through the player's own inventory menu (no screen needed)
             int menuSlot = slot < 9 ? 36 + slot : slot;
             PrinterAddon.debug("Dropping {} {} to make room (the build doesn't need them)", stack.getCount(),
@@ -76,6 +89,14 @@ public class InventoryCleaner {
             mc.gameMode.handleContainerInput(player.inventoryMenu.containerId, menuSlot, 1, ContainerInput.THROW, player);
             cooldown = COOLDOWN;
             return true;
+        }
+        if (store && !leftovers.isEmpty()) {
+            sinceStored = 0;
+            if (fetcher.startStore(mc, leftovers)) {
+                PrinterAddon.debug("Putting leftovers in the linked chests: {}", leftovers);
+                return true;
+            }
+            // No linked chest: they're dropped on the next ticks
         }
         return false;
     }

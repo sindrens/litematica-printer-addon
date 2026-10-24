@@ -85,6 +85,73 @@ public class SpeedTuner {
         return interval;
     }
 
+    /** Per kind of block: the fastest interval it came out right at (it came out wrong once faster). */
+    private final java.util.Map<net.minecraft.world.item.Item, Integer> itemFloors = new java.util.HashMap<>();
+    private boolean itemFloorsLoaded;
+
+    /** The slowest of the remembered floors of the blocks the current layer still needs. */
+    private int floorForLayer() {
+        loadItemFloors();
+        int floor = 1;
+        for (net.minecraft.world.item.Item item : AutoBuild.INSTANCE.layers.layerNeeds().keySet()) {
+            floor = Math.max(floor, itemFloors.getOrDefault(item, 1));
+        }
+        return floor;
+    }
+
+    private static java.nio.file.Path itemFile() {
+        return fi.dy.masa.malilib.util.FileUtils.getConfigDirectory().resolve(PrinterAddon.MOD_ID).resolve("speed-blocks.txt");
+    }
+
+    /** Lines "server item floor", for this server. */
+    private void loadItemFloors() {
+        if (itemFloorsLoaded) {
+            return;
+        }
+        itemFloorsLoaded = true;
+        try {
+            if (!java.nio.file.Files.isRegularFile(itemFile())) {
+                return;
+            }
+            String server = no.sindrens.printeraddon.util.ServerName.current(Minecraft.getInstance());
+            for (String line : java.nio.file.Files.readAllLines(itemFile())) {
+                String[] parts = line.trim().split(" ");
+                if (parts.length == 3 && parts[0].equals(server)) {
+                    net.minecraft.resources.Identifier id = net.minecraft.resources.Identifier.tryParse(parts[1]);
+                    if (id != null) {
+                        net.minecraft.core.registries.BuiltInRegistries.ITEM.getOptional(id)
+                                .ifPresent(item -> itemFloors.merge(item, Integer.parseInt(parts[2]), Math::max));
+                    }
+                }
+            }
+        } catch (Exception e) {
+            PrinterAddon.LOGGER.warn("Couldn't read the block speeds", e);
+        }
+    }
+
+    private void saveItemFloors() {
+        if (itemFloors.isEmpty()) {
+            return;
+        }
+        try {
+            String server = no.sindrens.printeraddon.util.ServerName.current(Minecraft.getInstance());
+            java.util.List<String> lines = new java.util.ArrayList<>();
+            if (java.nio.file.Files.isRegularFile(itemFile())) {
+                for (String line : java.nio.file.Files.readAllLines(itemFile())) {
+                    if (!line.startsWith(server + " ")) {
+                        lines.add(line);
+                    }
+                }
+            }
+            itemFloors.forEach((item, floor) -> lines.add(server + " "
+                    + net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(item) + " " + floor));
+            java.nio.file.Files.createDirectories(itemFile().getParent());
+            java.nio.file.Files.write(itemFile(), lines);
+        } catch (Exception e) {
+            PrinterAddon.LOGGER.warn("Couldn't save the block speeds", e);
+        }
+    }
+
     /** How far above the remembered interval a new build starts. */
     private static final int START_ABOVE_REMEMBERED = 2;
 
@@ -110,6 +177,7 @@ public class SpeedTuner {
 
     /** At the end of a build: remember the interval it got to on this server (only if it got anywhere). */
     public void remember() {
+        saveItemFloors();
         if (!Configs.Speed.AUTO_SPEED.getBooleanValue() || interval < 0 || good < 50) {
             return;
         }
@@ -200,7 +268,7 @@ public class SpeedTuner {
                 good++;
                 if (++goodInARow >= Configs.Speed.AUTO_SPEED_STEP_BLOCKS.getIntegerValue() && tick > calmUntil) {
                     goodInARow = 0;
-                    int min = Math.max(fastestSafe, Configs.Speed.AUTO_SPEED_MIN_INTERVAL.getIntegerValue());
+                    int min = Math.max(Math.max(fastestSafe, floorForLayer()), Configs.Speed.AUTO_SPEED_MIN_INTERVAL.getIntegerValue());
                     if (interval() > min) {
                         interval--;
                         Chat.info("Speed: printer interval " + interval + " (the last "
@@ -216,6 +284,11 @@ public class SpeedTuner {
                     return;
                 }
                 lastPenalty = tick;
+                // This kind of block came out wrong at this speed: remember it for later layers and builds too
+                net.minecraft.world.item.ItemStack wrongItem = StateRules.itemFor(schematic.getBlockState(pos));
+                if (!wrongItem.isEmpty()) {
+                    itemFloors.merge(wrongItem.getItem(), interval() + 1, Math::max);
+                }
                 PrinterAddon.debug("Wrong block at {} at interval {}: {} (should be {}; {})", pos.toShortString(), interval(),
                         mc.level.getBlockState(pos), schematic.getBlockState(pos), AutoBuild.INSTANCE.inventory.describe(mc));
                 slowDown(mc, "a block came out wrong at " + pos.toShortString());

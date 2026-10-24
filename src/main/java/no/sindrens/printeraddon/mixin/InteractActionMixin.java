@@ -55,13 +55,13 @@ public class InteractActionMixin {
         // click, or it opens the hopper instead (and nothing is placed). The printer doesn't always sneak, and its
         // sneak can be overtaken by the click. Sneak right before the click, in the same packet order a player would
         if (Configs.enabled() && client.level != null
-                && no.sindrens.printeraddon.build.QuickPlace.isInteractive(client.level.getBlockState(hit.getBlockPos()))
+                && no.sindrens.printeraddon.build.Clicks.isInteractive(client.level.getBlockState(hit.getBlockPos()))
                 && printer_addon$refillFirst(client, player, hand)) {
             ci.cancel();
             return;
         }
         if (Configs.enabled() && client.level != null
-                && no.sindrens.printeraddon.build.QuickPlace.isInteractive(client.level.getBlockState(hit.getBlockPos()))) {
+                && no.sindrens.printeraddon.build.Clicks.isInteractive(client.level.getBlockState(hit.getBlockPos()))) {
             net.minecraft.world.entity.player.Input keys = player.input.keyPresses;
             net.minecraft.world.entity.player.Input sneaking = new net.minecraft.world.entity.player.Input(
                     keys.forward(), keys.backward(), keys.left(), keys.right(), keys.jump(), true, keys.sprint());

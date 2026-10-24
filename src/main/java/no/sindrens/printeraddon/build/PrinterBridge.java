@@ -52,8 +52,15 @@ public final class PrinterBridge {
         return true;
     }
 
+    private static final class LITEMATICA {
+        static final fi.dy.masa.malilib.config.options.ConfigBoolean EASY_PLACE_MODE = fi.dy.masa.litematica.config.Configs.Generic.EASY_PLACE_MODE;
+        static final fi.dy.masa.malilib.config.options.ConfigBoolean PICK_BLOCK_AVOID_TOOLS = fi.dy.masa.litematica.config.Configs.Generic.PICK_BLOCK_AVOID_TOOLS;
+        static final fi.dy.masa.malilib.config.options.ConfigBoolean PICK_BLOCK_AVOID_DAMAGEABLE = fi.dy.masa.litematica.config.Configs.Generic.PICK_BLOCK_AVOID_DAMAGEABLE;
+    }
+
     /** The player's settings before auto build changed them. */
-    private record Saved(int interval, double range, boolean rotate, boolean interact) {
+    private record Saved(int interval, double range, boolean rotate, boolean interact, boolean printInAir,
+                         boolean easyPlace, boolean avoidTools, boolean avoidDamageable) {
     }
 
     private static Saved saved;
@@ -66,7 +73,9 @@ public final class PrinterBridge {
 
     public static void saveSettings() {
         saved = new Saved(Configs.PRINTING_INTERVAL.getIntegerValue(), Configs.PRINTING_RANGE.getDoubleValue(),
-                Configs.ROTATE.getBooleanValue(), Configs.INTERACT_BLOCKS.getBooleanValue());
+                Configs.ROTATE.getBooleanValue(), Configs.INTERACT_BLOCKS.getBooleanValue(), Configs.PRINT_IN_AIR.getBooleanValue(),
+                LITEMATICA.EASY_PLACE_MODE.getBooleanValue(), LITEMATICA.PICK_BLOCK_AVOID_TOOLS.getBooleanValue(),
+                LITEMATICA.PICK_BLOCK_AVOID_DAMAGEABLE.getBooleanValue());
     }
 
     public static void restoreSettings() {
@@ -77,6 +86,10 @@ public final class PrinterBridge {
         Configs.PRINTING_RANGE.setDoubleValue(saved.range());
         Configs.ROTATE.setBooleanValue(saved.rotate());
         Configs.INTERACT_BLOCKS.setBooleanValue(saved.interact());
+        Configs.PRINT_IN_AIR.setBooleanValue(saved.printInAir());
+        LITEMATICA.EASY_PLACE_MODE.setBooleanValue(saved.easyPlace());
+        LITEMATICA.PICK_BLOCK_AVOID_TOOLS.setBooleanValue(saved.avoidTools());
+        LITEMATICA.PICK_BLOCK_AVOID_DAMAGEABLE.setBooleanValue(saved.avoidDamageable());
         saved = null;
     }
 
@@ -97,6 +110,21 @@ public final class PrinterBridge {
         }
         if (!Configs.INTERACT_BLOCKS.getBooleanValue()) {
             Configs.INTERACT_BLOCKS.setBooleanValue(true);
+        }
+        // Never into the air (anticheats cancel it); only the add-on's own air place, if switched on, turns it on
+        // for one floating block at a time
+        if (Configs.PRINT_IN_AIR.getBooleanValue() && !AutoBuild.INSTANCE.airPlace.isActive()) {
+            Configs.PRINT_IN_AIR.setBooleanValue(false);
+        }
+        // Litematica: easy place would click as well; picking blocks never swaps tools out of the hotbar
+        if (LITEMATICA.EASY_PLACE_MODE.getBooleanValue()) {
+            LITEMATICA.EASY_PLACE_MODE.setBooleanValue(false);
+        }
+        if (!LITEMATICA.PICK_BLOCK_AVOID_TOOLS.getBooleanValue()) {
+            LITEMATICA.PICK_BLOCK_AVOID_TOOLS.setBooleanValue(true);
+        }
+        if (!LITEMATICA.PICK_BLOCK_AVOID_DAMAGEABLE.getBooleanValue()) {
+            LITEMATICA.PICK_BLOCK_AVOID_DAMAGEABLE.setBooleanValue(true);
         }
     }
 }

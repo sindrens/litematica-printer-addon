@@ -32,6 +32,15 @@ public final class ServerLag {
         lastNanos = now;
     }
 
+    /** A round trip to the server in ticks, from the player's ping (at least 2). */
+    public static int pingTicks(Minecraft mc) {
+        if (mc.getConnection() == null || mc.player == null) {
+            return 2;
+        }
+        net.minecraft.client.multiplayer.PlayerInfo info = mc.getConnection().getPlayerInfo(mc.player.getUUID());
+        return info == null ? 2 : Math.max(2, info.getLatency() / 50 + 1);
+    }
+
     public static double tps() {
         return tps;
     }

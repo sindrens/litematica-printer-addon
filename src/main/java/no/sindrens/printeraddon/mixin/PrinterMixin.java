@@ -15,10 +15,19 @@ public class PrinterMixin {
     /** Pauses the printer while the add-on is breaking a block, so both don't fight over the held item. */
     @Inject(method = "onGameTick", at = @At("HEAD"), cancellable = true)
     private void printer_addon$pauseWhileBreaking(CallbackInfoReturnable<Boolean> cir) {
+        // A free turn: the printer has nothing queued and looks for the next block now
+        printer_addon$freeTurn = ((Printer) (Object) this).actionHandler.acceptsActions();
         if (no.sindrens.printeraddon.config.Configs.enabled() && AutoBuild.INSTANCE.shouldPausePrinter()) {
+            if (printer_addon$freeTurn && AutoBuild.INSTANCE.isRunning()) {
+                AutoBuild.INSTANCE.stats.printerTurn(no.sindrens.printeraddon.build.BuildStats.Turn.PAUSED);
+            }
+            printer_addon$freeTurn = false;
             cir.setReturnValue(false);
         }
     }
+
+    @org.spongepowered.asm.mixin.Unique
+    private boolean printer_addon$freeTurn;
 
     /** As soon as the printer queued a placement, air place is switched off again. */
     @Inject(method = "onGameTick", at = @At("RETURN"))
@@ -28,6 +37,23 @@ public class PrinterMixin {
             if (AutoBuild.INSTANCE.isRunning()) {
                 AutoBuild.INSTANCE.stats.placed();
             }
+        }
+        // Each free turn, exactly what happened: placed, or why not (from what it was offered in this very turn)
+        if (printer_addon$freeTurn && AutoBuild.INSTANCE.isRunning()) {
+            AutoBuild build = AutoBuild.INSTANCE;
+            no.sindrens.printeraddon.build.BuildStats.Turn turn;
+            if (cir.getReturnValueZ()) {
+                turn = no.sindrens.printeraddon.build.BuildStats.Turn.PLACED;
+            } else if (build.lastOfferedTick != AutoBuild.clientTicks || build.lastRawCount == 0) {
+                turn = no.sindrens.printeraddon.build.BuildStats.Turn.NOTHING_IN_REACH;
+            } else if (build.lastOfferedCount == 0) {
+                turn = no.sindrens.printeraddon.build.BuildStats.Turn.NONE_READY;
+            } else if (build.lastExecutableCount == 0) {
+                turn = no.sindrens.printeraddon.build.BuildStats.Turn.CANT_PLACE_YET;
+            } else {
+                turn = no.sindrens.printeraddon.build.BuildStats.Turn.SKIPPED;
+            }
+            build.stats.printerTurn(turn);
         }
     }
 

@@ -119,13 +119,6 @@ public class Configs implements IConfigHandler {
         public static final ConfigInteger STUCK_REPORT_SECONDS = new ConfigInteger("stuckReportSeconds", 30, 5, 600,
                 "If the layer hasn't changed for this long, list in chat what is left and why.",
                 "Report stuck layer after (seconds)");
-        public static final ConfigOptionList QUICK_PLACE = new ConfigOptionList("quickPlace", QuickPlaceMode.OFF,
-                "Blocks the add-on places itself with one click (one per printer interval), working out which way to look and\n"
-                        + "which side to click so they come out exactly as in the schematic.\n"
-                        + "Only what the printer can't place (default): e.g. the first row of hoppers with nothing in front of them.\n"
-                        + "All: everything it can predict, much faster (the printer needs 2-4 intervals per block).\n"
-                        + "Never: printer only.",
-                "Quick place");
         public static final ConfigInteger SKIP_STUCK_SECONDS = new ConfigInteger("skipStuckSeconds", 20, 5, 3600,
                 "If blocks you have the items for still can't be placed after this long (e.g. two rails side by side\n"
                         + "that the game always connects), go on to the next layer and list them at the end to do by hand.\n"
@@ -146,21 +139,18 @@ public class Configs implements IConfigHandler {
                         + "rails for the right shape) and minecarts. Off: the printer places everything and the add-on only moves,\n"
                         + "breaks wrong blocks, gets the items and sets the printer's settings.",
                 "Add-on places blocks itself");
-        public static final ConfigBoolean USE_AIR_PLACE = new ConfigBoolean("useAirPlace", false,
+        public static final ConfigBoolean USE_AIR_PLACE = new ConfigBoolean("useAirPlaceForFloatingBlocks", false,
                 "When every missing block within reach floats (nothing next to it to place it against), turn on the\n"
                         + "printer's 'printInAir' for exactly one block, then off again. Off by default: placing against air is what\n"
                         + "anticheats look for, and they cancel those blocks.",
                 "Use printer's air place");
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                AUTO_LAYER, ADDON_PLACES, QUICK_PLACE, LAYER_CHECK_INTERVAL, STUCK_REPORT_SECONDS, SKIP_STUCK_SECONDS, EXTRA_BLOCKS_BLOCK_LAYER,
+                AUTO_LAYER, ADDON_PLACES, LAYER_CHECK_INTERVAL, STUCK_REPORT_SECONDS, SKIP_STUCK_SECONDS, EXTRA_BLOCKS_BLOCK_LAYER,
                 PLANT_WITH_TILLING,
                 USE_AIR_PLACE);
     }
 
-    public static QuickPlaceMode quickPlace() {
-        return (QuickPlaceMode) Layers.QUICK_PLACE.getOptionListValue();
-    }
 
     /** True when the add-on is switched on. */
     public static boolean enabled() {
@@ -262,6 +252,10 @@ public class Configs implements IConfigHandler {
                         + "right, and slows down again at the first wrong one. At 2 it places at most about 5 blocks a second\n"
                         + "(every block takes at least two printer actions); at 1 about twice that. Raise it if a server complains.",
                 "Automatic speed: fastest interval");
+        public static final ConfigInteger MAX_PLACEMENTS_PER_SECOND = new ConfigInteger("maxPlacementsPerSecond", 0, 0, 40,
+                "For servers with a strict anticheat: the printer places at most this many blocks per second. 0 = no limit\n"
+                        + "(the printer's interval decides).",
+                "Max placements per second");
         public static final ConfigInteger LAG_PAUSE_TPS = new ConfigInteger("lagPauseTps", 12, 0, 19,
                 "On a server: stop placing while the server runs below this many ticks per second (20 is normal),\n"
                         + "because clicks then get answered late and blocks come out wrong. 0 = never wait.",
@@ -286,7 +280,7 @@ public class Configs implements IConfigHandler {
                 "Custom: fly speed");
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                AUTO_SPEED, AUTO_SPEED_MIN_INTERVAL, AUTO_SPEED_STEP_BLOCKS, LAG_PAUSE_TPS, PRINTER_INTERVAL, BREAK_COOLDOWN, SHOP_CLICK_DELAY, WALK_SPEED, FLY_SPEED);
+                AUTO_SPEED, AUTO_SPEED_MIN_INTERVAL, AUTO_SPEED_STEP_BLOCKS, MAX_PLACEMENTS_PER_SECOND, LAG_PAUSE_TPS, PRINTER_INTERVAL, BREAK_COOLDOWN, SHOP_CLICK_DELAY, WALK_SPEED, FLY_SPEED);
 
         public static double walkSpeed() {
             SpeedPreset preset = preset();

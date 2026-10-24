@@ -189,7 +189,7 @@ public class Fluids {
         float oldPitch = player.getXRot();
         useBucket(mc, player, schematic, pos);
         // Turn back, so the printer's next block doesn't use the bucket's direction
-        QuickPlace.restoreView(player, oldYaw, oldPitch);
+        Clicks.restoreView(player, oldYaw, oldPitch);
     }
 
     private void useBucket(Minecraft mc, LocalPlayer player, WorldSchematic schematic, BlockPos pos) {
