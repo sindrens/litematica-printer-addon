@@ -74,8 +74,60 @@ public class SpeedTuner {
         }
         if (interval < 0) {
             interval = start;
+            // Start a little above what the last build on this server got to, instead of from the top again
+            Integer remembered = remembered();
+            if (remembered != null && remembered + START_ABOVE_REMEMBERED < start) {
+                interval = Math.max(Configs.Speed.AUTO_SPEED_MIN_INTERVAL.getIntegerValue(), remembered + START_ABOVE_REMEMBERED);
+                Chat.info("Speed: starting at interval " + interval + " (the last build here got to " + remembered + ")");
+            }
         }
         return interval;
+    }
+
+    /** How far above the remembered interval a new build starts. */
+    private static final int START_ABOVE_REMEMBERED = 2;
+
+    private static java.nio.file.Path file() {
+        return fi.dy.masa.malilib.util.FileUtils.getConfigDirectory().resolve(PrinterAddon.MOD_ID).resolve("speed.txt");
+    }
+
+    /** The interval the last build on this server ended at, if it was without mistakes for a while. */
+    @javax.annotation.Nullable
+    private static Integer remembered() {
+        try {
+            String server = no.sindrens.printeraddon.util.ServerName.current(Minecraft.getInstance());
+            for (String line : java.nio.file.Files.readAllLines(file())) {
+                String[] parts = line.split("=");
+                if (parts.length == 2 && parts[0].equals(server)) {
+                    return Integer.parseInt(parts[1].trim());
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
+    }
+
+    /** At the end of a build: remember the interval it got to on this server (only if it got anywhere). */
+    public void remember() {
+        if (!Configs.Speed.AUTO_SPEED.getBooleanValue() || interval < 0 || good < 50) {
+            return;
+        }
+        try {
+            String server = no.sindrens.printeraddon.util.ServerName.current(Minecraft.getInstance());
+            java.util.List<String> lines = new java.util.ArrayList<>();
+            if (java.nio.file.Files.isRegularFile(file())) {
+                for (String line : java.nio.file.Files.readAllLines(file())) {
+                    if (!line.startsWith(server + "=")) {
+                        lines.add(line);
+                    }
+                }
+            }
+            lines.add(server + "=" + Math.max(interval, fastestSafe));
+            java.nio.file.Files.createDirectories(file().getParent());
+            java.nio.file.Files.write(file(), lines);
+        } catch (Exception e) {
+            PrinterAddon.LOGGER.warn("Couldn't save the speed", e);
+        }
     }
 
     public String describe() {

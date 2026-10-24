@@ -1,20 +1,23 @@
 # Printer Addon
 
 Fabric add-on for [Litematica Printer](https://modrinth.com/mod/litematica-printer) on **Minecraft 26.2**.
-Builds schematics, and crop farms in particular, in survival:
+Litematica Printer does the placing; the add-on builds whole schematics in survival around it:
 
-- **Breaks wrong blocks** (wrong block, or the right block facing the wrong way) so the printer can place
-  the right one. Automatic during auto build, or on a key.
-- **Builds one layer at a time** from the bottom and moves to the next layer when one is done.
-- **Scans `/shop`** (ShopGUI+) and saves where every item is and what it costs.
+- **One layer at a time** from the bottom, never skipping a block. Wrong blocks (wrong block, or facing the
+  wrong way) are broken so the printer can place the right one.
+- **Flies** above the layer, along the rows, to where the most blocks can be placed at once.
+- **Automatic speed:** goes faster while every block comes out right (down to printer interval 2) and slows
+  down at the first wrong one. Remembers the speed per server for the next build.
+- **Gets the items:** takes them from chests, barrels and shulker boxes nearby (up to 500 blocks, in loaded
+  chunks), then buys the rest in `/shop` (ShopGUI+), and crafts rails, powered rails and pumpkin seeds from
+  iron and gold blocks, logs, redstone and pumpkins.
+- Keeps the layer's blocks on the hotbar, eats when hungry, waits when the server lags, picks up again after
+  logging out, and shows the build on screen (layer, blocks left, time to go, speed, what's missing).
 - Safety: stops when you take damage or another player comes close, and never uses a nearly broken tool.
-
-Coming next: safe build order for farms, temporary scaffolding, walking/flying, buying from the shop,
-auto eat. See [docs/DESIGN.md](docs/DESIGN.md).
 
 ## Install
 
-Put these in `.minecraft/mods`, together with this mod's jar:
+Put these in `.minecraft/mods` (or the Modrinth profile's `mods` folder), together with this mod's jar:
 
 | Mod | Version |
 |---|---|
@@ -23,17 +26,30 @@ Put these in `.minecraft/mods`, together with this mod's jar:
 | MaLiLib | 0.29.6 |
 | Litematica | 0.28.8 |
 | Litematica Printer | 3.2.2 (26.2) |
+| Mod Menu | optional (settings button in the mod list) |
 
 ## Use
 
-1. Load and place a schematic in Litematica as usual.
-2. Hold `J` and press `B` to start auto build. The printer turns on, Litematica switches to a single
-   layer at the bottom, and wrong blocks within reach get broken. Walk around the layer for now; moving
-   by itself comes later.
-3. Hold `J` and press `C` for the settings (speed presets, break range, tool protection, safety...).
+1. Load and place a schematic in Litematica as usual. The add-on says in chat what it still needs and what
+   that costs in the shop (scan the shop once with `J`+`S`).
+2. `J`+`B` starts auto build. It turns the printer on and builds from the bottom layer up. `J`+`B` again, or
+   `J`+`Q`, stops it.
+3. `J`+`C` (or Mod Menu) opens the settings.
 
-All keys: see [docs/DESIGN.md](docs/DESIGN.md#keybinds-defaults-all-changeable). They can be changed in
-the settings' Hotkeys tab.
+| Keys | What |
+|---|---|
+| `J`+`B` | Start / stop auto build |
+| `J`+`Q` | Stop everything (also in menus) |
+| `J`+`A` | Add-on on / off (off: Litematica Printer works as without it) |
+| `J`+`C` | Settings |
+| `J`+`P` | What the build still needs and what it costs |
+| `J`+`R` | Build report: everything missing or wrong, with coordinates (`config/printer_addon/report.txt`) |
+| `J`+`S` | Scan `/shop` |
+| `J`+`F` | Fix wrong blocks around me |
+| `J`+`X` | Clear extra blocks around me |
+| `J`+`Page Up` / `Page Down` | Layer up / down |
+
+All keys can be changed in the settings' Hotkeys tab.
 
 ## Build
 

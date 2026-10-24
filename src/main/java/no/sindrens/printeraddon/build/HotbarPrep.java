@@ -81,28 +81,20 @@ public class HotbarPrep {
     }
 
     /**
-     * A hotbar slot (1-7) that's empty or holds something this layer doesn't need much: other blocks first, then
-     * tools (they go to the inventory; breaking swaps the right one onto slot 9 when needed).
+     * A hotbar slot (1-7) that's empty or holds a block this layer doesn't need much. Tools stay where they are:
+     * swapping a tool away and back (the hoe on farmland layers) is a slot change right where the printer clicks.
      */
     private static int freeHotbarSlot(Inventory inventory, Set<Item> wanted) {
-        int block = -1;
-        int tool = -1;
+        int fallback = -1;
         for (int slot = 0; slot < SLOTS; slot++) {
             ItemStack stack = inventory.getItem(slot);
             if (stack.isEmpty()) {
                 return slot;
             }
-            if (wanted.contains(stack.getItem())) {
-                continue;
-            }
-            if (!stack.isDamageableItem()) {
-                if (block == -1) {
-                    block = slot;
-                }
-            } else if (tool == -1) {
-                tool = slot;
+            if (fallback == -1 && !wanted.contains(stack.getItem()) && !stack.isDamageableItem()) {
+                fallback = slot;
             }
         }
-        return block != -1 ? block : tool;
+        return fallback;
     }
 }

@@ -94,7 +94,7 @@ public class AutoBuild {
         if (running) {
             // A swap still on its way to the server would make the printer click with the wrong item
             inventory.update(Minecraft.getInstance());
-            if (inventory.handSettling(Minecraft.getInstance()) || ServerLag.shouldWait(Minecraft.getInstance())) {
+            if (inventory.settling() || ServerLag.shouldWait(Minecraft.getInstance())) {
                 return true;
             }
         }
@@ -444,6 +444,9 @@ public class AutoBuild {
     /** Stops auto build. {@code reason} is shown as a warning when it isn't the player's own choice. */
     public void stop(Minecraft mc, String reason) {
         boolean wasRunning = running;
+        if (wasRunning) {
+            speed.remember();
+        }
         running = false;
         no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.cancel(null);
         buying = false;
