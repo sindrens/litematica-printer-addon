@@ -6,8 +6,9 @@ Litematica Printer does the placing; the add-on builds whole schematics in survi
 - **One layer at a time** from the bottom, never skipping a block. Wrong blocks (wrong block, or facing the
   wrong way) are broken so the printer can place the right one.
 - **Flies** above the layer area by area (16x16, from the north-west corner, back and forth inside each area, no
-  area skipped), always to where the most blocks can be placed at once, and moves on as soon as nothing in reach
-  is left to place.
+  area skipped). It glides on while the printer places: slower the more there is in reach (it only stops for a lot
+  at once), never so fast that a block behind leaves the reach, and on to the next spot before it's even there.
+  Speeding up, braking and turns are smooth; the printer only waits while it flies faster than a slow walk.
 - **Automatic speed, per kind of block:** every kind (seeds, mud, pistons...) gets its own printer interval: it
   starts at your interval, goes faster while that kind comes out right (down to interval 1) and slows down at the
   first wrong one. Switching items that came out wrong once is done slower after. All of it is remembered per

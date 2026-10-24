@@ -308,7 +308,7 @@ public class AutoBuild {
         lastHeldCount = held;
         lastOfferedTick = clientTicks;
         lastRawCount = all.size();
-        java.util.List<net.minecraft.core.BlockPos> ordered = PlacementOrder.order(mc.level, schematic, forPrinter, mc.player.position(),
+        java.util.List<net.minecraft.core.BlockPos> ordered = PlacementOrder.order(mc.level, schematic, forPrinter, mover.orderFrom(mc.player),
                 mc.player.getMainHandItem().isEmpty() ? null : mc.player.getMainHandItem().getItem());
         if (!ordered.isEmpty()) {
             nextBlock = ordered.getFirst();

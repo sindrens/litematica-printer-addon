@@ -122,7 +122,7 @@ public class BuildStats {
             BuildLog.line("TURNS", (sb.length() > 2 ? sb.substring(0, sb.length() - 2) : "-")
                     + " | in reach: mover " + build.mover.printerReachCount() + ", printer " + build.lastUnfinishedCount
                     + " unfinished, " + build.lastHeldCount + " held back, " + build.lastOfferedCount + " offered"
-                    + " | " + build.mover.describe()
+                    + " | " + build.mover.describe() + String.format(" | %.1f blocks/s", build.mover.speedPerSecond())
                     + (player != null ? String.format(" | at %.1f %.1f %.1f", player.getX(), player.getY(), player.getZ()) : ""));
             java.util.Arrays.fill(secondTurns, 0);
             secondStart = AutoBuild.clientTicks;
