@@ -106,13 +106,49 @@ public class CraftTest implements FabricClientGameTest {
                 throw new AssertionError("Craft test, tools: " + toolsHave + " (plan " + toolPlan + ")");
             }
 
+            // Not in the recipe book: crafted by hand, the pattern clicked into the grid (a stone shovel on the
+            // player's server). Then with limited crafting on, the server gives nothing for it: twice, and the
+            // stone one isn't tried again (a wooden one is planned instead)
+            waitForServerInventory(server, context);
+            server.runCommand("clear @p");
+            server.runCommand("recipe take @p minecraft:stone_shovel");
+            server.runCommand("give @p cobblestone 3");
+            server.runCommand("give @p stick 6");
+            server.runCommand("give @p crafting_table");
+            context.waitTicks(20);
+            int byHand = craftOne(context, Items.STONE_SHOVEL);
+            System.out.println("CRAFT TEST stone shovel by hand: " + byHand);
+            if (byHand < 1) {
+                throw new AssertionError("Craft test: the stone shovel wasn't crafted by hand");
+            }
+            waitForServerInventory(server, context);
+            // Crafting it put it in the recipe book again
+            server.runCommand("recipe take @p minecraft:stone_shovel");
+            server.runCommand("gamerule limited_crafting true");
+            server.runCommand("clear @p stone_shovel");
+            context.waitTicks(10);
+            int refusedOnce = craftOne(context, Items.STONE_SHOVEL);
+            waitForServerInventory(server, context);
+            int refusedTwice = craftOne(context, Items.STONE_SHOVEL);
+            boolean refused = context.computeOnClient(mc -> Crafter.refused(Items.STONE_SHOVEL));
+            String plannedNow = context.computeOnClient(mc -> {
+                Map<Item, Integer> missing = new LinkedHashMap<>();
+                missing.put(no.sindrens.printeraddon.build.Tools.SHOVEL, 1);
+                return CraftPlan.of(mc, missing, item -> false, false).craft.toString();
+            });
+            server.runCommand("gamerule limited_crafting false");
+            System.out.println("CRAFT TEST limited crafting: crafted " + refusedOnce + " and " + refusedTwice + ", refused=" + refused
+                    + ", plan now " + plannedNow);
+            if (refusedOnce != 0 || refusedTwice != 0 || !refused || !plannedNow.contains("wooden_shovel") || plannedNow.contains("stone_shovel")) {
+                throw new AssertionError("Craft test, limited crafting: crafted " + refusedOnce + "/" + refusedTwice + ", refused="
+                        + refused + ", plan " + plannedNow);
+            }
+            context.runOnClient(mc -> Crafter.forgetRefusals());
+
             // A full inventory: crafting a hoe ends at once and asks for room (it crafted on and on, the server
             // saying "Your inventory is full!"). First the server has to have the crafting table closed: changes made
             // before that are sent for the table's menu, which the client no longer shows
-            for (int i = 0; i < 100 && !server.computeOnServer(s -> s.getPlayerList().getPlayers().getFirst().containerMenu
-                    == s.getPlayerList().getPlayers().getFirst().inventoryMenu); i++) {
-                context.waitTicks(1);
-            }
+            waitForServerInventory(server, context);
             server.runCommand("clear @p");
             server.runCommand("give @p cobblestone 2");
             server.runCommand("give @p stick 2");
@@ -164,5 +200,28 @@ public class CraftTest implements FabricClientGameTest {
                 throw new AssertionError("Craft test, full inventory: ended=" + ended + " askedForRoom=" + askedForRoom);
             }
         }
+    }
+
+    /** Until the server has no crafting table open for the player any more (changes before that go to its menu). */
+    private static void waitForServerInventory(TestServerContext server, ClientGameTestContext context) {
+        for (int i = 0; i < 100 && !server.computeOnServer(s -> s.getPlayerList().getPlayers().getFirst().containerMenu
+                == s.getPlayerList().getPlayers().getFirst().inventoryMenu); i++) {
+            context.waitTicks(1);
+        }
+    }
+
+    /** Crafts one of the item with a new crafter: how many more the inventory has after. */
+    private static int craftOne(ClientGameTestContext context, Item item) {
+        Crafter crafter = new Crafter();
+        int before = context.computeOnClient(mc -> mc.player.getInventory().countItem(item));
+        context.runOnClient(mc -> crafter.craft(item, 1));
+        int ticks = 0;
+        while (ticks < 20 * 30 && context.computeOnClient(mc -> crafter.isBusy())) {
+            context.runOnClient(crafter::tick);
+            context.waitTicks(1);
+            ticks++;
+        }
+        context.waitTicks(10);
+        return context.computeOnClient(mc -> mc.player.getInventory().countItem(item)) - before;
     }
 }

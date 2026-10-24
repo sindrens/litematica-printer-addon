@@ -163,8 +163,10 @@ public final class CraftPlan {
             craft.add(new Step(Items.IRON_HOE, 1));
             return;
         }
-        int stone = takeTag(ItemTags.STONE_TOOL_MATERIALS, 2 * count);
-        if (stone < 2 * count && sold.test(Items.COBBLESTONE)) {
+        // Wooden ones when the server won't craft stone ones
+        boolean stoneOk = !Crafter.refused(Items.STONE_HOE);
+        int stone = stoneOk ? takeTag(ItemTags.STONE_TOOL_MATERIALS, 2 * count) : 0;
+        if (stoneOk && stone < 2 * count && sold.test(Items.COBBLESTONE)) {
             buy.merge(Items.COBBLESTONE, Math.max(2 * count - stone, 16), Integer::sum);
             stone = 2 * count;
         }
@@ -188,14 +190,16 @@ public final class CraftPlan {
      * the next ones), else a wooden one from planks.
      */
     private void stoneTool(Item stone, Item wooden, int heads) {
-        int have = takeTag(ItemTags.STONE_TOOL_MATERIALS, heads);
-        if (have < heads && sold.test(Items.COBBLESTONE)) {
+        // A wooden one when the server won't craft the stone one
+        boolean stoneOk = !Crafter.refused(stone);
+        int have = stoneOk ? takeTag(ItemTags.STONE_TOOL_MATERIALS, heads) : 0;
+        if (stoneOk && have < heads && sold.test(Items.COBBLESTONE)) {
             buy.merge(Items.COBBLESTONE, Math.max(heads - have, 16), Integer::sum);
             have = heads;
         }
         sticks(2);
         needsTable = true;
-        if (have >= heads) {
+        if (stoneOk && have >= heads) {
             craft.add(new Step(stone, 1));
         } else {
             planks(heads);

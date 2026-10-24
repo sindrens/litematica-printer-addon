@@ -139,6 +139,15 @@ public class ShopBuyer {
     private static final java.util.Set<Integer> MINUS_SEEN_STACKS = new java.util.HashSet<>();
     /** Every different screen the stacks button led to is written to the build log once. */
     private final java.util.Set<String> loggedScreens = new java.util.HashSet<>();
+    /** Ticks while buying, and the last click (or shop command) at that count: the time between clicks counts from it. */
+    private long ticks;
+    private long lastClickTick = -1000;
+    /** For the build log: the order being timed, when it began, its clicks and how often the shop was opened for it. */
+    @Nullable
+    private Order timedOrder;
+    private long timedSince;
+    private int timedClicks;
+    private int timedOpens;
 
     public boolean isRunning() {
         return running;
@@ -497,6 +506,7 @@ public class ShopBuyer {
         if (!running || mc.player == null || mc.gameMode == null) {
             return;
         }
+        ticks++;
         if (delay > 0) {
             delay--;
             return;
@@ -521,7 +531,15 @@ public class ShopBuyer {
                     delay = clickDelay();
                     return;
                 }
+                if (timedOrder != order) {
+                    timedOrder = order;
+                    timedSince = ticks;
+                    timedClicks = 0;
+                    timedOpens = 0;
+                }
+                timedOpens++;
                 mc.player.connection.sendCommand(shop.shopCommand);
+                lastClickTick = ticks;
                 stacksScreen = false;
                 stepItems = 0;
                 // A fresh buy screen: the most it takes (if found) is kept, the clicks start over
@@ -545,7 +563,7 @@ public class ShopBuyer {
                 if (snapshot != null) {
                     phase = next;
                     waited = 0;
-                    delay = clickDelay();
+                    delay = delaySinceClick();
                 } else if (waited > timeout() + 2 * no.sindrens.printeraddon.build.ServerLag.pingTicks(mc)) {
                     if (next == Phase.STACKS) {
                         // The stacks button did nothing: not the end of this purchase, a stack at a time instead
@@ -737,7 +755,7 @@ public class ShopBuyer {
                     }
                     order.unchanged = 0;
                     phase = Phase.AMOUNT;
-                    delay = clickDelay();
+                    delay = delaySinceClick();
                 } else if (waited > AMOUNT_TIMEOUT + 2 * no.sindrens.printeraddon.build.ServerLag.pingTicks(mc)) {
                     // Nothing changed: a + that goes past what the screen takes (or a lost click). From here up one
                     // step at a time to find where it stops; buy what's set if it keeps not changing
@@ -891,6 +909,7 @@ public class ShopBuyer {
                     if (order.left <= 0 || tail || room(mc, order.item) <= 0) {
                         orders.pollFirst();
                         phase = Phase.OPEN;
+                        logTiming(order);
                     } else {
                         // Buy screens usually stay open: set the amount again (or pick stacks again)
                         ScreenSnapshot snapshot = ScreenSnapshot.capture(mc);
@@ -901,7 +920,7 @@ public class ShopBuyer {
                         }
                     }
                     waited = 0;
-                    delay = clickDelay();
+                    delay = delaySinceClick();
                 } else if (got == 0 && refusal() != null) {
                     // The server said why not: no waiting, no trying again
                     stacksPurchase = false;
@@ -968,8 +987,30 @@ public class ShopBuyer {
         await(snapshot.signature(), then);
     }
 
-    private static void clickSlot(Minecraft mc, ScreenSnapshot snapshot, int slot) {
+    private void clickSlot(Minecraft mc, ScreenSnapshot snapshot, int slot) {
         mc.gameMode.handleContainerInput(snapshot.containerId(), slot, 0, ContainerInput.PICKUP, mc.player);
+        lastClickTick = ticks;
+        timedClicks++;
+    }
+
+    /**
+     * The wait before the next click: the time between clicks counts from the last click, not from when the menu had
+     * settled (that waited twice: the menu's settling and then the whole time between clicks again, about 0.8 s a
+     * click; a purchase was 8 to 10 s).
+     */
+    private int delaySinceClick() {
+        return Math.max(0, clickDelay() - (int) Math.min(Integer.MAX_VALUE, ticks - lastClickTick));
+    }
+
+    /** One line per item bought, in the build log: how long it took and what for. */
+    private void logTiming(Order order) {
+        if (timedOrder != order) {
+            return;
+        }
+        no.sindrens.printeraddon.build.BuildLog.line("SHOP", String.format(java.util.Locale.ROOT,
+                "%d %s in %.1f s: %d clicks, the shop opened %d time%s, %d ticks between clicks at least",
+                order.got, order.location.name, (ticks - timedSince) / 20.0, timedClicks, timedOpens, timedOpens == 1 ? "" : "s", clickDelay()));
+        timedOrder = null;
     }
 
     /** The open menu once it has stopped changing (and differs from {@link #before}), else null. */
@@ -1334,7 +1375,8 @@ public class ShopBuyer {
     /**
      * Between clicks: 8 ticks at first, plus half the ping (servers drop clicks that come too fast). Learned: after
      * purchases that went through without a lost click, a tick less each time, down to 4 (a click took close to a
-     * second, a purchase 6 s); the first lost click puts it back to 8 for the rest of the session.
+     * second, a purchase 6 s); the first lost click puts it back to 8 for the rest of the session, and each one after
+     * that 2 more (up to 16).
      */
     private static int learnedDelay = 8;
     private static boolean delaySettled;
@@ -1351,12 +1393,11 @@ public class ShopBuyer {
 
     private static void clickLost() {
         cleanPurchases = 0;
-        if (learnedDelay < 8) {
-            no.sindrens.printeraddon.build.BuildLog.line("SHOP", "a click got no answer at " + learnedDelay
-                    + " ticks between clicks: back to 8 for this session");
-        }
-        learnedDelay = 8;
+        int was = learnedDelay;
+        learnedDelay = was < 8 ? 8 : Math.min(16, was + 2);
         delaySettled = true;
+        no.sindrens.printeraddon.build.BuildLog.line("SHOP", "a click got no answer at " + was
+                + " ticks between clicks: " + learnedDelay + " for this session");
     }
 
     private static int clickDelay() {

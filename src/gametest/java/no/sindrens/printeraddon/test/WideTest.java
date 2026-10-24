@@ -31,12 +31,15 @@ import java.util.List;
  * are never loaded at once with the render distance at 2), stone with pistons that a clock under them pushes all the
  * time. Its second layer must get finished, with no flying from one end to the other and back (a log had that for
  * minutes on the player's 119 x 119 farm: the far corner never loaded, and moving pistons counted as wrong blocks).
+ * Pillars of the player's own stand at both ends of the lane, where the player would fly.
  */
 public class WideTest implements FabricClientGameTest {
     private static final int LENGTH = 200;
     private static final int Y = -60;
     /** A clock with a piston on it every this many blocks. */
     private static final int CLOCK_EVERY = 25;
+    /** Where a wall of the player's stands across the strip, above it. */
+    private static final int WALL_X = 100;
 
     @Override
     public void runTest(ClientGameTestContext context) {
@@ -67,6 +70,14 @@ public class WideTest implements FabricClientGameTest {
                 server.runCommand("setblock " + x + " " + Y + " 0 observer[facing=east]");
                 server.runCommand("setblock " + (x + 1) + " " + Y + " 0 observer[facing=west]");
             }
+            // The player's own pillars just past both ends of the strip, up through the height the player flies at:
+            // the lane's ends can't be got to (a log had a lane end inside a farm's column, and the player stood
+            // still below the layer there every tick for 20 s). The far one isn't loaded when the lane is planned
+            server.runCommand("fill -1 " + Y + " 1 -1 " + (Y + 3) + " 1 cobblestone");
+            server.runCommand("fill " + LENGTH + " " + Y + " 1 " + LENGTH + " " + (Y + 3) + " 1 cobblestone");
+            // A wall across the lane where the player flies, 15 wide (like the walls of hoppers in the middle of the
+            // player's farm): the lane goes over it, not around it (around, it went 9 blocks to the side)
+            server.runCommand("fill " + WALL_X + " " + (Y + 2) + " -6 " + WALL_X + " " + (Y + 3) + " 8 cobblestone");
             server.runCommand("tp @p 2 " + (Y + 3) + " 1 -90 30");
             server.runCommand("gamemode survival @p");
             server.runCommand("fly");
@@ -90,9 +101,13 @@ public class WideTest implements FabricClientGameTest {
             long started = System.currentTimeMillis();
             int ticks = 0;
             int limit = 20 * 60 * 8;
+            // How far from the lane's line the player got near the wall while flying the lane
+            double offLane = 0;
             while (ticks < limit && context.computeOnClient(mc -> AutoBuild.INSTANCE.isRunning())) {
-                context.waitTicks(20);
-                ticks += 20;
+                context.waitTicks(5);
+                ticks += 5;
+                offLane = Math.max(offLane, context.computeOnClient(mc -> AutoBuild.INSTANCE.doing().startsWith("lane")
+                        && Math.abs(mc.player.getX() - (WALL_X + 0.5)) < 12 ? Math.abs(mc.player.getZ() - 1.5) : 0.0));
                 if (ticks % 200 == 0) {
                     context.takeScreenshot("wide");
                     int at = ticks;
@@ -118,9 +133,10 @@ public class WideTest implements FabricClientGameTest {
             }
             String result = (finished ? "finished" : "NOT finished") + " after " + ticks / 20 + " s game time ("
                     + (System.currentTimeMillis() - started) / 1000 + " s real), " + problems.size() + " blocks wrong"
-                    + (problems.isEmpty() ? "" : ": " + problems.subList(0, Math.min(10, problems.size())));
+                    + (problems.isEmpty() ? "" : ": " + problems.subList(0, Math.min(10, problems.size())))
+                    + String.format(java.util.Locale.ROOT, ", at most %.1f from the lane at the wall", offLane);
             System.out.println("WIDE TEST: " + result);
-            if (!finished || !problems.isEmpty()) {
+            if (!finished || !problems.isEmpty() || offLane > 2.5) {
                 throw new AssertionError("Wide test: " + result);
             }
         }

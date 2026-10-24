@@ -678,12 +678,23 @@ public class AutoBuild {
         return true;
     }
 
-    /** A pumpkin or melon with a stem of its kind next to it in the world (grown, not built). */
+    /**
+     * A pumpkin or melon that's the farm's, not the player's building: one with a stem next to it in the world (grown),
+     * or one where the schematic wants a stem (six were left alone on the player's farm, their stems never planted:
+     * put there from an older copy of the schematic).
+     */
     private static boolean grownFruit(net.minecraft.core.BlockPos pos, net.minecraft.world.level.block.state.BlockState current) {
         Minecraft mc = Minecraft.getInstance();
         net.minecraft.world.level.block.Block fruit = current.getBlock();
         if (mc.level == null || (fruit != net.minecraft.world.level.block.Blocks.PUMPKIN && fruit != net.minecraft.world.level.block.Blocks.MELON)) {
             return false;
+        }
+        fi.dy.masa.litematica.world.WorldSchematic schematic = SchematicHelper.world();
+        if (schematic != null) {
+            net.minecraft.world.level.block.Block wanted = schematic.getBlockState(pos).getBlock();
+            if (wanted instanceof net.minecraft.world.level.block.StemBlock || wanted instanceof net.minecraft.world.level.block.AttachedStemBlock) {
+                return true;
+            }
         }
         for (net.minecraft.core.Direction direction : net.minecraft.core.Direction.Plane.HORIZONTAL) {
             net.minecraft.world.level.block.Block next = mc.level.getBlockState(pos.relative(direction)).getBlock();
@@ -766,7 +777,9 @@ public class AutoBuild {
             if (have >= entry.getValue()) {
                 continue;
             }
-            if (have == 0) {
+            // A tool that can't be had (a recipe the server doesn't allow) never stops the build: tilling or
+            // breaking waits for it, everything else goes on (a stone shovel that couldn't be crafted stopped a build)
+            if (have == 0 && !Tools.isMarker(item)) {
                 outOfSomething |= !gettable(mc, item) || !autoBuy;
             }
             // Only once it's (nearly) used up: this many or fewer left

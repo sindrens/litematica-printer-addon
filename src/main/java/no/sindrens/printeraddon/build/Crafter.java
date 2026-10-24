@@ -92,6 +92,28 @@ public class Crafter {
     private int openedMenu = -1;
 
     /**
+     * Items the server gave nothing for, with the ingredients in the grid (a recipe it doesn't let the player craft:
+     * not unlocked, with limited crafting on): how many times. Twice, and it's not tried again on this server.
+     */
+    private static final java.util.Map<Item, Integer> REFUSALS = new java.util.HashMap<>();
+    private static String refusalsServer = "";
+
+    public static boolean refused(Item item) {
+        Minecraft mc = Minecraft.getInstance();
+        String server = no.sindrens.printeraddon.util.ServerName.current(mc);
+        if (!server.equals(refusalsServer)) {
+            refusalsServer = server;
+            REFUSALS.clear();
+        }
+        return REFUSALS.getOrDefault(item, 0) >= 2;
+    }
+
+    /** Tries every recipe again (for tests). */
+    public static void forgetRefusals() {
+        REFUSALS.clear();
+    }
+
+    /**
      * True once after a job ended for lack of room in the inventory: room is made (stacks into storage) before the
      * next try, and it doesn't count as "can't be crafted".
      */
@@ -118,6 +140,10 @@ public class Crafter {
 
     /** Queues crafting {@code count} of {@code item} (ingredients must be in the inventory by the time it runs). */
     public void craft(Item item, int count) {
+        if (count > 0 && refused(item)) {
+            BuildLog.line("CRAFT", "not crafting " + new ItemStack(item).getHoverName().getString() + ": this server gave nothing for it twice");
+            return;
+        }
         if (count > 0) {
             jobs.add(new Job(item, count));
         }
@@ -289,6 +315,16 @@ public class Crafter {
                 AbstractContainerMenu menu = needsTable ? player.containerMenu : player.inventoryMenu;
                 if (menu.getSlot(0).getItem().isEmpty()) {
                     if (waited > TIMEOUT / 2) {
+                        if (count(player, job.item()) - startCount <= 0 && manual != null) {
+                            // The ingredients are in the grid and the server shows no result: it won't craft this
+                            // (a stone shovel on the player's server, not in the recipe book either). First call:
+                            // forgets what was known for another server
+                            refused(job.item());
+                            REFUSALS.merge(job.item(), 1, Integer::sum);
+                            BuildLog.line("CRAFT", "the server gave nothing for " + new ItemStack(job.item()).getHoverName().getString()
+                                    + " with its ingredients in the grid" + (refused(job.item())
+                                    ? " again (a recipe this server doesn't allow?): not tried again on this server" : ""));
+                        }
                         phase = Phase.CLEAR;
                     }
                     return true;

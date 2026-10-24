@@ -23,7 +23,7 @@ Put these in your `mods` folder:
 4. To use a chest, look at it, press `J`+`B` and click "Link".
 5. Press `J`+`B` and click Start.
 
-It builds layer by layer from the bottom, flying over each layer in straight lanes while the printer places all the way. If you're kicked or the server restarts, it joins again, runs your "Commands back to the build" (for example `/server skyblock`, `/is go`) and carries on. Starting it again also retries the blocks it skipped last time.
+It builds layer by layer from the bottom, flying over each layer in straight lanes while the printer places all the way. It flies over anything that's in the way of a lane, such as the walls of a farm. If you're kicked or the server restarts, it joins again, runs your "Commands back to the build" (for example `/server skyblock`, `/is go`) and carries on. Starting it again also retries the blocks it skipped last time.
 
 Your inventory can start empty. It takes what it needs from your vaults, buys the rest and crafts its own tools: a hoe for farmland, and a pickaxe and shovel for breaking wrong blocks. When you stop it, or the build is done, it puts the building items back in your vaults. It warns you when they're getting full; link a chest for more room. You can clear out your vaults at any time, because it buys whatever is missing.
 
@@ -44,7 +44,8 @@ Your inventory can start empty. It takes what it needs from your vaults, buys th
 - It uses `/feed` and `/craft` if you have permission.
 - It stops when you take damage or another player comes close.
 - With the add-on off, Litematica Printer works as normal.
-- A farm that's already running (pistons firing) doesn't hold up a layer.
+- A farm that's already running (pistons firing) doesn't hold up a layer. Pumpkins or melons that grew where a stem belongs are broken, so the stem can be planted.
+- If the server won't let it craft a tool, it tries a wooden one and otherwise goes on without it.
 - Something wrong? Press `J`+`B`, click "Open build logs folder" and send the newest log.
 
 ## Watch the speed test

@@ -73,10 +73,11 @@ public final class Tools {
             shovel |= state.is(net.minecraft.tags.BlockTags.MINEABLE_WITH_SHOVEL);
         }
         java.util.List<Item> missing = new java.util.ArrayList<>();
-        if (pickaxe && !has(PICKAXE, inventory)) {
+        // Not one the server won't craft, stone or wooden (it's only for breaking wrong blocks: that goes on without)
+        if (pickaxe && !has(PICKAXE, inventory) && !(Crafter.refused(Items.STONE_PICKAXE) && Crafter.refused(Items.WOODEN_PICKAXE))) {
             missing.add(PICKAXE);
         }
-        if (shovel && !has(SHOVEL, inventory)) {
+        if (shovel && !has(SHOVEL, inventory) && !(Crafter.refused(Items.STONE_SHOVEL) && Crafter.refused(Items.WOODEN_SHOVEL))) {
             missing.add(SHOVEL);
         }
         return missing;

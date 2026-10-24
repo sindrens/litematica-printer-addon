@@ -39,6 +39,14 @@ public final class FlyPath {
     /** Feet positions from start to goal (excluding the start), or null if there's no way within the limits. */
     @Nullable
     public static List<Vec3> find(Level level, Vec3 from, Vec3 to) {
+        return find(level, from, to, p -> true);
+    }
+
+    /**
+     * Same, only through the spots that are {@code allowed} (a lane's line: over what's in the way, not around it).
+     */
+    @Nullable
+    public static List<Vec3> find(Level level, Vec3 from, Vec3 to, Predicate<BlockPos> allowed) {
         from = lift(level, from);
         BlockPos start = BlockPos.containing(from.x, from.y + 0.01, from.z);
         BlockPos goal = BlockPos.containing(to.x, to.y + 0.01, to.z);
@@ -48,7 +56,7 @@ public final class FlyPath {
         if (!fits(level, goal)) {
             return null;
         }
-        List<BlockPos> blocks = search(level, start, goal.getY(), goal::equals, p -> distance(p, goal));
+        List<BlockPos> blocks = search(level, start, goal.getY(), goal::equals, p -> distance(p, goal), allowed);
         return blocks == null ? null : straighten(level, from, blocks, to);
     }
 
@@ -68,7 +76,7 @@ public final class FlyPath {
             return List.of(feet(start));
         }
         List<BlockPos> blocks = search(level, start, block.getY(), goal,
-                p -> Math.max(0, Math.sqrt(feet(p).add(0, eyeHeight, 0).distanceToSqr(center)) - reach));
+                p -> Math.max(0, Math.sqrt(feet(p).add(0, eyeHeight, 0).distanceToSqr(center)) - reach), p -> true);
         return blocks == null ? null : straighten(level, from, blocks, feet(blocks.getLast()));
     }
 
@@ -78,6 +86,12 @@ public final class FlyPath {
      */
     @Nullable
     public static List<Vec3> leg(Level level, Vec3 from, Vec3 to, double length) {
+        return leg(level, from, to, length, p -> true);
+    }
+
+    /** Same, only through the spots that are {@code allowed}. */
+    @Nullable
+    public static List<Vec3> leg(Level level, Vec3 from, Vec3 to, double length, Predicate<BlockPos> allowed) {
         Vec3 d = to.subtract(from);
         double total = d.length();
         if (total < 1) {
@@ -86,11 +100,11 @@ public final class FlyPath {
         Vec3 point = from.add(d.scale(Math.min(1, length / total)));
         int y = (int) Math.floor(Math.max(from.y, to.y) + 0.01);
         for (int up = 0; up <= 16; up += 8) {
-            BlockPos goal = freeNear(level, BlockPos.containing(point.x, y + up, point.z), 3);
+            BlockPos goal = freeNear(level, BlockPos.containing(point.x, y + up, point.z), 3, allowed);
             if (goal == null) {
                 continue;
             }
-            List<Vec3> way = find(level, from, feet(goal));
+            List<Vec3> way = find(level, from, feet(goal), allowed);
             if (way != null) {
                 return way;
             }
@@ -101,6 +115,11 @@ public final class FlyPath {
     /** The nearest spot the player fits in, within {@code radius} blocks of this one (null if none). */
     @Nullable
     public static BlockPos freeNear(Level level, BlockPos center, int radius) {
+        return freeNear(level, center, radius, p -> true);
+    }
+
+    @Nullable
+    private static BlockPos freeNear(Level level, BlockPos center, int radius, Predicate<BlockPos> allowed) {
         for (int r = 0; r <= radius; r++) {
             BlockPos best = null;
             double bestDistance = Double.MAX_VALUE;
@@ -112,7 +131,7 @@ public final class FlyPath {
                         }
                         BlockPos pos = center.offset(dx, dy, dz);
                         double distance = dx * dx + dy * dy + dz * dz;
-                        if (distance < bestDistance && fits(level, pos)) {
+                        if (distance < bestDistance && allowed.test(pos) && fits(level, pos)) {
                             bestDistance = distance;
                             best = pos;
                         }
@@ -129,7 +148,7 @@ public final class FlyPath {
     /** A* from start to the first block that's a goal, or null when there's none within the limits. */
     @Nullable
     private static List<BlockPos> search(Level level, BlockPos start, int goalY, Predicate<BlockPos> isGoal,
-                                         ToDoubleFunction<BlockPos> estimate) {
+                                         ToDoubleFunction<BlockPos> estimate, Predicate<BlockPos> allowed) {
         int maxY = Math.max(start.getY(), goalY) + MAX_CLIMB;
         int minY = level.getMinY() + 1;
 
@@ -157,7 +176,7 @@ public final class FlyPath {
                         if (next.getY() > maxY || next.getY() < minY || cost.containsKey(next) && cost.get(next) <= here + 1) {
                             continue;
                         }
-                        if (!fits(level, next) || !cornersFree(level, current, dx, dy, dz)) {
+                        if (!allowed.test(next) || !fits(level, next) || !cornersFree(level, current, dx, dy, dz)) {
                             continue;
                         }
                         double step = Math.sqrt(dx * dx + dy * dy + dz * dz) * (dy > 0 ? CLIMB_COST : 1);
