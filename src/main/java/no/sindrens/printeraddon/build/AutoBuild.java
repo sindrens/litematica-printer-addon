@@ -49,9 +49,17 @@ public class AutoBuild {
     /** Spots the printer just placed (game tick of the attempt): not given to it again until the server has answered. */
     private final java.util.Map<net.minecraft.core.BlockPos, Long> recentlyTried = new java.util.HashMap<>();
 
+    /** When the printer last queued a block (for turning the head back once it pauses). */
+    public long lastQueuedTick;
+
+    /** The item the printer picked for its last block (for an empty hand at the click, see InteractActionMixin). */
+    @javax.annotation.Nullable
+    public net.minecraft.world.item.Item lastTriedItem;
+
     /** The printer is about to click this spot with this item (null: none in particular). */
     public void printerTried(net.minecraft.core.BlockPos pos, @javax.annotation.Nullable net.minecraft.world.item.Item item) {
         Minecraft mc = Minecraft.getInstance();
+        lastTriedItem = item;
         if (mc.level != null) {
             ServerAcks.tried(pos);
             recentlyTried.put(pos.immutable(), clientTicks);
@@ -1050,6 +1058,20 @@ public class AutoBuild {
 
     private boolean resumeLater;
 
+    /**
+     * The whole add-on on or off (J+A, or the button in the J+B menu). Off: everything it does stops and every hook
+     * into Litematica Printer passes straight through, so the printer works exactly as without the add-on.
+     */
+    public void setAddonEnabled(Minecraft mc, boolean on) {
+        Configs.Generic.ADDON_ENABLED.setBooleanValue(on);
+        if (!on) {
+            stopEverything(mc);
+            no.sindrens.printeraddon.shop.ShopScanner.INSTANCE.cancel(null);
+            no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.cancel(null);
+        }
+        Chat.info("Printer Addon " + (on ? "\u00a7aon" : "\u00a7coff\u00a7r: Litematica Printer works on its own (J+A or J+B to switch it on again)") + ".");
+    }
+
     public void toggle(Minecraft mc) {
         if (running) {
             stop(mc, null);
@@ -1169,6 +1191,11 @@ public class AutoBuild {
 
         PrinterBridge.applySettings(mc.player);
         stats.tick(activity());
+        // Nothing placed for a moment: the head turns back to where the camera looks, smoothly
+        if (PrinterBridge.isIdle() && clientTicks - lastQueuedTick > 8 && !breaker.isBusy() && !fluids.isBusy()
+                && !rails.isBusy() && !entities.isBusy() && !airPlace.isActive()) {
+            PrinterBridge.easeLookBack(mc.player);
+        }
         // The pause between shopping rounds runs every tick (it used to stand still while nothing was missing, and
         // a new layer then waited out the rest: 28 s in a log); a new layer may shop at once
         if (buyCooldown > 0) {

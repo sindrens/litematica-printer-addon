@@ -36,6 +36,7 @@ public class BuildStats {
         layerPlaced = totalPlaced = 0;
         recent.clear();
         layerTickCount = totalTickCount = 0;
+        averageRate = -1;
         minuteStart = -1;
         minutePlaced = 0;
         java.util.Arrays.fill(minuteTurns, 0);
@@ -57,6 +58,43 @@ public class BuildStats {
             count++;
         }
         return count;
+    }
+
+    /**
+     * Blocks per real minute over the last several minutes, everything counted (shop trips, flights, layer changes
+     * too): what the time left is worked out with. A moving average updated every 5 s that follows a change within a
+     * few minutes; the last-minute rate jumped from 0 (in the shop) to 700 (a full area) and so did the time left.
+     */
+    private double averageRate = -1;
+    private long averageAt;
+    private int averagePlaced;
+    private static final long AVERAGE_STEP_MILLIS = 5_000;
+    /** Weight of each 5 s step: about the last 4 minutes count. */
+    private static final double AVERAGE_WEIGHT = 1 / 48.0;
+
+    public double averageRate() {
+        long now = System.currentTimeMillis();
+        long sinceStart = now - buildStartMillis;
+        if (averageRate < 0) {
+            // The first minute: the plain rate so far (from 20 s on)
+            if (sinceStart < 20_000) {
+                return -1;
+            }
+            if (sinceStart < 60_000) {
+                return totalPlaced * 60_000.0 / sinceStart;
+            }
+            averageRate = totalPlaced * 60_000.0 / sinceStart;
+            averageAt = now;
+            averagePlaced = totalPlaced;
+            return averageRate;
+        }
+        while (now - averageAt >= AVERAGE_STEP_MILLIS) {
+            double step = (totalPlaced - averagePlaced) * 60_000.0 / AVERAGE_STEP_MILLIS;
+            averageRate += AVERAGE_WEIGHT * (step - averageRate);
+            averagePlaced = totalPlaced;
+            averageAt += AVERAGE_STEP_MILLIS;
+        }
+        return averageRate;
     }
 
     /** Blocks placed per real minute over the last minute (or since the start, if shorter). */

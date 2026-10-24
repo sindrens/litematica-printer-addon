@@ -219,9 +219,14 @@ public class SpeedTuner {
         picks.add(new Pick(pos.immutable(), item, interval(), AutoBuild.clientTicks, before, states));
     }
 
-    /** The printer's click was skipped: the hand was empty (the stack ran out between taking it and clicking). */
+    /**
+     * The printer's click was skipped: the hand was empty (the stack ran out between taking it and clicking). Not a
+     * click that placed nothing: it says nothing about the speed (counted as one, an empty hotbar slowed redstone
+     * down from interval 2 to 12).
+     */
     public void emptyHand(BlockPos pos) {
         minuteEmptyHand++;
+        picks.removeIf(pick -> pick.pos().equals(pos));
         BuildLog.line("HOTBAR", "click at " + pos.toShortString() + " skipped: empty hand (the stack in that slot ran out"
                 + (lastPicked != null ? ", it was " + name(lastPicked) : "") + ")");
     }

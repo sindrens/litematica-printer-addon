@@ -23,6 +23,13 @@ public class AddonInit implements IInitializationHandler {
         TickHandler.getInstance().registerClientTickHandler(new ClientTick());
         KeyCallbacks.init();
         no.sindrens.printeraddon.gui.BuildHud.register();
+        // Switched off in the settings list: everything stops, like with J+A
+        no.sindrens.printeraddon.config.Configs.Generic.ADDON_ENABLED.setValueChangeCallback(config -> {
+            net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+            if (!config.getBooleanValue() && mc.player != null) {
+                no.sindrens.printeraddon.build.AutoBuild.INSTANCE.stopEverything(mc);
+            }
+        });
 
         PrinterAddon.LOGGER.info("{} initialized", PrinterAddon.MOD_NAME);
     }

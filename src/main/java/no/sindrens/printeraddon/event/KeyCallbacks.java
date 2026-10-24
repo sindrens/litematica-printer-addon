@@ -39,13 +39,14 @@ public class KeyCallbacks {
             AutoBuild build = AutoBuild.INSTANCE;
 
             if (key == Hotkeys.TOGGLE_ADDON.getKeybind()) {
-                boolean on = !no.sindrens.printeraddon.config.Configs.Generic.ADDON_ENABLED.getBooleanValue();
-                no.sindrens.printeraddon.config.Configs.Generic.ADDON_ENABLED.setBooleanValue(on);
-                if (!on) {
-                    build.stopEverything(mc);
-                }
-                no.sindrens.printeraddon.util.Chat.info("Printer Addon " + (on ? "\u00a7aon" : "\u00a7coff\u00a7r (the printer works on its own)") + ".");
-            } else if (key == Hotkeys.BUILD_REPORT.getKeybind()) {
+                build.setAddonEnabled(mc, !no.sindrens.printeraddon.config.Configs.enabled());
+                return true;
+            }
+            // Add-on off: only the settings, the menu and the switch itself
+            if (!no.sindrens.printeraddon.config.Configs.enabled()) {
+                return false;
+            }
+            if (key == Hotkeys.BUILD_REPORT.getKeybind()) {
                 no.sindrens.printeraddon.build.BuildReport.show(mc);
             } else if (key == Hotkeys.SHOW_COST.getKeybind()) {
                 no.sindrens.printeraddon.build.CostEstimate.show(mc);

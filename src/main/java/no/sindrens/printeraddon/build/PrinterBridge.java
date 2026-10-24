@@ -52,6 +52,46 @@ public final class PrinterBridge {
         return true;
     }
 
+    /**
+     * While the printer has nothing to do: the head it turned for its last block turns back to where the camera
+     * looks, a part each tick (the server shows the head the printer turned until its next block: it stayed looking
+     * straight down or up, then snapped). Returns true while still turning.
+     */
+    public static boolean easeLookBack(net.minecraft.client.player.LocalPlayer player) {
+        Printer printer = LitematicaMixinMod.printer;
+        if (printer == null || !printer.actionHandler.acceptsActions()) {
+            return false;
+        }
+        me.aleksilassila.litematica.printer.actions.PrepareAction look = printer.actionHandler.lookAction;
+        if (look == null || (!look.modifyYaw && !look.modifyPitch)) {
+            return false;
+        }
+        boolean turning = false;
+        if (look.modifyPitch) {
+            float d = player.getXRot() - look.pitch;
+            if (Math.abs(d) > 2) {
+                look.pitch += d * 0.3f;
+                turning = true;
+            }
+        }
+        if (look.modifyYaw) {
+            float d = net.minecraft.util.Mth.wrapDegrees(player.getYRot() - look.yaw);
+            if (Math.abs(d) > 2) {
+                look.yaw += d * 0.3f;
+                turning = true;
+            }
+        }
+        if (!turning) {
+            // Back where the camera looks: the printer's look is used up
+            printer.actionHandler.lookAction = null;
+        }
+        // The client only sends its direction when the camera moves: told to the server here (the printer puts
+        // its look into the packet while it has one)
+        player.connection.send(new net.minecraft.network.protocol.game.ServerboundMovePlayerPacket.Rot(
+                player.getYRot(), player.getXRot(), player.onGround(), player.horizontalCollision));
+        return turning;
+    }
+
     private static final class LITEMATICA {
         static final fi.dy.masa.malilib.config.options.ConfigBoolean EASY_PLACE_MODE = fi.dy.masa.litematica.config.Configs.Generic.EASY_PLACE_MODE;
         static final fi.dy.masa.malilib.config.options.ConfigBoolean PICK_BLOCK_AVOID_TOOLS = fi.dy.masa.litematica.config.Configs.Generic.PICK_BLOCK_AVOID_TOOLS;

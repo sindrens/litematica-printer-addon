@@ -72,9 +72,14 @@ public final class BuildHud {
 
         int left = build.blocksLeft();
         double rate = build.stats.recentRate();
-        String eta = rate > 0.5 ? BuildStats.time((long) (left / rate * 60_000)) : "-";
-        add(lines, colors, String.format("%,d blocks left in the build, about %s to go", left, eta), TEXT);
-        add(lines, colors, String.format("%.0f blocks/min, %s", rate, build.speed.describe()), GREY);
+        // The time left from the average over the last minutes (with the shopping and flying in it), not from the
+        // last minute alone
+        double average = build.stats.averageRate();
+        String eta = average > 0.5 ? BuildStats.time((long) (left / average * 60_000)) : "working it out";
+        add(lines, colors, String.format("%,d blocks left in the build, about %s to go", left, eta)
+                + (build.wholeKnown() ? "" : " (still counting)"), TEXT);
+        add(lines, colors, String.format("%.0f blocks/min now, %s on average, %s", rate,
+                average > 0 ? String.format("%.0f", average) : "-", build.speed.describe()), GREY);
         int busy = build.stats.printerBusyPercent();
         add(lines, colors, "Printer busy " + busy + "%" + (busy < 80 ? " (mostly idle because: " + build.stats.printerIdleReason() + ")" : ""), GREY);
         add(lines, colors, "Doing: " + build.doing(), GREY);

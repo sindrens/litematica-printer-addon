@@ -41,9 +41,14 @@ Litematica Printer does the placing; the add-on builds whole schematics in survi
   printer's own settings (it starts at your interval, keeps your range). It doesn't place blocks itself; the
   optional "Add-on places blocks itself" (buckets, rails, minecarts) is off by default.
   Hopper chains are built from the hopper they end in, and your camera stays free.
-- Keeps the layer's blocks on the hotbar, eats when hungry, waits when the server lags, picks up again after
-  logging out, and shows the build on screen (layer, blocks left, time to go, speed, how busy the printer is and
-  why not, what's missing).
+- Keeps the layer's blocks on the hotbar (also with the chat or the pause menu open), eats when hungry, waits
+  when the server lags, picks up again after logging out, and shows the build on screen (layer, blocks left, time
+  to go from the average of the last minutes, speed, how busy the printer is and why not, what's missing).
+- Natural head: for blocks that face up or down the head tilts 60 degrees instead of flipping straight up and
+  down, and turns back to where you look, smoothly, as soon as the printer pauses.
+- **On / off:** the button at the top of the `J`+`B` menu (or `J`+`A`). Off, Litematica and Litematica Printer
+  work exactly as without the add-on. The settings (`J`+`C`) open on "Important" (the few to set once); "All
+  settings" lists every one to search with the magnifier; hover a setting for what it does.
 - Safety: stops when you take damage or another player comes close, and never uses a nearly broken tool.
 
 ## Quick guide
@@ -56,7 +61,8 @@ Litematica Printer does the placing; the add-on builds whole schematics in survi
 **Build**
 - `J`+`B` → Start. Builds layer by layer from the bottom, gets what's missing (storage first, then the shop),
   crafts seeds, dust and rails, and puts leftovers away.
-- `J`+`Q` stops everything, `J`+`A` turns the add-on off. After a disconnect or restart it goes on by itself.
+- `J`+`Q` stops everything. The add-on on/off (plain Litematica Printer) is the button at the top of `J`+`B`
+  (or `J`+`A`). After a disconnect or restart it goes on by itself.
 
 **Good to know**
 - Don't click in the shop or `/pv` while it's buying (closed by accident: it opens them again).

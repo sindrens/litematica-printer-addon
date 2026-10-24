@@ -24,8 +24,8 @@ public class Configs implements IConfigHandler {
     public static class Generic {
         public static final ConfigBoolean ADDON_ENABLED = new ConfigBoolean("addonEnabled", true,
                 "Turns the whole add-on on or off. Off: Litematica Printer works exactly as without the add-on\n"
-                        + "(no view turning, no build order, no breaking). Hotkey J+A.",
-                "Add-on enabled");
+                        + "(no view turning, no build order, no breaking). Hotkey J+A, or the button at the top of the J+B menu.",
+                "Add-on on (off: plain Litematica Printer)");
         public static final ConfigBoolean AUTO_BUILD = new ConfigBoolean("autoBuild", false,
                 "Main switch. Turns on the printer and lets the add-on break wrong blocks and step through layers.",
                 "Auto build");
@@ -38,11 +38,11 @@ public class Configs implements IConfigHandler {
                 "Set printer settings");
         public static final ConfigBoolean SHOW_HUD = new ConfigBoolean("showHud", true,
                 "During auto build, show a small box at the top left: layer, blocks left, time to go, speed, what's missing.",
-                "Show build status on screen");
+                "Build status on screen");
         public static final ConfigBoolean RESUME_AFTER_REJOIN = new ConfigBoolean("resumeAfterRejoin", true,
                 "If auto build was running when you logged out or lost the connection, start it again 10 seconds after\n"
                         + "rejoining the same server with the same schematic. It goes on from the first unfinished layer.",
-                "Resume after rejoining");
+                "Go on after a restart or disconnect");
         public static final ConfigInteger BUILD_RENDER_DISTANCE = new ConfigInteger("buildRenderDistance", 0, 0, 32,
                 "Render distance (chunks) while auto build runs, for less lag on a slow computer. Your own setting comes\n"
                         + "back when it stops. 0 = don't change it.",
@@ -155,11 +155,11 @@ public class Configs implements IConfigHandler {
         public static final ConfigOptionList MOVE_MODE = new ConfigOptionList("movementMode", MoveMode.FLY,
                 "How auto build gets you to the next unfinished blocks: fly (fastest: always above the blocks being built),\n"
                         + "walk, walk and fly when needed, or not at all.",
-                "Movement");
+                "Movement (fly is fastest)");
         public static final ConfigString FLY_COMMAND = new ConfigString("flyCommand", "fly",
                 "Command (without the slash) sent once if flying is needed but not allowed yet. Empty: never send one.",
                 "Fly command");
-        public static final ConfigBoolean KEEP_MOVING = new ConfigBoolean("keepMoving", false,
+        public static final ConfigBoolean KEEP_MOVING = new ConfigBoolean("keepMoving", true,
                 "Flying: when only a few blocks are left to place where you are, already fly on to the next spot (the printer\n"
                         + "places the last ones on the way) instead of stopping until everything around is done.",
                 "Keep moving");
@@ -185,10 +185,10 @@ public class Configs implements IConfigHandler {
     public static class Safety {
         public static final ConfigBoolean STOP_ON_DAMAGE = new ConfigBoolean("stopOnDamage", true,
                 "Stop auto build when you take damage.",
-                "Stop on damage");
+                "Stop when you take damage");
         public static final ConfigBoolean STOP_NEAR_PLAYERS = new ConfigBoolean("stopNearPlayers", true,
                 "Stop auto build when another player comes close.",
-                "Stop near other players");
+                "Stop when a player comes close");
         public static final ConfigInteger NEAR_PLAYER_DISTANCE = new ConfigInteger("nearPlayerDistance", 16, 2, 128,
                 "Distance in blocks for 'Stop near other players'.",
                 "Near player distance");
@@ -220,18 +220,18 @@ public class Configs implements IConfigHandler {
         public static final ConfigBoolean FETCH_FROM_CHESTS = new ConfigBoolean("fetchFromChests", true,
                 "Before buying, take missing items from the chests, barrels and shulker boxes you linked (J+B, Build tab:\n"
                         + "look at one and press 'Link chest'). No other chest is ever opened. They have to be loaded (in view distance).",
-                "Take from linked chests first");
+                "Use linked chests and vaults first");
         public static final ConfigString VAULTS = new ConfigString("playerVaultNumbers", "1,2",
                 "Your player vaults to use as storage, like chests: items are taken from them before buying (pumpkins to\n"
                         + "craft seeds from, for example) and leftovers are put in them. Numbers, e.g. 1-6 or 1,2,3. Empty = none.",
-                "Player vaults (/pv)");
+                "Your vaults (/pv numbers)");
         public static final ConfigString VAULT_COMMAND = new ConfigString("vaultCommand", "pv",
                 "Command that opens a player vault, without the slash (the vault number is added).",
                 "Vault command");
         public static final ConfigBoolean AUTO_BUY = new ConfigBoolean("autoBuy", true,
                 "During auto build, buy what the current layer is missing from the shop (as much as fits in the inventory).\n"
                         + "Needs a shop scan of the server first (J+S). No spending limit.",
-                "Buy missing items");
+                "Buy what's missing in the shop");
         public static final ConfigInteger BUY_WHEN_LEFT = new ConfigInteger("buyWhenLeft", 8, 0, 64,
                 "Only get more of an item (from linked chests or the shop) once this many or fewer are left in the inventory.\n"
                         + "How much is bought is shared between the items the layer needs, and a few slots always stay free.",
@@ -267,6 +267,31 @@ public class Configs implements IConfigHandler {
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
                 FETCH_FROM_CHESTS, VAULTS, VAULT_COMMAND, AUTO_BUY, BUY_WHEN_LEFT, PREFER_BLOCKS, USE_CRAFT_COMMAND, CRAFT_COMMAND,
                 SHOP_COMMAND, SHOP_SECTION, PROBE_BUY_SCREEN, MAX_PAGES, WAIT_TIMEOUT_TICKS);
+    }
+
+    /** The settings most players need to look at once (first tab of the settings); everything else is tuned already. */
+    public static java.util.List<IConfigBase> important() {
+        return java.util.List.of(
+                Generic.ADDON_ENABLED,
+                Shop.VAULTS, Shop.FETCH_FROM_CHESTS, Shop.AUTO_BUY, Shop.PREFER_BLOCKS,
+                Shop.USE_CRAFT_COMMAND, Safety.USE_FEED_COMMAND, Safety.AUTO_EAT,
+                Movement.MOVE_MODE,
+                Safety.STOP_ON_DAMAGE, Safety.STOP_NEAR_PLAYERS,
+                Generic.RESUME_AFTER_REJOIN, Generic.SHOW_HUD, Generic.CHAT_MESSAGES,
+                Shop.SHOP_COMMAND, Shop.VAULT_COMMAND, Shop.CRAFT_COMMAND, Safety.FEED_COMMAND, Movement.FLY_COMMAND);
+    }
+
+    /** Every setting of every tab (for searching them all at once). */
+    public static java.util.List<IConfigBase> all() {
+        java.util.List<IConfigBase> all = new java.util.ArrayList<>();
+        all.addAll(Generic.OPTIONS);
+        all.addAll(Shop.OPTIONS);
+        all.addAll(Movement.OPTIONS);
+        all.addAll(Safety.OPTIONS);
+        all.addAll(Layers.OPTIONS);
+        all.addAll(Breaking.OPTIONS);
+        all.addAll(Speed.OPTIONS);
+        return all;
     }
 
     public static class Speed {

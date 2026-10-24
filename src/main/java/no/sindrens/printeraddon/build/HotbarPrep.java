@@ -28,7 +28,10 @@ public class HotbarPrep {
     /** Moves at most one item onto the hotbar. Returns true if it did. */
     public boolean tick(Minecraft mc, Map<Item, Integer> layerNeeds) {
         LocalPlayer player = mc.player;
-        if (player == null || mc.gameMode == null || mc.gui.screen() != null || layerNeeds.isEmpty() || ++tick % CHECK_EVERY != 0) {
+        // Also with the chat or the pause menu open (alt-tabbed): the printer goes on placing then, and an empty
+        // hotbar stopped it. Not while a container or the inventory is open (the player may be moving items)
+        if (player == null || mc.gameMode == null || mc.gui.screen() instanceof net.minecraft.client.gui.screens.inventory.AbstractContainerScreen<?>
+                || layerNeeds.isEmpty() || ++tick % CHECK_EVERY != 0) {
             return false;
         }
         Inventory inventory = player.getInventory();

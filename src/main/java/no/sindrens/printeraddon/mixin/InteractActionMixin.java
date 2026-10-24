@@ -50,6 +50,9 @@ public class InteractActionMixin {
             no.sindrens.printeraddon.PrinterAddon.trace("Skipped a printer click with an empty hand at {}", hit.getBlockPos().toShortString());
             if (no.sindrens.printeraddon.build.AutoBuild.INSTANCE.isRunning()) {
                 no.sindrens.printeraddon.build.AutoBuild.INSTANCE.speed.emptyHand(hit.getBlockPos());
+                // The item it wanted is in the inventory (the hotbar ran dry, e.g. with the chat open): into the
+                // hand now, the printer clicks again in a moment
+                printer_addon$refillEmpty(client, player, hand);
             }
             ci.cancel();
             return;
@@ -97,6 +100,32 @@ public class InteractActionMixin {
         printer_addon$turned = true;
     }
 
+    /** An empty hand at the printer's click: the item it picked, from the inventory into the hand. */
+    @Unique
+    private static void printer_addon$refillEmpty(Minecraft client, LocalPlayer player, InteractionHand hand) {
+        net.minecraft.world.item.Item wanted = no.sindrens.printeraddon.build.AutoBuild.INSTANCE.lastTriedItem;
+        if (wanted == null || hand != InteractionHand.MAIN_HAND || client.gameMode == null
+                || client.gui.screen() instanceof net.minecraft.client.gui.screens.inventory.AbstractContainerScreen<?>) {
+            return;
+        }
+        net.minecraft.world.entity.player.Inventory inventory = player.getInventory();
+        int best = -1;
+        for (int slot = net.minecraft.world.entity.player.Inventory.getSelectionSize(); slot < net.minecraft.world.entity.player.Inventory.INVENTORY_SIZE; slot++) {
+            net.minecraft.world.item.ItemStack stack = inventory.getItem(slot);
+            if (stack.is(wanted) && (best < 0 || stack.getCount() > inventory.getItem(best).getCount())) {
+                best = slot;
+            }
+        }
+        if (best < 0) {
+            return;
+        }
+        client.gameMode.handleContainerInput(player.inventoryMenu.containerId, best, inventory.getSelectedSlot(),
+                net.minecraft.world.inventory.ContainerInput.SWAP, player);
+        no.sindrens.printeraddon.build.AutoBuild.INSTANCE.inventory.moved();
+        no.sindrens.printeraddon.build.BuildLog.line("HOTBAR", "empty hand at a click: " + wanted.toString().replace("minecraft:", "")
+                + " from slot " + (best + 1) + " into hotbar slot " + (inventory.getSelectedSlot() + 1));
+    }
+
     /**
      * The last item of a stack, clicked against a hopper or chest: the server can already be at zero (it counts
      * placements the client didn't see) and then opens the hopper. Swap a full stack of the same item into the hand
@@ -125,7 +154,7 @@ public class InteractActionMixin {
 
     @Inject(method = "interact", at = @At("RETURN"))
     private void printer_addon$lookBack(Minecraft client, LocalPlayer player, InteractionHand hand, BlockHitResult hit, CallbackInfo ci) {
-        if (client.level != null) {
+        if (Configs.enabled() && client.level != null) {
             // The click went out with this sequence number: the server answers it when it's done (see ServerAcks)
             no.sindrens.printeraddon.build.ServerAcks.clicked(((ClientLevelAccessor) client.level).printer_addon$predictions().currentSequence());
         }

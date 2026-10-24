@@ -21,7 +21,8 @@ import java.util.List;
 import java.util.Objects;
 
 public class ConfigGui extends GuiConfigsBase {
-    private static Tab tab = Tab.GENERIC;
+    /** Opens on the important settings (the ones a player sets once); the build menu (J+B) opens on Build. */
+    private static Tab tab = Tab.IMPORTANT;
 
     /** J+B: the settings opened on the Build tab (start/stop, linked chests, quick actions). */
     public static ConfigGui buildMenu() {
@@ -50,12 +51,29 @@ public class ConfigGui extends GuiConfigsBase {
 
         if (tab == Tab.BUILD) {
             addBuildTab(10, 52);
+        } else if (tab != Tab.HOTKEYS) {
+            // Where the search is (MaLiLib's: the magnifier at the top left of the list)
+            this.addLabel(this.width - 230, 30, 220, 10, 0xFFAAAAAA, tab == Tab.ALL
+                    ? "Search every setting: the magnifier at the top left"
+                    : "Hover a setting for what it does. Search: 'All settings'");
         }
     }
 
     private void addBuildTab(int x, int y) {
         Minecraft mc = Minecraft.getInstance();
         boolean running = AutoBuild.INSTANCE.isRunning();
+        // The add-on itself on or off: off, Litematica Printer works exactly as without it
+        boolean on = Configs.enabled();
+        this.addButton(new ButtonGeneric(x, y, 200, 20, on ? "Add-on: \u00a7aON\u00a7r (click: plain printer)" : "Add-on: \u00a7cOFF\u00a7r (click to switch on)"),
+                (button, mouse) -> {
+                    AutoBuild.INSTANCE.setAddonEnabled(mc, !Configs.enabled());
+                    this.initGui();
+                });
+        this.addLabel(x + 210, y + 5, 300, 10, 0xFFAAAAAA, on ? "Also J+A" : "Litematica Printer works on its own now");
+        y += 30;
+        if (!on) {
+            return;
+        }
         this.addButton(new ButtonGeneric(x, y, 200, 20, running ? "Stop auto build" : "Start auto build"),
                 (button, mouse) -> {
                     GuiBase.openGui(null);
@@ -106,6 +124,7 @@ public class ConfigGui extends GuiConfigsBase {
         });
         y += 24;
         // The full log of each build (every step, every flight, a snapshot every 5 s)
+        this.addLabel(x + 210, y + 5, 320, 10, 0xFFAAAAAA, "Settings to look at: the Important tab");
         this.addButton(new ButtonGeneric(x, y, 200, 20, "Open build logs folder"), (button, mouse) -> {
             java.nio.file.Path folder = no.sindrens.printeraddon.build.BuildLog.folder();
             try {
@@ -125,6 +144,8 @@ public class ConfigGui extends GuiConfigsBase {
     public List<ConfigOptionWrapper> getConfigs() {
         List<? extends IConfigBase> configs = switch (tab) {
             case BUILD -> List.<IConfigBase>of();
+            case IMPORTANT -> Configs.important();
+            case ALL -> Configs.all();
             case GENERIC -> Configs.Generic.OPTIONS;
             case BREAKING -> Configs.Breaking.OPTIONS;
             case LAYERS -> Configs.Layers.OPTIONS;
@@ -139,6 +160,8 @@ public class ConfigGui extends GuiConfigsBase {
 
     private enum Tab {
         BUILD("Build"),
+        IMPORTANT("Important"),
+        ALL("All settings"),
         GENERIC("Generic"),
         BREAKING("Breaking"),
         LAYERS("Layers"),

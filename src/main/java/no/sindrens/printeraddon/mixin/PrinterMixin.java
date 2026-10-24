@@ -32,8 +32,12 @@ public class PrinterMixin {
     /** As soon as the printer queued a placement, air place is switched off again. */
     @Inject(method = "onGameTick", at = @At("RETURN"))
     private void printer_addon$afterPlacing(CallbackInfoReturnable<Boolean> cir) {
+        if (!no.sindrens.printeraddon.config.Configs.enabled()) {
+            return;
+        }
         if (cir.getReturnValueZ()) {
             AutoBuild.INSTANCE.airPlace.onPrinterQueued();
+            AutoBuild.INSTANCE.lastQueuedTick = AutoBuild.clientTicks;
             if (AutoBuild.INSTANCE.isRunning()) {
                 AutoBuild.INSTANCE.stats.placed();
             }
@@ -100,6 +104,9 @@ public class PrinterMixin {
      */
     @Inject(method = "getReachablePositions", at = @At("RETURN"), cancellable = true)
     private void printer_addon$buildOrder(CallbackInfoReturnable<List<BlockPos>> cir) {
-        cir.setReturnValue(AutoBuild.INSTANCE.filterPrinterPositions(cir.getReturnValue()));
+        // Add-on off: the printer's own list, untouched
+        if (no.sindrens.printeraddon.config.Configs.enabled()) {
+            cir.setReturnValue(AutoBuild.INSTANCE.filterPrinterPositions(cir.getReturnValue()));
+        }
     }
 }

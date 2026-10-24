@@ -31,6 +31,10 @@ public class ClientTick implements IClientTickHandler {
             return;
         }
 
+        // Add-on off: nothing of it runs (Litematica and its printer work on their own)
+        if (!no.sindrens.printeraddon.config.Configs.enabled()) {
+            return;
+        }
         no.sindrens.printeraddon.build.CostEstimate.tick(mc);
         if (AutoBuild.INSTANCE.isRunning()) {
             no.sindrens.printeraddon.build.Resume.whileRunning(mc);
