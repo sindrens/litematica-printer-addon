@@ -43,6 +43,10 @@ public class Configs implements IConfigHandler {
                 "If auto build was running when you logged out or lost the connection, start it again 10 seconds after\n"
                         + "rejoining the same server with the same schematic. It goes on from the first unfinished layer.",
                 "Resume after rejoining");
+        public static final ConfigInteger BUILD_RENDER_DISTANCE = new ConfigInteger("buildRenderDistance", 0, 0, 32,
+                "Render distance (chunks) while auto build runs, for less lag on a slow computer. Your own setting comes\n"
+                        + "back when it stops. 0 = don't change it.",
+                "Render distance while building");
         public static final ConfigBoolean CHAT_MESSAGES = new ConfigBoolean("chatMessages", true,
                 "Show status messages in chat (layer done, stuck, scan results...).",
                 "Chat messages");
@@ -64,7 +68,7 @@ public class Configs implements IConfigHandler {
                 "Debug log");
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                ADDON_ENABLED, AUTO_BUILD, SHOW_HUD, RESUME_AFTER_REJOIN, SPEED_PRESET, APPLY_SPEED_TO_PRINTER, TURN_VIEW_FOR_PRINTER, CHAT_MESSAGES, DETAILED_CHAT, STATUS_FILE, DEBUG_LOG);
+                ADDON_ENABLED, AUTO_BUILD, SHOW_HUD, RESUME_AFTER_REJOIN, BUILD_RENDER_DISTANCE, SPEED_PRESET, APPLY_SPEED_TO_PRINTER, TURN_VIEW_FOR_PRINTER, CHAT_MESSAGES, DETAILED_CHAT, STATUS_FILE, DEBUG_LOG);
     }
 
     public static class Breaking {

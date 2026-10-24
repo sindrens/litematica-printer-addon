@@ -34,6 +34,24 @@ public final class PrinterBridge {
         return printer == null || printer.actionHandler.acceptsActions();
     }
 
+    /**
+     * Before the add-on turns the player itself. Litematica Printer keeps its last look direction after its last
+     * action (until its next turn) and puts that direction into every look packet sent meanwhile, including the
+     * add-on's: a piston meant to face down then faces up. With the printer's queue empty that look is used up, so
+     * it's dropped. Returns false while the printer still has actions queued (then don't turn).
+     */
+    public static boolean releaseLook() {
+        Printer printer = LitematicaMixinMod.printer;
+        if (printer == null) {
+            return true;
+        }
+        if (!printer.actionHandler.acceptsActions()) {
+            return false;
+        }
+        printer.actionHandler.lookAction = null;
+        return true;
+    }
+
     /** The player's settings before auto build changed them. */
     private record Saved(int interval, double range, boolean rotate, boolean interact) {
     }

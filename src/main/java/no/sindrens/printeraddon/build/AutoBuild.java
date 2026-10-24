@@ -31,6 +31,8 @@ public class AutoBuild {
     public final InventoryWatch inventory = new InventoryWatch();
     public final AutoEat eater = new AutoEat();
     private final HotbarPrep hotbar = new HotbarPrep();
+    /** The player's render distance while a lower one is used for building (0 = not changed). */
+    private int savedRenderDistance;
     /** Crafting to do once the current purchase is done. */
     private java.util.List<CraftPlan.Step> craftAfterBuying = java.util.List.of();
     /** Items a crafting round was for: if they're still missing afterwards, crafting didn't work out. */
@@ -390,6 +392,11 @@ public class AutoBuild {
 
         running = true;
         Configs.Generic.AUTO_BUILD.setBooleanValue(true);
+        int renderDistance = Configs.Generic.BUILD_RENDER_DISTANCE.getIntegerValue();
+        if (renderDistance > 0 && mc.options.renderDistance().get() != renderDistance) {
+            savedRenderDistance = mc.options.renderDistance().get();
+            mc.options.renderDistance().set(renderDistance);
+        }
         safety.reset();
         emptyDuringBuild.clear();
         deferred.clear();
@@ -446,6 +453,10 @@ public class AutoBuild {
         mover.stop(mc);
         airPlace.stop();
         eater.reset(mc);
+        if (savedRenderDistance > 0) {
+            mc.options.renderDistance().set(savedRenderDistance);
+            savedRenderDistance = 0;
+        }
         crafter.reset();
         fetcher.reset();
 

@@ -184,6 +184,7 @@ public class Fluids {
     }
 
     private void use(Minecraft mc, LocalPlayer player, WorldSchematic schematic, BlockPos pos) {
+        PrinterBridge.releaseLook();
         float oldYaw = player.getYRot();
         float oldPitch = player.getXRot();
         useBucket(mc, player, schematic, pos);

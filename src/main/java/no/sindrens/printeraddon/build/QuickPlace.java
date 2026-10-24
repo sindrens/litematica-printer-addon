@@ -231,6 +231,9 @@ public class QuickPlace {
         }
 
         // Look the way that gives the right direction, then click the face of the empty spot
+        if (!PrinterBridge.releaseLook()) {
+            return false;
+        }
         float oldYaw = player.getYRot();
         float oldPitch = player.getXRot();
         boolean turned = Math.abs(oldYaw - way.yaw()) > 0.5 || Math.abs(oldPitch - way.pitch()) > 0.5;

@@ -346,6 +346,9 @@ public class RailHelper {
         if (item.isEmpty() || !player.getMainHandItem().is(item.getItem()) || selfPlaceFacing(mc.level, schematic, at, target) == null) {
             return;
         }
+        if (!PrinterBridge.releaseLook()) {
+            return;
+        }
         float yaw = eastWest ? 90 : 0;
         float oldYaw = player.getYRot();
         float oldPitch = player.getXRot();
