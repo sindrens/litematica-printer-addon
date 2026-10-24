@@ -353,6 +353,13 @@ public class Mover {
             state = State.IDLE;
             return;
         }
+        // Already there (the same spot again): no flight, just keep placing here
+        if (state != State.WALKING && state != State.FLYING && mode.canFly() && flying(player)
+                && hoverPoint(mc, nearest).distanceToSqr(player.position()) < 0.6 * 0.6) {
+            target = nearest;
+            state = State.WORKING;
+            return;
+        }
         if (target == null || !target.equals(nearest) || (state != State.WALKING && state != State.FLYING)) {
             target = nearest;
             replans = 0;
@@ -1216,9 +1223,9 @@ public class Mover {
                         if (result == BlockCheck.Result.BUCKET && !Fluids.canDo(mc, schematic, immutable, target)) {
                             continue;
                         }
-                        if (result == BlockCheck.Result.MISSING && !PlacementOrder.isReady(mc.level, schematic, immutable, target)) {
-                            continue;
-                        }
+                        // Blocks that wait (for the water next to them, for what they stand on) stay in the work:
+                        // they count as unfinished in reach, so the player waits a moment for them instead of
+                        // flying off and coming back; canDoNow says when they can be placed
                         work.add(immutable);
                     }
                 }
