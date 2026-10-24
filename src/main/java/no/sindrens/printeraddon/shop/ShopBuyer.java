@@ -31,7 +31,9 @@ import java.util.regex.Pattern;
 /**
  * Buys items from /shop with the menus the shop scan found: opens the money shop, the category and the page,
  * clicks the item, sets the amount with the +32/+16/+1 buttons, presses purchase and checks the items arrived.
- * Buys only what fits in the inventory. Stops when a purchase doesn't arrive (not enough money).
+ * Two stacks or more at a time go through the buy screen's "purchase stacks" (several stacks in one purchase);
+ * if that screen isn't understood, a stack at a time as before. Buys only what fits in the inventory. Stops when a
+ * purchase doesn't arrive (not enough money).
  */
 public class ShopBuyer {
     public static final ShopBuyer INSTANCE = new ShopBuyer();
@@ -43,7 +45,7 @@ public class ShopBuyer {
     private static final Pattern MINUS = Pattern.compile("^[-\u2212]\\s*(\\d+)$");
     private static final Pattern TIMES = Pattern.compile("^x\\s*(\\d+)$");
 
-    private enum Phase { OPEN, WAIT_MENU, NAVIGATE, OPEN_ITEM, AMOUNT, WAIT_AMOUNT, PURCHASE, VERIFY }
+    private enum Phase { OPEN, WAIT_MENU, NAVIGATE, OPEN_ITEM, AMOUNT, WAIT_AMOUNT, PURCHASE, VERIFY, STACKS }
 
     private static final class Order {
         final Item item;
@@ -52,6 +54,8 @@ public class ShopBuyer {
         final ShopScanResult.Location location;
         /** Tries from the start (/shop again) after something didn't look right. */
         int retries;
+        /** The stacks screen has nothing small enough for what's left of this one. */
+        boolean noStacks;
 
         Order(Item item, int left, ShopScanResult.Location location) {
             this.item = item;
@@ -82,6 +86,15 @@ public class ShopBuyer {
     private double spent;
     @Nullable
     private String error;
+    /** The "purchase stacks" screen didn't work out: a stack at a time for the rest of the session. */
+    private static boolean stacksBroken;
+    /** The last purchase went through the stacks screen (and its title, to know it again). */
+    private boolean stacksPurchase;
+    @Nullable
+    private String stacksTitle;
+    private boolean confirmTried;
+    /** Every different screen the stacks button led to is written to the build log once. */
+    private final java.util.Set<String> loggedScreens = new java.util.HashSet<>();
 
     public boolean isRunning() {
         return running;
@@ -250,7 +263,12 @@ public class ShopBuyer {
                     waited = 0;
                     delay = clickDelay();
                 } else if (waited > timeout()) {
-                    fail(order, "the shop menu didn't open or change");
+                    if (next == Phase.STACKS) {
+                        // The stacks button did nothing: not the end of this purchase, a stack at a time instead
+                        stacksFailed(mc, order, "nothing happened when purchase stacks was clicked");
+                    } else {
+                        fail(order, "the shop menu didn't open or change");
+                    }
                 }
             }
             case NAVIGATE -> {
@@ -308,6 +326,16 @@ public class ShopBuyer {
                 }
                 int amount = amountShown(snapshot, order.id);
                 int room = room(mc, order.item);
+                int stack = order.item.getDefaultMaxStackSize();
+                // Two stacks or more still to buy (and room for them): several stacks in one purchase
+                if (!stacksBroken && !order.noStacks && Math.min(order.left, room) >= 2 * stack) {
+                    Integer stacks = stacksButton(snapshot);
+                    if (stacks != null) {
+                        PrinterAddon.debug("Buying {} by the stack ({} wanted, room for {})", order.location.name, order.left, room);
+                        click(mc, stacks, Phase.STACKS);
+                        return;
+                    }
+                }
                 int want = Math.max(1, Math.min(64, Math.min(order.left, room)));
                 Integer button = null;
                 if (amount < want) {
@@ -359,24 +387,100 @@ public class ShopBuyer {
                 phase = Phase.VERIFY;
                 waited = 0;
             }
+            case STACKS -> {
+                ScreenSnapshot snapshot = ScreenSnapshot.capture(mc);
+                if (snapshot == null) {
+                    stacksFailed(mc, order, "the menu closed after clicking purchase stacks");
+                    return;
+                }
+                logScreen("stacks screen for " + order.location.name, snapshot);
+                int stack = order.item.getDefaultMaxStackSize();
+                int want = Math.min(order.left, room(mc, order.item));
+                int bestSlot = -1;
+                int bestAmount = 0;
+                int options = 0;
+                for (ScreenSnapshot.Item item : snapshot.items()) {
+                    if (!item.itemId().equals(order.id)) {
+                        continue;
+                    }
+                    int amount = stacksAmount(item, stack);
+                    if (amount < stack) {
+                        continue;
+                    }
+                    options++;
+                    if (amount <= want && amount > bestAmount) {
+                        bestAmount = amount;
+                        bestSlot = item.slot();
+                    }
+                }
+                if (options == 0) {
+                    stacksFailed(mc, order, "no stack amounts found on the stacks screen");
+                    return;
+                }
+                if (bestSlot < 0) {
+                    // Even the smallest is more than wanted (or fits): a stack at a time for the rest of this item
+                    PrinterAddon.debug("Every amount on the stacks screen is more than the {} wanted: buying normally", want);
+                    order.noStacks = true;
+                    mc.player.closeContainer();
+                    phase = Phase.OPEN;
+                    waited = 0;
+                    delay = clickDelay();
+                    return;
+                }
+                stacksTitle = snapshot.title();
+                stacksPurchase = true;
+                confirmTried = false;
+                countBefore = count(mc, order.item);
+                lastAmount = bestAmount;
+                PrinterAddon.debug("Buying {} {} by the stack (slot {})", bestAmount, order.location.name, bestSlot);
+                clickSlot(mc, snapshot, bestSlot);
+                phase = Phase.VERIFY;
+                waited = 0;
+            }
             case VERIFY -> {
                 int got = count(mc, order.item) - countBefore;
+                // A purchase by the stack may ask to confirm first: once
+                if (got == 0 && stacksPurchase && !confirmTried && waited > 10 + no.sindrens.printeraddon.build.ServerLag.pingTicks(mc)) {
+                    confirmTried = true;
+                    ScreenSnapshot snapshot = ScreenSnapshot.capture(mc);
+                    Integer confirm = snapshot == null || snapshot.title().equals(stacksTitle) ? null : purchaseButton(snapshot);
+                    if (snapshot != null) {
+                        logScreen("after choosing the stacks", snapshot);
+                    }
+                    if (confirm != null) {
+                        PrinterAddon.debug("Confirming the purchase by the stack");
+                        clickSlot(mc, snapshot, confirm);
+                        waited = 0;
+                        return;
+                    }
+                }
                 if (got > 0 && (got >= lastAmount || waited > 10)) {
                     order.left -= got;
                     bought.merge(order.item, got, Integer::sum);
                     if (order.location.buyPrice != null) {
                         spent += got * order.location.buyPrice;
                     }
-                    PrinterAddon.debug("Bought {} {}", got, order.location.name);
+                    PrinterAddon.debug("Bought {} {}{}", got, order.location.name, stacksPurchase ? " (by the stack)" : "");
+                    boolean byStack = stacksPurchase;
+                    stacksPurchase = false;
                     if (order.left <= 0 || room(mc, order.item) <= 0) {
                         orders.pollFirst();
                         phase = Phase.OPEN;
                     } else {
-                        // Buy screens usually stay open: set the amount again
+                        // Buy screens usually stay open: set the amount again (or pick stacks again)
                         ScreenSnapshot snapshot = ScreenSnapshot.capture(mc);
-                        phase = snapshot != null && snapshot.looksLikeBuyScreen() ? Phase.AMOUNT : Phase.OPEN;
+                        if (byStack && snapshot != null && snapshot.title().equals(stacksTitle)) {
+                            phase = Phase.STACKS;
+                        } else {
+                            phase = snapshot != null && snapshot.looksLikeBuyScreen() ? Phase.AMOUNT : Phase.OPEN;
+                        }
                     }
+                    waited = 0;
                     delay = clickDelay();
+                } else if (waited > timeout() && stacksPurchase) {
+                    // Nothing arrived by the stack: a stack at a time from now on (from the start)
+                    stacksPurchase = false;
+                    stacksFailed(mc, order, "nothing arrived after choosing " + lastAmount + " by the stack");
                 } else if (waited > timeout() && order.retries++ < 1) {
                     // Nothing arrived: once more from the start (the first purchase after opening sometimes gets lost)
                     PrinterAddon.debug("The purchase of {} didn't arrive: trying once more", order.location.name);
@@ -548,6 +652,79 @@ public class ShopBuyer {
         }
         Matcher m = Pattern.compile("(\\d+)").matcher(item.name());
         return m.find() ? Integer.parseInt(m.group(1)) : 0;
+    }
+
+    /** The buy screen's "purchase stacks" (or "buy stacks") button, if it has one. */
+    @Nullable
+    private static Integer stacksButton(ScreenSnapshot snapshot) {
+        for (ScreenSnapshot.Item item : snapshot.items()) {
+            String name = ShopText.plain(item.name());
+            if (name.contains("stack") && (name.contains("purchase") || name.contains("buy"))) {
+                return item.slot();
+            }
+        }
+        return null;
+    }
+
+    private static final Pattern STACKS_TEXT = Pattern.compile("(\\d+)\\s*(?:x\\s*)?stacks?\\b");
+    private static final Pattern ITEMS_TEXT = Pattern.compile("(?:^|\\s)x\\s*(\\d+)|(\\d+)\\s*(?:items|pcs)");
+
+    /**
+     * How many items one choice on the stacks screen buys: "3 stacks" (in the name or the text under it), "x 192",
+     * else the number the item shows counts as stacks.
+     */
+    private static int stacksAmount(ScreenSnapshot.Item item, int stack) {
+        List<String> texts = new ArrayList<>();
+        texts.add(ShopText.plain(item.name()));
+        for (String line : item.lore()) {
+            texts.add(ShopText.plain(line));
+        }
+        for (String text : texts) {
+            Matcher m = STACKS_TEXT.matcher(text);
+            if (m.find()) {
+                return Integer.parseInt(m.group(1)) * stack;
+            }
+        }
+        for (String text : texts) {
+            Matcher m = ITEMS_TEXT.matcher(text);
+            if (m.find()) {
+                return Integer.parseInt(m.group(1) != null ? m.group(1) : m.group(2));
+            }
+        }
+        return item.count() * stack;
+    }
+
+    /** The stacks screen didn't work out: a stack at a time for the rest of the session, starting over for this one. */
+    private void stacksFailed(Minecraft mc, Order order, String why) {
+        stacksBroken = true;
+        Chat.warn("Buying by the stack didn't work (" + why + "): buying a stack at a time. The build log has what the screen showed.");
+        no.sindrens.printeraddon.build.BuildLog.line("SHOP", "buying by the stack stopped: " + why);
+        if (mc.player != null) {
+            mc.player.closeContainer();
+        }
+        phase = Phase.OPEN;
+        waited = 0;
+        delay = 20 + clickDelay();
+    }
+
+    /** A shop screen in the build log, every slot with its text (once per different screen). */
+    private void logScreen(String what, ScreenSnapshot snapshot) {
+        if (!loggedScreens.add(what + "|" + snapshot.title() + "|" + snapshot.items().size())) {
+            return;
+        }
+        StringBuilder sb = new StringBuilder(what + ": \"" + snapshot.title() + "\", " + snapshot.size() + " slots:");
+        for (ScreenSnapshot.Item item : snapshot.items()) {
+            if (item.isFiller()) {
+                continue;
+            }
+            sb.append(" [").append(item.slot()).append(' ').append(item.count()).append(' ').append(item.itemId().replace("minecraft:", ""))
+                    .append(" \"").append(ShopText.plain(item.name())).append('"');
+            if (!item.lore().isEmpty()) {
+                sb.append(" lore: ").append(String.join(" / ", item.lore().stream().map(ShopText::plain).toList()));
+            }
+            sb.append(']');
+        }
+        no.sindrens.printeraddon.build.BuildLog.line("SHOP", sb.toString());
     }
 
     /** "Purchase item" / "Confirm" / "Buy", never "purchase stacks". */

@@ -141,6 +141,7 @@ public class AutoBuild {
     private final java.util.Set<net.minecraft.world.item.Item> couldntBuy = new java.util.HashSet<>();
     private boolean buying;
     private int buyCooldown;
+    private int shoppingLayer = Integer.MIN_VALUE;
     private final Safety safety = new Safety();
 
     private boolean running;
@@ -594,7 +595,6 @@ public class AutoBuild {
             return false;
         }
         if (buyCooldown > 0) {
-            buyCooldown--;
             return false;
         }
         // Buy when an item is (nearly) used up
@@ -669,6 +669,8 @@ public class AutoBuild {
                 crafter.craft(step.item(), step.count());
             }
             craftAfterBuying = java.util.List.of();
+            // Only crafting this round: looked at again soon after, not in 30 s
+            buyCooldown = 40;
             return crafter.isBusy();
         }
         if (no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.start(mc, list)) {
@@ -994,6 +996,15 @@ public class AutoBuild {
 
         PrinterBridge.applySettings(mc.player);
         stats.tick(activity());
+        // The pause between shopping rounds runs every tick (it used to stand still while nothing was missing, and
+        // a new layer then waited out the rest: 28 s in a log); a new layer may shop at once
+        if (buyCooldown > 0) {
+            buyCooldown--;
+        }
+        if (layers.getLayer() != shoppingLayer) {
+            shoppingLayer = layers.getLayer();
+            buyCooldown = 0;
+        }
 
         speed.tick(mc);
 

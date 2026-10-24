@@ -106,7 +106,7 @@ public class ShopTest implements FabricClientGameTest {
             FakeShop.reset();
             context.runOnClient(mc -> {
                 Map<Item, Integer> list = new LinkedHashMap<>();
-                list.put(Items.HOPPER, 100);
+                list.put(Items.HOPPER, 200);          // 3 stacks by "purchase stacks", the rest normally
                 list.put(Items.STONE, 10);
                 list.put(Items.CAULDRON, 3);          // on page 2
                 list.put(Items.PUMPKIN_SEEDS, 5);
@@ -135,12 +135,13 @@ public class ShopTest implements FabricClientGameTest {
             System.out.println("SHOP BUY TEST: took " + buySeconds + " s, purchases " + FakeShop.confirmClicks
                     + ", item clicks " + FakeShop.itemClicks + ", bought " + FakeShop.bought + "\n  inventory: " + have
                     + "\n  not sold: " + context.computeOnClient(mc -> ShopBuyer.INSTANCE.notSold().toString()));
-            check(FakeShop.otherShopClicks == 0, "the buyer opened another shop or 'purchase stacks'");
+            check(FakeShop.otherShopClicks == 0, "the buyer opened another shop");
+            check(FakeShop.stackPurchases >= 1, "nothing was bought by the stack");
             int[] counts = context.computeOnClient(mc -> new int[]{
                     mc.player.getInventory().countItem(Items.HOPPER), mc.player.getInventory().countItem(Items.STONE),
                     mc.player.getInventory().countItem(Items.CAULDRON), mc.player.getInventory().countItem(Items.PUMPKIN_SEEDS),
                     mc.player.getInventory().countItem(Items.LAVA_BUCKET)});
-            check(counts[0] == 100, "hoppers: " + counts[0] + ", wanted 100");
+            check(counts[0] == 200, "hoppers: " + counts[0] + ", wanted 200");
             check(counts[1] == 10, "stone: " + counts[1] + ", wanted 10");
             check(counts[2] == 3, "cauldrons: " + counts[2] + ", wanted 3");
             check(counts[3] == 5, "pumpkin seeds: " + counts[3] + ", wanted 5");

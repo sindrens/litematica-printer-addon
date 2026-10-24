@@ -14,8 +14,9 @@ Litematica Printer does the placing; the add-on builds whole schematics in survi
   first wrong one. Switching items that came out wrong once is done slower after. All of it is remembered per
   server (`config/printer_addon/speed-blocks.txt`) for the next build. Only the printer's own clicks count (stems
   growing, other players building don't).
-- **Gets the items:** takes them from the chests, barrels and shulker boxes you linked (no other chest is ever
-  opened), then buys the rest in `/shop` (ShopGUI+), and crafts rails, powered rails, a diamond hoe and pumpkin
+- **Gets the items:** takes them from your vaults (`/pv 1`, `/pv 2`...) and the chests, barrels and shulker boxes
+  you linked (no other chest is ever opened), then buys the rest in `/shop` (ShopGUI+), several stacks per purchase
+  with the buy screen's "Purchase stacks" (a stack at a time if that screen isn't understood), and crafts rails, powered rails, a diamond hoe and pumpkin
   seeds from iron and gold blocks, diamonds, logs, redstone and pumpkins (seeds: always pumpkins bought and
   crafted, a stack at a time; seeds only bought if the shop has no pumpkins). Only what the current layer needs is bought; leftovers go
   back into the linked chests when the inventory gets full.

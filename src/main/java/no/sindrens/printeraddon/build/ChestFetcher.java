@@ -66,8 +66,11 @@ public class ChestFetcher {
     private int taken;
     private int gap;
 
+    /** A job (fetching or storing) runs, until its end is written down (see tick). */
+    private boolean active;
+
     public boolean isBusy() {
-        return current != null || !toVisit.isEmpty();
+        return active || current != null || !toVisit.isEmpty();
     }
 
     public void reset() {
@@ -76,6 +79,7 @@ public class ChestFetcher {
         storing.clear();
         toVisit.clear();
         current = null;
+        active = false;
     }
 
     /** True if there's anywhere to take from or store to (linked chests or vaults). */
@@ -108,6 +112,7 @@ public class ChestFetcher {
         storing.clear();
         storing.putAll(items);
         taken = 0;
+        active = true;
         return true;
     }
 
@@ -134,6 +139,8 @@ public class ChestFetcher {
         if (!Configs.Shop.FETCH_FROM_CHESTS.getBooleanValue() || mc.player == null || isBusy()) {
             return false;
         }
+        // A finished store job leaves nothing behind that could be taken for this one
+        storing.clear();
         wanted.clear();
         list.forEach((item, count) -> {
             int room = ShopBuyer.room(mc, item);
@@ -161,6 +168,7 @@ public class ChestFetcher {
             return false;
         }
         taken = 0;
+        active = true;
         Chat.info("Looking in " + toVisit.size() + " vault" + (toVisit.size() == 1 ? "" : "s") + "/chest"
                 + (toVisit.size() == 1 ? "" : "s") + " for " + describe(wanted) + " before buying.");
         return true;
@@ -182,6 +190,7 @@ public class ChestFetcher {
                 Chat.info("Put " + taken + " leftover items in storage.");
                 storing.clear();
                 toVisit.clear();
+                active = false;
                 mover.goTo(null);
                 return false;
             }
@@ -195,6 +204,7 @@ public class ChestFetcher {
                     Chat.info("Took " + taken + " items from storage.");
                 }
                 toVisit.clear();
+                active = false;
                 mover.goTo(null);
                 return false;
             }
@@ -235,11 +245,12 @@ public class ChestFetcher {
             }
             case TAKE -> {
                 if (!(mc.gui.screen() instanceof AbstractContainerScreen<?>) || player.containerMenu == player.inventoryMenu) {
-                    if (waited > OPEN_TIMEOUT + 2 * ServerLag.pingTicks(mc)) {
+                    // A vault is loaded by the server the first time it's opened: that can take a few seconds
+                    if (waited > OPEN_TIMEOUT + (current.pos() == null ? 60 : 0) + 2 * ServerLag.pingTicks(mc)) {
                         PrinterAddon.debug("The {} didn't open", current.name());
                         if (current.pos() == null) {
-                            // No such vault (or no /pv here): not again for a while
-                            vaultDown.put(current.vault(), AutoBuild.clientTicks + 20L * 60 * 10);
+                            // No such vault (or no /pv here, or the server was slow): not again for a minute
+                            vaultDown.put(current.vault(), AutoBuild.clientTicks + 20L * 60);
                         }
                         current = null;
                     }
@@ -275,13 +286,16 @@ public class ChestFetcher {
                     if (stack.isEmpty()) {
                         continue;
                     }
-                    contents.merge(stack.getItem(), stack.getCount(), Integer::sum);
-                    Integer want = wanted.get(stack.getItem());
-                    if (want != null && want > 0 && ShopBuyer.room(mc, stack.getItem()) > 0) {
+                    // Read before the click: the moved stack is empty afterwards (and reads as air)
+                    Item item = stack.getItem();
+                    int count = stack.getCount();
+                    contents.merge(item, count, Integer::sum);
+                    Integer want = wanted.get(item);
+                    if (want != null && want > 0 && ShopBuyer.room(mc, item) > 0) {
                         mc.gameMode.handleContainerInput(menu.containerId, slot.index, 0, ContainerInput.QUICK_MOVE, player);
-                        wanted.put(stack.getItem(), want - stack.getCount());
-                        contents.merge(stack.getItem(), -stack.getCount(), Integer::sum);
-                        taken += stack.getCount();
+                        wanted.put(item, want - count);
+                        contents.merge(item, -count, Integer::sum);
+                        taken += count;
                     }
                 }
                 known.put(current, new Known(contents, AutoBuild.clientTicks));

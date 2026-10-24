@@ -34,6 +34,8 @@ public final class FakeShop {
     public static int itemClicks;
     /** Clicks on purchase. */
     public static int confirmClicks;
+    /** Purchases on the "purchase stacks" screen. */
+    public static int stackPurchases;
     /** Items bought with confirm: item id -> amount. */
     public static final Map<String, Integer> bought = new HashMap<>();
 
@@ -44,6 +46,7 @@ public final class FakeShop {
         otherShopClicks = 0;
         itemClicks = 0;
         confirmClicks = 0;
+        stackPurchases = 0;
         bought.clear();
     }
 
@@ -181,10 +184,38 @@ public final class FakeShop {
                 left -= n;
             }
         });
-        menu.button(31, named(Items.NETHER_STAR, "ᴘᴜʀᴄʜᴀѕᴇ ѕᴛᴀᴄᴋѕ"),
-                p -> otherShopClicks++);
+        menu.button(31, named(Items.NETHER_STAR, "ᴘᴜʀᴄʜᴀѕᴇ ѕᴛᴀᴄᴋѕ", "ɴᴇᴇᴅ ᴍᴏʀᴇ? ᴘᴜʀᴄʜᴀѕᴇ ɪɴ ѕᴛᴀᴄᴋѕ ʜᴇʀᴇ.", "→ ᴄʟɪᴄᴋ ᴛᴏ ᴠɪᴇᴡ ѕᴛᴀᴄᴋѕ"),
+                p -> openStacks(p, item, () -> openBuy(p, item, back)));
         menu.button(40, named(Items.BARRIER, "Back"), p -> back.run());
         refresh[0].run();
+        menu.open(player);
+    }
+
+    /** "Purchase stacks": 1 to 9 stacks of the item, each bought with one click (nothing if it doesn't fit). */
+    private static void openStacks(ServerPlayer player, Item item, Runnable back) {
+        String name = new ItemStack(item).getHoverName().getString();
+        Menu menu = new Menu("Buying stacks ➠ " + name, 5);
+        for (int n = 1; n <= 9; n++) {
+            int stacks = n;
+            menu.button(9 + n - 1 + 9, withLore(new ItemStack(item, n), List.of("ᴘᴜʀᴄʜᴀѕᴇ " + n + " ѕᴛᴀᴄᴋ" + (n > 1 ? "ѕ" : ""),
+                    "ᴄᴏѕᴛ: $" + n * 6.4)), p -> {
+                int free = 0;
+                for (int slot = 0; slot < 36; slot++) {
+                    if (p.getInventory().getItem(slot).isEmpty()) {
+                        free++;
+                    }
+                }
+                if (free < stacks) {
+                    return;
+                }
+                stackPurchases++;
+                bought.merge(net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(item).toString(), stacks * 64, Integer::sum);
+                for (int i = 0; i < stacks; i++) {
+                    p.getInventory().add(new ItemStack(item, item.getDefaultMaxStackSize()));
+                }
+            });
+        }
+        menu.button(40, named(Items.BARRIER, "Back"), p -> back.run());
         menu.open(player);
     }
 
