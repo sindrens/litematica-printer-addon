@@ -434,8 +434,14 @@ public class AutoBuild {
 
         buyCooldown = 20 * 30;
 
-        // First what's in chests nearby (the next round buys what wasn't there)
-        if (fetcher.start(mc, list)) {
+        // First what's in storage (vaults, linked chests); the next round buys what wasn't there. For seeds also
+        // pumpkins: the player may have put pumpkins in storage to craft seeds from
+        java.util.Map<net.minecraft.world.item.Item, Integer> fromStorage = new java.util.LinkedHashMap<>(list);
+        Integer seeds = list.get(net.minecraft.world.item.Items.PUMPKIN_SEEDS);
+        if (seeds != null) {
+            fromStorage.merge(net.minecraft.world.item.Items.PUMPKIN, (seeds + 3) / 4, Integer::sum);
+        }
+        if (fetcher.start(mc, fromStorage)) {
             mover.stop(mc);
             buyCooldown = 0;
             return true;

@@ -69,7 +69,10 @@ public final class CraftPlan {
     }
 
     private void add(Item item, int count) {
-        if (item == Items.RAIL) {
+        // Always the shop first: crafted only when the shop doesn't sell it (seeds: own pumpkins first, see below)
+        if ((item == Items.RAIL || item == Items.POWERED_RAIL) && sold.test(item)) {
+            buy.merge(item, count, Integer::sum);
+        } else if (item == Items.RAIL) {
             int crafts = ceil(count, 16);
             ingot(Items.IRON_INGOT, Items.IRON_BLOCK, 6 * crafts);
             sticks(crafts);
@@ -84,7 +87,12 @@ public final class CraftPlan {
             craft.add(new Step(Items.POWERED_RAIL, crafts * 6));
         } else if (item == Items.PUMPKIN_SEEDS) {
             int crafts = ceil(count, 4);
+            // Pumpkins the player brought (or that came from storage) are crafted first
             int pumpkins = take(Items.PUMPKIN, crafts);
+            if (pumpkins < crafts && sold.test(Items.PUMPKIN_SEEDS)) {
+                buy.merge(Items.PUMPKIN_SEEDS, (crafts - pumpkins) * 4, Integer::sum);
+                crafts = pumpkins;
+            }
             if (pumpkins < crafts && sold.test(Items.PUMPKIN)) {
                 buy.merge(Items.PUMPKIN, crafts - pumpkins, Integer::sum);
                 pumpkins = crafts;

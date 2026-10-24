@@ -213,6 +213,13 @@ public class Configs implements IConfigHandler {
                 "Before buying, take missing items from the chests, barrels and shulker boxes you linked (J+B, Build tab:\n"
                         + "look at one and press 'Link chest'). No other chest is ever opened. They have to be loaded (in view distance).",
                 "Take from linked chests first");
+        public static final ConfigString VAULTS = new ConfigString("playerVaults", "",
+                "Your player vaults to use as storage, like chests: items are taken from them before buying (pumpkins to\n"
+                        + "craft seeds from, for example) and leftovers are put in them. Numbers, e.g. 1-6 or 1,2,3. Empty = none.",
+                "Player vaults (/pv)");
+        public static final ConfigString VAULT_COMMAND = new ConfigString("vaultCommand", "pv",
+                "Command that opens a player vault, without the slash (the vault number is added).",
+                "Vault command");
         public static final ConfigBoolean AUTO_BUY = new ConfigBoolean("autoBuy", true,
                 "During auto build, buy what the current layer is missing from the shop (as much as fits in the inventory).\n"
                         + "Needs a shop scan of the server first (J+S). No spending limit.",
@@ -237,7 +244,7 @@ public class Configs implements IConfigHandler {
                 "Shop menu timeout (ticks)");
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                FETCH_FROM_CHESTS, AUTO_BUY, BUY_WHEN_LEFT, SHOP_COMMAND, SHOP_SECTION, PROBE_BUY_SCREEN, MAX_PAGES, WAIT_TIMEOUT_TICKS);
+                FETCH_FROM_CHESTS, VAULTS, VAULT_COMMAND, AUTO_BUY, BUY_WHEN_LEFT, SHOP_COMMAND, SHOP_SECTION, PROBE_BUY_SCREEN, MAX_PAGES, WAIT_TIMEOUT_TICKS);
     }
 
     public static class Speed {

@@ -12,12 +12,6 @@ import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.ChunkPos;
-import net.minecraft.world.level.block.entity.BarrelBlockEntity;
-import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.entity.ChestBlockEntity;
-import net.minecraft.world.level.block.entity.ShulkerBoxBlockEntity;
-import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import no.sindrens.printeraddon.PrinterAddon;
@@ -27,33 +21,48 @@ import no.sindrens.printeraddon.util.Chat;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
- * Takes missing items from the chests, barrels and shulker boxes the player linked before anything is bought, and
- * puts leftovers the build no longer needs back into them. Flies to a container, opens it, takes or stores, and
- * remembers what's in each one so it doesn't open them again for nothing.
+ * Takes missing items from storage before anything is bought, and puts leftovers the build no longer needs back:
+ * the player's vaults (/pv 1, /pv 2... opened with the command, no flying) and the chests, barrels and shulker boxes
+ * they linked (flown to). Remembers what's in each one so it doesn't open them again for nothing.
  */
 public class ChestFetcher {
     private static final int TIMEOUT = 20 * 20;
-    private static final int OPEN_TIMEOUT = 40;
+    private static final int OPEN_TIMEOUT = 60;
+    /** Ticks between closing a vault and opening the next (servers don't like menus opened back to back). */
+    private static final int VAULT_GAP = 10;
+    /** What's known about a storage spot is trusted this long (the player may fill it meanwhile). */
+    private static final long KNOWN_FOR = 20 * 60 * 5;
 
     private enum Phase { GO, OPEN, TAKE, CLOSE }
 
-    /** What was in each container when it was last opened (item -> count). */
-    private final Map<BlockPos, Map<Item, Integer>> known = new HashMap<>();
+    /** A linked container (pos) or a vault (number, opened with the vault command). */
+    private record Spot(@Nullable BlockPos pos, int vault) {
+        String name() {
+            return pos != null ? "chest at " + pos.toShortString() : "/" + Configs.Shop.VAULT_COMMAND.getStringValue() + " " + vault;
+        }
+    }
+
+    private record Known(Map<Item, Integer> contents, long at) {
+    }
+
+    private final Map<Spot, Known> known = new HashMap<>();
     private final Map<Item, Integer> wanted = new LinkedHashMap<>();
-    private final List<BlockPos> toVisit = new ArrayList<>();
+    private final List<Spot> toVisit = new ArrayList<>();
     /** Items being put away (instead of taken), with how many stacks of each stay in the inventory. */
     private final Map<Item, Integer> storing = new HashMap<>();
     @Nullable
-    private BlockPos current;
+    private Spot current;
     private Phase phase;
     private int waited;
     private int taken;
+    private int gap;
 
     public boolean isBusy() {
         return current != null || !toVisit.isEmpty();
@@ -67,7 +76,12 @@ public class ChestFetcher {
         current = null;
     }
 
-    /** Puts every stack of these items into the nearest linked containers. Returns false if there are none. */
+    /** True if there's anywhere to take from or store to (linked chests or vaults). */
+    public static boolean hasStorage(Minecraft mc) {
+        return Configs.Shop.FETCH_FROM_CHESTS.getBooleanValue() && !spots(mc).isEmpty();
+    }
+
+    /** Puts every stack of these items into storage. Returns false if there is none. */
     public boolean startStore(Minecraft mc, java.util.Set<Item> items) {
         Map<Item, Integer> keep = new HashMap<>();
         items.forEach(item -> keep.put(item, 0));
@@ -75,17 +89,16 @@ public class ChestFetcher {
     }
 
     /**
-     * Puts stacks of these items into the nearest linked containers until only the given number of stacks of each
-     * is left in the inventory. Returns false if there are no linked containers.
+     * Puts stacks of these items into storage (vaults first, then the nearest linked containers) until only the
+     * given number of stacks of each is left in the inventory. Returns false if there is no storage.
      */
     public boolean startStore(Minecraft mc, Map<Item, Integer> items) {
         if (!Configs.Shop.FETCH_FROM_CHESTS.getBooleanValue() || mc.player == null || isBusy() || items.isEmpty()) {
             return false;
         }
         toVisit.clear();
-        toVisit.addAll(containersNearby(mc));
-        Vec3 from = mc.player.position();
-        toVisit.sort(java.util.Comparator.comparingDouble(p -> from.distanceToSqr(Vec3.atCenterOf(p))));
+        toVisit.addAll(spots(mc));
+        sort(mc, toVisit);
         if (toVisit.isEmpty()) {
             return false;
         }
@@ -113,7 +126,7 @@ public class ChestFetcher {
     }
 
     /**
-     * Starts fetching (item -> how many). Returns false if no container nearby could have any of it.
+     * Starts fetching (item -> how many). Returns false if no storage spot could have any of it.
      */
     public boolean start(Minecraft mc, Map<Item, Integer> list) {
         if (!Configs.Shop.FETCH_FROM_CHESTS.getBooleanValue() || mc.player == null || isBusy()) {
@@ -127,27 +140,27 @@ public class ChestFetcher {
             }
         });
         toVisit.clear();
-        // Containers known to have something wanted first, then ones never opened, nearest first
-        List<BlockPos> unknown = new ArrayList<>();
-        for (BlockPos pos : containersNearby(mc)) {
-            Map<Item, Integer> contents = known.get(pos);
-            if (contents == null) {
-                unknown.add(pos);
-            } else if (wanted.keySet().stream().anyMatch(item -> contents.getOrDefault(item, 0) > 0)) {
-                toVisit.add(pos);
+        known.values().removeIf(k -> AutoBuild.clientTicks - k.at() > KNOWN_FOR);
+        // Spots known to have something wanted first, then ones never opened (vaults first, then nearest chests)
+        List<Spot> unknown = new ArrayList<>();
+        for (Spot spot : spots(mc)) {
+            Known k = known.get(spot);
+            if (k == null) {
+                unknown.add(spot);
+            } else if (wanted.keySet().stream().anyMatch(item -> k.contents().getOrDefault(item, 0) > 0)) {
+                toVisit.add(spot);
             }
         }
-        Vec3 from = mc.player.position();
-        toVisit.sort(java.util.Comparator.comparingDouble(p -> from.distanceToSqr(Vec3.atCenterOf(p))));
-        unknown.sort(java.util.Comparator.comparingDouble(p -> from.distanceToSqr(Vec3.atCenterOf(p))));
+        sort(mc, toVisit);
+        sort(mc, unknown);
         toVisit.addAll(unknown);
         if (wanted.isEmpty() || toVisit.isEmpty()) {
             toVisit.clear();
             return false;
         }
         taken = 0;
-        Chat.info("Looking in " + toVisit.size() + " chest" + (toVisit.size() == 1 ? "" : "s") + " nearby for "
-                + describe(wanted) + " before buying.");
+        Chat.info("Looking in " + toVisit.size() + " vault" + (toVisit.size() == 1 ? "" : "s") + "/chest"
+                + (toVisit.size() == 1 ? "" : "s") + " for " + describe(wanted) + " before buying.");
         return true;
     }
 
@@ -158,65 +171,75 @@ public class ChestFetcher {
             reset();
             return false;
         }
+        if (gap > 0) {
+            gap--;
+            return true;
+        }
         if (current == null && !storing.isEmpty()) {
             if (!anyLeftToStore(player.getInventory()) || toVisit.isEmpty()) {
-                Chat.info("Put " + taken + " leftover items in your chests.");
+                Chat.info("Put " + taken + " leftover items in storage.");
                 storing.clear();
                 toVisit.clear();
                 mover.goTo(null);
                 return false;
             }
             current = toVisit.removeFirst();
-            phase = Phase.GO;
+            phase = current.pos() == null ? Phase.OPEN : Phase.GO;
             waited = 0;
         } else if (current == null) {
             wanted.values().removeIf(count -> count <= 0);
             if (wanted.isEmpty() || toVisit.isEmpty()) {
                 if (!toVisit.isEmpty() || taken > 0) {
-                    Chat.info("Took " + taken + " items from chests.");
+                    Chat.info("Took " + taken + " items from storage.");
                 }
                 toVisit.clear();
                 mover.goTo(null);
                 return false;
             }
             current = toVisit.removeFirst();
-            phase = Phase.GO;
+            phase = current.pos() == null ? Phase.OPEN : Phase.GO;
             waited = 0;
         }
         waited++;
 
         switch (phase) {
             case GO -> {
-                if (!(mc.level.getBlockEntity(current) instanceof net.minecraft.world.Container)) {
+                BlockPos pos = current.pos();
+                if (!(mc.level.getBlockEntity(pos) instanceof net.minecraft.world.Container)) {
                     known.remove(current);
                     current = null;
                     return true;
                 }
-                if (mover.goTo(current)) {
+                if (mover.goTo(pos)) {
                     phase = Phase.OPEN;
                     waited = 0;
                 } else if (waited > TIMEOUT) {
-                    PrinterAddon.debug("Couldn't get to the chest at {}", current.toShortString());
+                    PrinterAddon.debug("Couldn't get to the {}", current.name());
                     current = null;
                 }
                 mover.tick(mc);
             }
             case OPEN -> {
                 player.setShiftKeyDown(false);
-                Vec3 hit = Vec3.atCenterOf(current).add(0, 0.5, 0);
-                mc.gameMode.useItemOn(player, InteractionHand.MAIN_HAND, new BlockHitResult(hit, Direction.UP, current, false));
+                if (current.pos() == null) {
+                    PrinterAddon.debug("Opening {}", current.name());
+                    player.connection.sendCommand(Configs.Shop.VAULT_COMMAND.getStringValue() + " " + current.vault());
+                } else {
+                    Vec3 hit = Vec3.atCenterOf(current.pos()).add(0, 0.5, 0);
+                    mc.gameMode.useItemOn(player, InteractionHand.MAIN_HAND, new BlockHitResult(hit, Direction.UP, current.pos(), false));
+                }
                 phase = Phase.TAKE;
                 waited = 0;
             }
             case TAKE -> {
-                if (!(mc.gui.screen() instanceof AbstractContainerScreen<?> screen) || player.containerMenu == player.inventoryMenu) {
-                    if (waited > OPEN_TIMEOUT) {
-                        PrinterAddon.debug("The chest at {} didn't open", current.toShortString());
+                if (!(mc.gui.screen() instanceof AbstractContainerScreen<?>) || player.containerMenu == player.inventoryMenu) {
+                    if (waited > OPEN_TIMEOUT + 2 * ServerLag.pingTicks(mc)) {
+                        PrinterAddon.debug("The {} didn't open", current.name());
                         current = null;
                     }
                     return true;
                 }
-                if (waited < 4) {
+                if (waited < 4 + ServerLag.pingTicks(mc)) {
                     // Let the contents arrive
                     return true;
                 }
@@ -226,7 +249,6 @@ public class ChestFetcher {
                     for (Slot slot : menu.slots) {
                         ItemStack stack = slot.getItem();
                         Integer keep = stack.isEmpty() ? null : storing.get(stack.getItem());
-                        // Smallest stacks are not picked first, but that's fine: whole stacks go either way
                         if (slot.container instanceof Inventory && keep != null && stacks.getOrDefault(stack.getItem(), 0) > keep) {
                             taken += stack.getCount();
                             stacks.merge(stack.getItem(), -1, Integer::sum);
@@ -256,26 +278,67 @@ public class ChestFetcher {
                         taken += stack.getCount();
                     }
                 }
-                known.put(current, contents);
+                known.put(current, new Known(contents, AutoBuild.clientTicks));
+                PrinterAddon.debug("{}: took what was wanted, {} left wanted", current.name(), wanted);
                 phase = Phase.CLOSE;
             }
             case CLOSE -> {
                 player.closeContainer();
+                if (current.pos() == null) {
+                    gap = VAULT_GAP;
+                }
                 current = null;
             }
         }
         return true;
     }
 
-    /** The chests the player linked (see {@link ChestLinks}) that are loaded and still a container. */
-    private static List<BlockPos> containersNearby(Minecraft mc) {
-        List<BlockPos> found = new ArrayList<>();
-        for (BlockPos pos : ChestLinks.list(mc)) {
-            if (mc.level.isLoaded(pos) && mc.level.getBlockEntity(pos) instanceof net.minecraft.world.Container) {
-                found.add(pos);
+    /** Vaults first (no flying), then the containers nearest first. */
+    private static void sort(Minecraft mc, List<Spot> spots) {
+        Vec3 from = mc.player.position();
+        spots.sort(Comparator.comparingDouble(s -> s.pos() == null ? -1000 + s.vault() : from.distanceToSqr(Vec3.atCenterOf(s.pos()))));
+    }
+
+    /** The vaults from the settings and the linked containers (see {@link ChestLinks}) that are loaded. */
+    private static List<Spot> spots(Minecraft mc) {
+        List<Spot> found = new ArrayList<>();
+        for (int vault : vaults()) {
+            found.add(new Spot(null, vault));
+        }
+        if (mc.level != null) {
+            for (BlockPos pos : ChestLinks.list(mc)) {
+                if (mc.level.isLoaded(pos) && mc.level.getBlockEntity(pos) instanceof net.minecraft.world.Container) {
+                    found.add(new Spot(pos, 0));
+                }
             }
         }
         return found;
+    }
+
+    /** The vault numbers from the setting: "1-6", "1,2,3", "1-3,5". */
+    public static List<Integer> vaults() {
+        List<Integer> vaults = new ArrayList<>();
+        for (String part : Configs.Shop.VAULTS.getStringValue().split(",")) {
+            part = part.trim();
+            if (part.isEmpty()) {
+                continue;
+            }
+            try {
+                int dash = part.indexOf('-');
+                if (dash > 0) {
+                    int from = Integer.parseInt(part.substring(0, dash).trim());
+                    int to = Integer.parseInt(part.substring(dash + 1).trim());
+                    for (int v = from; v <= Math.min(to, from + 99); v++) {
+                        vaults.add(v);
+                    }
+                } else {
+                    vaults.add(Integer.parseInt(part));
+                }
+            } catch (NumberFormatException e) {
+                PrinterAddon.debug("Vault setting: '{}' is not a number", part);
+            }
+        }
+        return vaults;
     }
 
     private static String describe(Map<Item, Integer> items) {

@@ -34,8 +34,11 @@ import java.util.Map;
  * can't wash away redstone or crops.
  */
 public class Fluids {
-    /** Ticks between bucket uses. */
-    private static final int COOLDOWN = 8;
+    /** Ticks between bucket uses (an infinite water bucket from a plugin needs the server's answer first). */
+    private static final int COOLDOWN = 20;
+    /** The slot of the bucket last used and when, to check it came back right (see checkBucket). */
+    private int usedSlot = -1;
+    private long usedAt;
     private static final int SKIP_TICKS = 20 * 30;
 
     private int cooldown;
@@ -121,10 +124,15 @@ public class Fluids {
         if (pending != null) {
             BlockPos pos = pending;
             pending = null;
+            usedSlot = player.getInventory().getSelectedSlot();
+            usedAt = tick;
             use(mc, player, schematic, pos);
-            cooldown = COOLDOWN;
+            cooldown = Math.max(COOLDOWN, 10 + 2 * ServerLag.pingTicks(mc));
+            AutoBuild.INSTANCE.inventory.moved();
+            AutoBuild.INSTANCE.layers.checkSoon();
             return true;
         }
+        checkBucket(mc, player);
 
         if (cooldown > 0) {
             cooldown--;
@@ -150,6 +158,28 @@ public class Fluids {
         }
         pending = next;
         return true;
+    }
+
+    /**
+     * The client shows the bucket empty after using it; an infinite water bucket is full again on the server. If
+     * the slot still shows an empty bucket a while later, click it once (pick up, put back) so the server sends
+     * what's really there: otherwise a ghost bucket stays in the inventory.
+     */
+    private void checkBucket(Minecraft mc, LocalPlayer player) {
+        if (usedSlot < 0 || tick - usedAt < 40) {
+            return;
+        }
+        int slot = usedSlot;
+        usedSlot = -1;
+        if (!player.getInventory().getItem(slot).is(Items.BUCKET) || mc.gui.screen() != null) {
+            return;
+        }
+        int menuSlot = slot < 9 ? 36 + slot : slot;
+        int id = player.inventoryMenu.containerId;
+        mc.gameMode.handleContainerInput(id, menuSlot, 0, net.minecraft.world.inventory.ContainerInput.PICKUP, player);
+        mc.gameMode.handleContainerInput(id, menuSlot, 0, net.minecraft.world.inventory.ContainerInput.PICKUP, player);
+        AutoBuild.INSTANCE.inventory.moved();
+        PrinterAddon.debug("Bucket in slot {} still empty after use: asked the server for the real item", slot + 1);
     }
 
     /**

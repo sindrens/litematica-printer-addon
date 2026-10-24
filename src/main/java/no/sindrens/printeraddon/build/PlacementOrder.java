@@ -59,6 +59,10 @@ public final class PlacementOrder {
         if (needsSupport(target) && !target.canSurvive(level, pos)) {
             return "needs the block it stands on or hangs from first";
         }
+        // On a layer with water (waterlogged leaves next to farmland), the water goes in before anything else
+        if (!holdsWater(target) && AutoBuild.INSTANCE.layers.waterFirst(pos)) {
+            return "the water on this layer goes in first";
+        }
         BlockPos water = waterFirst(level, schematic, pos, target);
         if (water != null) {
             return "tilling waits for the water at " + water.toShortString();
@@ -109,6 +113,11 @@ public final class PlacementOrder {
         }
 
         return null;
+    }
+
+    /** A block that holds a water source (water itself or a waterlogged block). */
+    public static boolean holdsWater(BlockState target) {
+        return target.getFluidState().isSource() && target.getFluidState().getType().isSame(net.minecraft.world.level.material.Fluids.WATER);
     }
 
     /**

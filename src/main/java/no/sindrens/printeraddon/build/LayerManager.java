@@ -115,6 +115,21 @@ public class LayerManager {
     }
 
     /** True when the current layer hasn't changed for this many ticks. */
+    /** Check the layer again within a few ticks (e.g. after water went in). */
+    public void checkSoon() {
+        ticksUntilCheck = Math.min(ticksUntilCheck, 5);
+    }
+
+    /**
+     * True while the current layer has water still to go in (waterlogged blocks, water): on such a layer the water
+     * blocks come first, everything else after (farmland is wet from the start, no water flows over placed blocks).
+     */
+    public boolean waterFirst(BlockPos pos) {
+        return active && waterPending != 0 && pos.getY() >= layer && pos.getY() <= layerTop;
+    }
+
+    private int waterPending;
+
     public boolean stalledFor(int ticks) {
         return active && ticksWithoutProgress >= ticks;
     }
@@ -189,6 +204,10 @@ public class LayerManager {
 
         Findings findings = new Findings();
         int remaining = scanLayers(mc.level, schematic, areas, null, findings);
+        if (waterPending > 0 && findings.water == 0 && remaining > 0) {
+            Chat.info("The water on " + describeLayers() + " is in: now the rest of the layer.");
+        }
+        waterPending = findings.water;
         if (findings.needsHoe && mc.player != null && !mc.player.getInventory().contains(net.minecraft.tags.ItemTags.HOES)) {
             findings.needs.put(net.minecraft.world.item.Items.IRON_HOE, 1);
         }
@@ -479,6 +498,8 @@ public class LayerManager {
         ticksWithoutProgress = 0;
         reportedStuck = false;
         ticksUntilCheck = 0;
+        // Not known yet whether the new layer has water: nothing else goes in until the first check says
+        waterPending = -1;
     }
 
     private void reportStuck(Minecraft mc, WorldSchematic schematic, List<SchematicHelper.Area> areas) {
@@ -530,6 +551,8 @@ public class LayerManager {
         final java.util.Map<net.minecraft.world.item.Item, Integer> needs = new java.util.LinkedHashMap<>();
         /** Farmland is placed as dirt and tilled: that needs a hoe. */
         boolean needsHoe;
+        /** Unfinished blocks that hold water (waterlogged or water): they go first. */
+        int water;
     }
 
     /**
@@ -565,6 +588,9 @@ public class LayerManager {
 
                     if (unfinished) {
                         remaining++;
+                        if (findings != null && PlacementOrder.holdsWater(schematic.getBlockState(pos))) {
+                            findings.water++;
+                        }
                         if (examples != null && examples.size() < MAX_REPORTED) {
                             examples.add(pos.immutable());
                         }
@@ -574,8 +600,10 @@ public class LayerManager {
                         }
                         if (findings != null && result == BlockCheck.Result.MISSING) {
                             BlockState target = schematic.getBlockState(pos);
+                            // Blocks waiting for the layer's water aren't waiting for something above
                             if (!PlacementOrder.isReady(level, schematic, pos, target)
-                                    && PlacementOrder.waterFirst(level, schematic, pos, target) == null) {
+                                    && PlacementOrder.waterFirst(level, schematic, pos, target) == null
+                                    && !AutoBuild.INSTANCE.layers.waterFirst(pos)) {
                                 findings.waiting.add(pos.immutable());
                             }
                             ItemStack item = StateRules.itemFor(target);
