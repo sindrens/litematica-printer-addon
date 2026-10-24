@@ -43,6 +43,18 @@ public class Configs implements IConfigHandler {
                 "If auto build was running when you logged out or lost the connection, start it again 10 seconds after\n"
                         + "rejoining the same server with the same schematic. It goes on from the first unfinished layer.",
                 "Go on after a restart or disconnect");
+        public static final ConfigBoolean RECONNECT = new ConfigBoolean("reconnect", true,
+                "If the server kicks you or restarts while auto build runs, join it again by itself: 10 s after the\n"
+                        + "'Disconnected' screen, then 20 s, 30 s and every minute, for half an hour. Click 'Back to server list'\n"
+                        + "to cancel. Never after a ban, nor when you leave yourself; it stops after 3 kicks in 10 minutes.\n"
+                        + "Once back at the build, it goes on (see 'Go on after a restart or disconnect').",
+                "Join again after a kick or restart");
+        public static final ConfigString BACK_COMMANDS = new ConfigString("backToBuildCommands", "server skyblock, is go",
+                "Commands that take you back to the build after joining again, or when the server moved you away (to a\n"
+                        + "hub): run one by one, 8 seconds apart, then again every minute until you're back at the build (for\n"
+                        + "half an hour). Comma between them, no /. Empty: none. Stop auto build first (J+Q) when you leave on\n"
+                        + "purpose, or it brings you back.",
+                "Commands back to the build");
         public static final ConfigInteger BUILD_RENDER_DISTANCE = new ConfigInteger("buildRenderDistance", 0, 0, 32,
                 "Render distance (chunks) while auto build runs, for less lag on a slow computer. Your own setting comes\n"
                         + "back when it stops. 0 = don't change it.",
@@ -69,7 +81,7 @@ public class Configs implements IConfigHandler {
                 "Debug log");
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                ADDON_ENABLED, AUTO_BUILD, SHOW_HUD, RESUME_AFTER_REJOIN, BUILD_RENDER_DISTANCE, SPEED_PRESET, APPLY_SPEED_TO_PRINTER, TURN_VIEW_FOR_PRINTER, CHAT_MESSAGES, DETAILED_CHAT, STATUS_FILE, DEBUG_LOG);
+                ADDON_ENABLED, AUTO_BUILD, SHOW_HUD, RESUME_AFTER_REJOIN, RECONNECT, BACK_COMMANDS, BUILD_RENDER_DISTANCE, SPEED_PRESET, APPLY_SPEED_TO_PRINTER, TURN_VIEW_FOR_PRINTER, CHAT_MESSAGES, DETAILED_CHAT, STATUS_FILE, DEBUG_LOG);
     }
 
     public static class Breaking {
@@ -277,7 +289,7 @@ public class Configs implements IConfigHandler {
                 Shop.USE_CRAFT_COMMAND, Safety.USE_FEED_COMMAND, Safety.AUTO_EAT,
                 Movement.MOVE_MODE,
                 Safety.STOP_ON_DAMAGE, Safety.STOP_NEAR_PLAYERS,
-                Generic.RESUME_AFTER_REJOIN, Generic.SHOW_HUD, Generic.CHAT_MESSAGES,
+                Generic.RESUME_AFTER_REJOIN, Generic.RECONNECT, Generic.BACK_COMMANDS, Generic.SHOW_HUD, Generic.CHAT_MESSAGES,
                 Shop.SHOP_COMMAND, Shop.VAULT_COMMAND, Shop.CRAFT_COMMAND, Safety.FEED_COMMAND, Movement.FLY_COMMAND);
     }
 

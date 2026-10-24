@@ -1089,6 +1089,10 @@ public class AutoBuild {
         if (running) {
             BuildLog.line("DISCONNECT", "the connection ended: " + reason);
         }
+        // Kicked or the server restarting while building, or on the way back to it: join again by itself
+        if (running || Resume.pending()) {
+            Reconnect.connectionEnded(Minecraft.getInstance(), reason);
+        }
     }
 
     /** Errors already written, so one that repeats every tick isn't written every tick. */
@@ -1242,7 +1246,22 @@ public class AutoBuild {
     private static final java.util.ArrayDeque<Long> unwantedMenus = new java.util.ArrayDeque<>();
     private static long lastUnwantedMenuWarning = -100000;
 
+    /** The world auto build runs in: another one means the server moved you (to a hub, say). */
+    @javax.annotation.Nullable
+    private net.minecraft.client.multiplayer.ClientLevel builtIn;
+
     public void tick(Minecraft mc) {
+        if (running && mc.level != builtIn) {
+            if (builtIn != null) {
+                // Moved to another world (another server of the network): stop, then go back (see Resume)
+                BuildLog.line("WORLD", "the world changed (moved to another server?): stopping, going back to the build after");
+                stopForDisconnect(mc);
+                return;
+            }
+            builtIn = mc.level;
+        } else if (!running) {
+            builtIn = null;
+        }
         long started = Perf.start();
         tickParts(mc);
         if (running) {

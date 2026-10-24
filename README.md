@@ -23,7 +23,7 @@ Put these in your `mods` folder:
 4. To use a chest, look at it, press `J`+`B` and click "Link".
 5. Press `J`+`B` and click Start.
 
-It builds layer by layer from the bottom and carries on by itself after a restart or disconnect.
+It builds layer by layer from the bottom. If you're kicked or the server restarts, it joins again, runs your "Commands back to the build" (for example `/server skyblock`, `/is go`) and carries on.
 
 ## Keys
 

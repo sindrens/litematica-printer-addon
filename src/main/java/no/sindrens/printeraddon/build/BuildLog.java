@@ -55,6 +55,12 @@ public final class BuildLog {
             removeOld(dir);
             file = dir.resolve("build-" + LocalDateTime.now().format(FILE_NAME) + ".log");
             out = Files.newBufferedWriter(file, StandardCharsets.UTF_8);
+            // What happened since the last build (joining again, getting back to the build) comes first
+            for (String line : pending) {
+                out.write(line);
+                out.newLine();
+            }
+            pending.clear();
         } catch (IOException e) {
             PrinterAddon.LOGGER.warn("Couldn't open the build log", e);
             out = null;
@@ -71,6 +77,25 @@ public final class BuildLog {
         } catch (IOException ignored) {
         }
         out = null;
+    }
+
+    /** Lines from between builds, for the top of the next build log. */
+    private static final java.util.Deque<String> pending = new java.util.ArrayDeque<>();
+
+    /**
+     * A line from between builds (joining again, getting back to the build): into the build log if one is open,
+     * else kept for the next one (the last 100) and written to the game log at once.
+     */
+    public static void lineOrKeep(String kind, String text) {
+        if (out != null) {
+            line(kind, text);
+            return;
+        }
+        PrinterAddon.LOGGER.info("[Printer Addon] {} {}", kind, text);
+        if (pending.size() >= 100) {
+            pending.pollFirst();
+        }
+        pending.addLast(LocalDateTime.now().format(TIME) + " t=" + AutoBuild.clientTicks + " " + kind + " " + text);
     }
 
     /** One line: time, game tick, kind, text. */

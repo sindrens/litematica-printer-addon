@@ -26,8 +26,11 @@ public class ClientTick implements IClientTickHandler {
             AutoBuild.INSTANCE.stopForDisconnect(mc);
             no.sindrens.printeraddon.build.Resume.onDisconnect();
             no.sindrens.printeraddon.build.ServerLag.reset();
+            // Kicked or the server restarting: joining again when it's time
+            no.sindrens.printeraddon.build.Reconnect.whileOut(mc);
             return;
         }
+        no.sindrens.printeraddon.build.Reconnect.whileIn(mc);
 
         if (ShopScanner.INSTANCE.isRunning()) {
             ShopScanner.INSTANCE.tick(mc);
