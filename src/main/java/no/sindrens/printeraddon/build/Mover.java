@@ -76,6 +76,8 @@ public class Mover {
     @Nullable
     private Vec3 flyPathFor;
     private int flyIndex;
+    /** The path is a straight line towards a part that isn't loaded yet (worked out again once it is). */
+    private boolean flyPathBlind;
 
     private int workTicksWithoutProgress;
     private int lastInReach = -1;
@@ -112,6 +114,22 @@ public class Mover {
             }
         }
         return errand != null && errandReached;
+    }
+
+    /** The blocks left for later right now. */
+    public java.util.Set<BlockPos> skippedNow() {
+        return new java.util.HashSet<>(skipped.keySet());
+    }
+
+    /** Leaves a block for later (30 s), with the reason and everything known about it in the build log. */
+    private void skip(BlockPos pos, String why) {
+        skipped.put(pos, tick + SKIP_TICKS);
+        if (BuildLog.isOpen()) {
+            Minecraft mc = Minecraft.getInstance();
+            WorldSchematic schematic = SchematicHelper.world();
+            BuildLog.line("SKIP", pos.toShortString() + " for 30 s: " + why
+                    + (schematic != null && mc.player != null ? " | " + Diagnose.explain(mc, schematic, pos) : ""));
+        }
     }
 
     /** True for a block the printer was given time for in reach, but nothing happened. */
@@ -180,7 +198,24 @@ public class Mover {
         target = null;
     }
 
+    private State loggedState;
+    @Nullable
+    private BlockPos loggedTarget;
+
     public void tick(Minecraft mc) {
+        tickNow(mc);
+        // Every change of what the player is doing, in the build log
+        if (BuildLog.isOpen() && mc.player != null && (state != loggedState || !java.util.Objects.equals(target, loggedTarget))) {
+            BuildLog.line("STATE", (loggedState == null ? "-" : loggedState) + " -> " + state
+                    + (target != null ? " | target " + target.toShortString() : "")
+                    + " | area " + areaName(area) + " | at " + mc.player.blockPosition().toShortString()
+                    + " | " + describe());
+            loggedState = state;
+            loggedTarget = target;
+        }
+    }
+
+    private void tickNow(Minecraft mc) {
         tick++;
         LocalPlayer player = mc.player;
         WorldSchematic schematic = SchematicHelper.world();
@@ -328,7 +363,13 @@ public class Mover {
         // Only when nothing here waits for items (they're being bought or fetched: wait for them here)
         if (work.isEmpty() && !unloaded.isEmpty() && waitingForItems == 0) {
             // The rest of the layer is too far away to be loaded: go there so it loads
-            BlockPos far = nearest(player, unloaded);
+            List<BlockPos> notSkipped = unloaded.stream().filter(p -> !skipped.containsKey(p)).toList();
+            if (notSkipped.isEmpty()) {
+                halt(player);
+                state = State.IDLE;
+                return;
+            }
+            BlockPos far = nearest(player, notSkipped);
             if (target == null || !target.equals(far) || (state != State.WALKING && state != State.FLYING)) {
                 target = far;
                 PrinterAddon.debug("Going to {}, that part isn't loaded yet", far.toShortString());
@@ -863,7 +904,7 @@ public class Mover {
             }
             Vec3 eye = player.getEyePosition();
             for (BlockPos pos : inReach) {
-                skipped.put(pos, tick + SKIP_TICKS);
+                skip(pos, "nothing happened to it in reach");
                 missedAt(Math.sqrt(eye.distanceToSqr(Vec3.atCenterOf(pos))));
             }
             work.removeAll(inReach);
@@ -895,7 +936,7 @@ public class Mover {
                 // A hover spot to the side of the block it's for: skip that block
                 BlockPos block = !work.contains(goalBlock) && spotFor != null ? spotFor : goalBlock;
                 PrinterAddon.debug("Can't do {} from where it can stand, skipping it for now", block.toShortString());
-                skipped.put(block, tick + SKIP_TICKS);
+                skip(block, "got to it over and over and still not done");
                 work.remove(block);
                 state = State.IDLE;
                 samePlans = 0;
@@ -942,7 +983,7 @@ public class Mover {
         }
 
         PrinterAddon.debug("Can't get to {}, skipping it for now", goalBlock.toShortString());
-        skipped.put(goalBlock, tick + SKIP_TICKS);
+        skip(goalBlock, "no way to get to it");
         work.remove(goalBlock);
         state = State.IDLE;
     }
@@ -1097,7 +1138,7 @@ public class Mover {
             PrinterAddon.debug("Stuck walking at {}, planning again", player.blockPosition().toShortString());
             if (++replans > 3 || target == null) {
                 if (target != null) {
-                    skipped.put(target, tick + SKIP_TICKS);
+                    skip(target, "stuck walking");
                     work.remove(target);
                 }
                 halt(player);
@@ -1132,11 +1173,20 @@ public class Mover {
         }
 
         // The way there, around buildings and anything else in the way (worked out once per target)
-        if (flyPath == null || !flyTarget.equals(flyPathFor)) {
+        boolean targetLoaded = mc.level.isLoaded(BlockPos.containing(flyTarget));
+        if (flyPath == null || !flyTarget.equals(flyPathFor) || (flyPathBlind && targetLoaded)) {
             long started = Perf.start();
             flyPathFor = flyTarget;
             flyIndex = 0;
-            if (FlyPath.clear(mc.level, player.position(), flyTarget)) {
+            flyPathBlind = false;
+            if (!targetLoaded) {
+                // Not loaded yet (far away): nothing is known there, so straight towards it; the way around
+                // anything is found as soon as it has loaded
+                flyPath = List.of(flyTarget);
+                flyPathBlind = true;
+                BuildLog.line("MOVE", "flying straight towards " + BlockPos.containing(flyTarget).toShortString()
+                        + " (not loaded yet; the way is worked out once it is)");
+            } else if (FlyPath.clear(mc.level, player.position(), flyTarget)) {
                 flyPath = List.of(flyTarget);
             } else {
                 flyPath = FlyPath.find(mc.level, player.position(), flyTarget);
@@ -1147,10 +1197,10 @@ public class Mover {
                     BuildLog.line("MOVE", "no way to " + BlockPos.containing(flyTarget).toShortString()
                             + (target != null ? " for " + target.toShortString() : "") + ": leaving it for later");
                     if (target != null) {
-                        skipped.put(target, tick + SKIP_TICKS);
+                        skip(target, "no flight path");
                         work.remove(target);
                         if (spotFor != null) {
-                            skipped.put(spotFor, tick + SKIP_TICKS);
+                            skip(spotFor, "no flight path");
                             work.remove(spotFor);
                         }
                     }
@@ -1204,7 +1254,7 @@ public class Mover {
             stuckTicks = 0;
             lastDistance = Double.MAX_VALUE;
             if (target != null) {
-                skipped.put(target, tick + SKIP_TICKS);
+                skip(target, "stuck flying");
                 work.remove(target);
             }
             flyPath = null;
@@ -1347,6 +1397,10 @@ public class Mover {
                             unloadedAreas.putIfAbsent(areaKey(pos), pos.immutable());
                             continue;
                         }
+                        // The player's own building where the schematic wants something else: not ours to change
+                        if (result.needsBreaking() && AutoBuild.INSTANCE.isConflict(pos, result, mc.level.getBlockState(pos))) {
+                            continue;
+                        }
                         if (result == BlockCheck.Result.MISSING && mc.level.getBlockState(pos).isAir()) {
                             AutoBuild.INSTANCE.markEmpty(pos);
                         }
@@ -1386,6 +1440,9 @@ public class Mover {
         }
 
         addReadyDeferred(mc, schematic, creative);
+        BuildLog.line("SCAN", "work " + work.size() + " | waiting for items " + waitingForItems + " | not loaded "
+                + unloaded.size() + " in " + unloadedAreas.size() + " areas | left for later " + skipped.size()
+                + " | conflicts " + AutoBuild.INSTANCE.conflicts.size() + " | player at " + player.blockPosition().toShortString());
     }
 
     /** Deferred blocks (from finished layers) that can be placed now. */

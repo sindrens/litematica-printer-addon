@@ -267,6 +267,8 @@ public class SpeedTuner {
         switch (result) {
             case OK, BUCKET, PRINTER_FIXES -> {
                 good++;
+                BuildLog.line("PLACED", pos.toShortString() + " " + AutoBuild.shortState(mc.level.getBlockState(pos))
+                        + (result == BlockCheck.Result.OK ? "" : " (" + result + " still to do)") + " | interval " + interval());
                 int min = Math.max(Math.max(fastestSafe, floorForLayer()), Configs.Speed.AUTO_SPEED_MIN_INTERVAL.getIntegerValue());
                 // Far from the fastest known safe speed: fewer blocks per step and big steps (half the way at once);
                 // close to it: the set number of blocks and one tick at a time
@@ -283,6 +285,8 @@ public class SpeedTuner {
             case WRONG_BLOCK, WRONG_STATE -> {
                 bad++;
                 goodInARow = 0;
+                BuildLog.line("WRONG", pos.toShortString() + " is " + AutoBuild.shortState(mc.level.getBlockState(pos)) + ", should be "
+                        + AutoBuild.shortState(schematic.getBlockState(pos)) + " | interval " + interval());
                 // Several wrong blocks found in one check were placed at the same speed: slow down once
                 if (lastPenalty == tick) {
                     return;

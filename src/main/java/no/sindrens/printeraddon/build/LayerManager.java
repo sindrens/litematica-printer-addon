@@ -220,6 +220,9 @@ public class LayerManager {
         }
         waterPending = findings.water;
         waterCells = findings.waterCells;
+        BuildLog.line("LAYER", describeLayers() + ": " + remaining + " unfinished (" + findings.waiting.size()
+                + " waiting for something above, " + findings.water + " water still to go in) | conflicts "
+                + AutoBuild.INSTANCE.conflicts.size() + " | still needs " + findings.needs);
         if (findings.needsHoe && mc.player != null && !mc.player.getInventory().contains(net.minecraft.tags.ItemTags.HOES)) {
             findings.needs.put(net.minecraft.world.item.Items.DIAMOND_HOE, 1);
         }
@@ -596,6 +599,8 @@ public class LayerManager {
                     boolean unfinished = switch (result) {
                         case OK -> false;
                         case EXTRA -> extraCounts;
+                        case WRONG_BLOCK -> !AutoBuild.INSTANCE.isConflict(pos, result, level.getBlockState(pos))
+                                && !AutoBuild.INSTANCE.couldNotPlace.contains(pos);
                         default -> !AutoBuild.INSTANCE.couldNotPlace.contains(pos);
                     };
 

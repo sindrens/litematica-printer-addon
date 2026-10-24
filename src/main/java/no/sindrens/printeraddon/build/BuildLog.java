@@ -98,6 +98,37 @@ public final class BuildLog {
         }
     }
 
+    /** Every add-on setting, for the start of the log. */
+    public static String settings() {
+        StringBuilder sb = new StringBuilder();
+        java.util.List<java.util.List<fi.dy.masa.malilib.config.IConfigBase>> all = java.util.List.of(
+                no.sindrens.printeraddon.config.Configs.Generic.OPTIONS, no.sindrens.printeraddon.config.Configs.Breaking.OPTIONS,
+                no.sindrens.printeraddon.config.Configs.Layers.OPTIONS, no.sindrens.printeraddon.config.Configs.Movement.OPTIONS,
+                no.sindrens.printeraddon.config.Configs.Safety.OPTIONS, no.sindrens.printeraddon.config.Configs.Shop.OPTIONS,
+                no.sindrens.printeraddon.config.Configs.Speed.OPTIONS);
+        for (java.util.List<fi.dy.masa.malilib.config.IConfigBase> list : all) {
+            for (fi.dy.masa.malilib.config.IConfigBase option : list) {
+                if (option instanceof fi.dy.masa.malilib.config.IConfigValue value) {
+                    sb.append(option.getName()).append('=').append(value.getStringValue()).append(", ");
+                }
+            }
+        }
+        return sb.length() > 2 ? sb.substring(0, sb.length() - 2) : "";
+    }
+
+    /** The whole inventory: "slot:count item", for the log. */
+    public static String inventory(net.minecraft.client.player.LocalPlayer player) {
+        StringBuilder sb = new StringBuilder("selected slot " + (player.getInventory().getSelectedSlot() + 1) + " | ");
+        for (int slot = 0; slot < net.minecraft.world.entity.player.Inventory.INVENTORY_SIZE; slot++) {
+            net.minecraft.world.item.ItemStack stack = player.getInventory().getItem(slot);
+            if (!stack.isEmpty()) {
+                sb.append(slot + 1).append(':').append(stack.getCount()).append(' ')
+                        .append(net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem()).getPath()).append(", ");
+            }
+        }
+        return sb.substring(0, sb.length() - 2);
+    }
+
     private static void removeOld(Path dir) throws IOException {
         try (Stream<Path> files = Files.list(dir)) {
             List<Path> logs = files.filter(p -> p.getFileName().toString().startsWith("build-"))

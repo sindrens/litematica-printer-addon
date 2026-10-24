@@ -26,11 +26,20 @@ Litematica Printer does the placing; the add-on builds whole schematics in survi
 ## Build log
 
 Every auto build writes its full log to `.minecraft/logs/printer_addon/build-<date>_<time>.log` (the last 20
-are kept; `J`+`B` → "Open build logs folder"). It has every step and message (what went wrong, why it waits,
-wrong blocks, buying), every flight (from where to where, how long it took, how many blocks were in reach on
-arrival), a snapshot every 5 seconds (position, layer, blocks left, blocks placed in those 5 seconds, what it's
-doing, how busy the printer is and why not), and once a minute how many milliseconds each part of the add-on
-took.
+are kept; `J`+`B` → "Open build logs folder"). Send it when something goes wrong. Lines by kind:
+
+| Kind | What |
+|---|---|
+| `START`, `SETTINGS`, `INVENTORY` | Versions, every setting (add-on and printer), reach, ping, storage, the whole inventory (also once a minute) |
+| `TRY` | Every click of the printer: the spot, what's there, what the schematic wants, the item in hand, the distance, where the player is |
+| `PLACED`, `WRONG` | Every block that appeared, right or wrong (and what it should have been) |
+| `SKIP`, `GIVEUP`, `IGNORED` | Every block left for later, with the reason; at the end the full list of what wasn't placed and why |
+| `CONFLICT` | Blocks of the player's own buildings where the schematic wants something else: left alone, never broken |
+| `MOVE`, `STATE`, `PLAN` | Every flight (from, to, how long, blocks in reach on arrival), every change of what the player does, the spots planned per area |
+| `TURNS` | Every second: what the printer's turns went to (placed, paused and why, nothing in reach...) and where the player is |
+| `SCAN`, `LAYER`, `SNAP` | What's left to do, what waits for items, what isn't loaded; every 5 s a summary |
+| `LEARN`, `PERF` | What it learned about the reach on this server; how many ms each part of the add-on took |
+| `step`, `detail`, `info`, `WARN` | Everything else it does or says |
 
 ## Install
 

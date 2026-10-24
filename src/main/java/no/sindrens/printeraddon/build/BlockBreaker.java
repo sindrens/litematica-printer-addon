@@ -181,7 +181,8 @@ public class BlockBreaker {
     private static boolean shouldBreak(BlockCheck.Result result, Mode mode, BlockPos pos) {
         return switch (mode) {
             // A container the printer put in the wrong spot during this build may be broken too
-            case WRONG -> result.needsBreaking()
+            case WRONG -> (result.needsBreaking() && !AutoBuild.INSTANCE.isConflict(pos, result,
+                    net.minecraft.client.Minecraft.getInstance().level.getBlockState(pos)))
                     || (result == BlockCheck.Result.PROTECTED && AutoBuild.INSTANCE.placedDuringBuild(pos));
             case EXTRA -> result == BlockCheck.Result.EXTRA;
         };

@@ -53,6 +53,17 @@ public class AutoBuild {
         Minecraft mc = Minecraft.getInstance();
         if (mc.level != null) {
             recentlyTried.put(pos.immutable(), clientTicks);
+            triedDuringBuild.add(pos.immutable());
+            if (BuildLog.isOpen()) {
+                fi.dy.masa.litematica.world.WorldSchematic schematic = SchematicHelper.world();
+                BuildLog.line("TRY", String.format("%s: is %s, wants %s | in hand %s | %.2f from the eye | player at %.1f %.1f %.1f",
+                        pos.toShortString(), shortState(mc.level.getBlockState(pos)),
+                        schematic != null ? shortState(schematic.getBlockState(pos)) : "?",
+                        mc.player.getMainHandItem().isEmpty() ? "nothing" : mc.player.getMainHandItem().getCount() + " "
+                                + net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(mc.player.getMainHandItem().getItem()).getPath(),
+                        Math.sqrt(mc.player.getEyePosition().distanceToSqr(net.minecraft.world.phys.Vec3.atCenterOf(pos))),
+                        mc.player.getX(), mc.player.getY(), mc.player.getZ()));
+            }
             speed.attempted();
             // The same click again and again with nothing changing (the server refuses it): leave that block for a
             // while instead of standing there; the player moves on and it's tried again later, from elsewhere
@@ -66,6 +77,11 @@ public class AutoBuild {
                 Mover.missedAt(Math.sqrt(mc.player.getEyePosition().distanceToSqr(net.minecraft.world.phys.Vec3.atCenterOf(pos))));
                 PrinterAddon.debug("The printer tried {} {} times and nothing changed (is {}): leaving it for 30 s",
                         pos.toShortString(), MAX_TRIES, now.getBlock().getName().getString());
+                fi.dy.masa.litematica.world.WorldSchematic schematic = SchematicHelper.world();
+                if (schematic != null) {
+                    BuildLog.line("GIVEUP", pos.toShortString() + " for 30 s, clicked " + MAX_TRIES + " times without a change | "
+                            + Diagnose.explain(mc, schematic, pos));
+                }
             } else {
                 triesAt.put(pos.immutable(), new Tries(now, tries.count() + 1, tries.since()));
             }
@@ -390,6 +406,12 @@ public class AutoBuild {
                         pos.set(x, y, z);
                         BlockCheck.Result result = BlockCheck.check(mc.level, schematic, pos);
                         net.minecraft.world.level.block.state.BlockState target = schematic.getBlockState(pos);
+                        if (!target.isAir()) {
+                            INSTANCE.schematicBlocks.add(target.getBlock());
+                        }
+                        if (result.needsBreaking() && INSTANCE.isConflict(pos, result, mc.level.getBlockState(pos))) {
+                            continue;
+                        }
                         net.minecraft.world.item.Item item = null;
                         if (result == BlockCheck.Result.MISSING || result.needsBreaking()) {
                             net.minecraft.world.item.ItemStack stack =
@@ -435,6 +457,40 @@ public class AutoBuild {
         if (running) {
             emptyDuringBuild.add(pos.immutable());
         }
+    }
+
+    /** A block state in short: "hopper[facing=down,enabled=true]" without "minecraft:". */
+    public static String shortState(net.minecraft.world.level.block.state.BlockState state) {
+        return state.toString().replace("Block{minecraft:", "").replace("}", "");
+    }
+
+    /** Every kind of block the schematic has (filled while the whole schematic is read, see needsAt). */
+    public final java.util.Set<net.minecraft.world.level.block.Block> schematicBlocks = new java.util.HashSet<>();
+    /** Spots the printer clicked during this build. */
+    private final java.util.Set<net.minecraft.core.BlockPos> triedDuringBuild = new java.util.HashSet<>();
+    /** Schematic conflicts found (logged once each). */
+    public final java.util.Set<net.minecraft.core.BlockPos> conflicts = new java.util.HashSet<>();
+
+    /**
+     * A block that was already in the world, isn't one the schematic uses and that the build didn't touch (the
+     * player's own building standing where the schematic wants something else): never broken, never counted as
+     * unfinished, logged once as a schematic conflict. Wrong blocks of the schematic's own kinds (a printer mistake:
+     * mud where dirt goes, a hopper facing the wrong way) and anything placed during the build are broken as before.
+     */
+    public boolean isConflict(net.minecraft.core.BlockPos pos, BlockCheck.Result result,
+                              net.minecraft.world.level.block.state.BlockState current) {
+        if (!running || result != BlockCheck.Result.WRONG_BLOCK || schematicBlocks.isEmpty()) {
+            return false;
+        }
+        if (emptyDuringBuild.contains(pos) || triedDuringBuild.contains(pos) || schematicBlocks.contains(current.getBlock())) {
+            return false;
+        }
+        if (conflicts.add(pos.immutable())) {
+            fi.dy.masa.litematica.world.WorldSchematic schematic = SchematicHelper.world();
+            BuildLog.line("CONFLICT", pos.toShortString() + ": the world has " + current + ", the schematic wants "
+                    + (schematic != null ? schematic.getBlockState(pos) : "?") + " (left alone, not counted)");
+        }
+        return true;
     }
 
     /** True for a protected (container) block that wasn't there when the build began. */
@@ -594,6 +650,15 @@ public class AutoBuild {
                 + " | printer interval " + me.aleksilassila.litematica.printer.config.Configs.PRINTING_INTERVAL.getIntegerValue()
                 + ", range " + me.aleksilassila.litematica.printer.config.Configs.PRINTING_RANGE.getDoubleValue()
                 + " | movement " + Configs.Movement.mode() + " | fps " + mc.getFps());
+        BuildLog.line("SETTINGS", BuildLog.settings());
+        BuildLog.line("SETTINGS", "printer: interval " + me.aleksilassila.litematica.printer.config.Configs.PRINTING_INTERVAL.getIntegerValue()
+                + ", range " + me.aleksilassila.litematica.printer.config.Configs.PRINTING_RANGE.getDoubleValue()
+                + ", rotate " + me.aleksilassila.litematica.printer.config.Configs.ROTATE.getBooleanValue()
+                + ", interact blocks " + me.aleksilassila.litematica.printer.config.Configs.INTERACT_BLOCKS.getBooleanValue()
+                + ", print in air " + me.aleksilassila.litematica.printer.config.Configs.PRINT_IN_AIR.getBooleanValue()
+                + " | player reach " + mc.player.blockInteractionRange() + " | ping " + ServerLag.pingTicks(mc) + " ticks"
+                + " | linked chests " + ChestLinks.list(mc).size() + " | vaults " + ChestFetcher.vaults());
+        BuildLog.line("INVENTORY", BuildLog.inventory(mc.player));
         int renderDistance = Configs.Generic.BUILD_RENDER_DISTANCE.getIntegerValue();
         if (renderDistance > 0 && mc.options.renderDistance().get() != renderDistance) {
             savedRenderDistance = mc.options.renderDistance().get();
@@ -601,6 +666,9 @@ public class AutoBuild {
         }
         safety.reset();
         emptyDuringBuild.clear();
+        triedDuringBuild.clear();
+        conflicts.clear();
+        schematicBlocks.clear();
         deferred.clear();
         couldNotPlace.clear();
         shoppingList.clear();
@@ -640,6 +708,9 @@ public class AutoBuild {
         entities.reset();
         breaker.setForced(airPlace.misplaced());
 
+        // Read the whole schematic once now: what it needs, and which kinds of blocks it has (to tell the player's
+        // own buildings from wrong blocks before anything is broken)
+        updateMissingWhole(mc, SchematicHelper.world());
         if (Configs.Layers.AUTO_LAYER.getBooleanValue() && !layers.start(mc)) {
             stop(mc, null);
             return;
@@ -675,6 +746,7 @@ public class AutoBuild {
         }
         if (wasRunning) {
             BuildLog.line("END", (reason != null ? "stopped: " + reason : "stopped") + " | " + stats.total());
+            logIgnored(mc);
             BuildLog.line("PERF", Perf.report());
             PrinterBridge.setPrinting(printerWasOn);
             PrinterBridge.setAirPlace(airPlaceWasOn);
@@ -687,6 +759,36 @@ public class AutoBuild {
             }
         }
         BuildLog.close();
+    }
+
+    /** At the end of the build: every block that was left out, and why. */
+    private void logIgnored(Minecraft mc) {
+        fi.dy.masa.litematica.world.WorldSchematic schematic = SchematicHelper.world();
+        if (schematic == null || mc.level == null || mc.player == null) {
+            return;
+        }
+        java.util.Set<net.minecraft.core.BlockPos> all = new java.util.LinkedHashSet<>();
+        all.addAll(givenUp.keySet());
+        all.addAll(couldNotPlace);
+        all.addAll(mover.skippedNow());
+        BuildLog.line("IGNORED", all.size() + " blocks left for later or not placeable, " + conflicts.size()
+                + " schematic conflicts (the world has another block that isn't the build's)");
+        int n = 0;
+        for (net.minecraft.core.BlockPos pos : all) {
+            if (n++ >= 2000) {
+                BuildLog.line("IGNORED", "... and " + (all.size() - 2000) + " more");
+                break;
+            }
+            BuildLog.line("IGNORED", Diagnose.explain(mc, schematic, pos));
+        }
+        n = 0;
+        for (net.minecraft.core.BlockPos pos : conflicts) {
+            if (n++ >= 2000) {
+                break;
+            }
+            BuildLog.line("CONFLICT", pos.toShortString() + ": is " + shortState(mc.level.getBlockState(pos)) + ", schematic wants "
+                    + shortState(schematic.getBlockState(pos)));
+        }
     }
 
     public void stopEverything(Minecraft mc) {
@@ -761,6 +863,9 @@ public class AutoBuild {
             Perf.tick();
             if (++logTicks % 100 == 0) {
                 snapshot(mc);
+            }
+            if (logTicks % 1200 == 0 && mc.player != null) {
+                BuildLog.line("INVENTORY", BuildLog.inventory(mc.player));
             }
         }
     }

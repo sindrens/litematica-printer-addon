@@ -96,7 +96,31 @@ public class BuildStats {
     /** Paused turns of the last minute by reason. */
     private final java.util.Map<String, Integer> minutePauses = new java.util.TreeMap<>();
 
+    private final int[] secondTurns = new int[Turn.values().length];
+    private long secondStart = -1;
+
     public void printerTurn(Turn turn) {
+        // Once a second in the build log: what the printer's turns went to
+        secondTurns[turn.ordinal()]++;
+        if (secondStart < 0) {
+            secondStart = AutoBuild.clientTicks;
+        }
+        if (AutoBuild.clientTicks - secondStart >= 20) {
+            StringBuilder sb = new StringBuilder();
+            for (Turn t : Turn.values()) {
+                if (secondTurns[t.ordinal()] > 0) {
+                    sb.append(t.name().toLowerCase().replace('_', ' ')).append(' ').append(secondTurns[t.ordinal()]).append(", ");
+                }
+            }
+            if (secondTurns[Turn.PAUSED.ordinal()] > 0) {
+                sb.append("last pause: ").append(AutoBuild.INSTANCE.pauseReason).append(", ");
+            }
+            net.minecraft.client.player.LocalPlayer player = net.minecraft.client.Minecraft.getInstance().player;
+            BuildLog.line("TURNS", (sb.length() > 2 ? sb.substring(0, sb.length() - 2) : "-")
+                    + (player != null ? String.format(" | at %.1f %.1f %.1f", player.getX(), player.getY(), player.getZ()) : ""));
+            java.util.Arrays.fill(secondTurns, 0);
+            secondStart = AutoBuild.clientTicks;
+        }
         if (turn == Turn.PAUSED) {
             minutePauses.merge(AutoBuild.INSTANCE.pauseReason, 1, Integer::sum);
         }
