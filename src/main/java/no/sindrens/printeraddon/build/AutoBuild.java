@@ -203,6 +203,16 @@ public class AutoBuild {
      * What the printer gets to see: during auto build only blocks that are ready, full blocks first, plus deferred
      * blocks within reach that have become ready. During air place only the one block it's meant for.
      */
+    private boolean nextToUnconfirmed(net.minecraft.core.BlockPos pos, long now, long confirm) {
+        for (net.minecraft.core.Direction direction : net.minecraft.core.Direction.values()) {
+            Long at = recentlyTried.get(pos.relative(direction));
+            if (at != null && now - at < confirm) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** Of the printer's last offer: unfinished blocks in its range, and of those held back as just tried. */
     public int lastUnfinishedCount;
     public int lastHeldCount;
@@ -246,14 +256,22 @@ public class AutoBuild {
         // the same spot is clicked twice: dirt, then tilling)
         long holdBack = Math.max(8, 2L * ServerLag.pingTicks(mc) + 6);
         recentlyTried.values().removeIf(at -> now - at > holdBack);
+        // Nor next to a block clicked a moment ago: the printer may click against that neighbour, and if the server
+        // doesn't have it yet, the server puts the new block INTO the neighbour's spot (dirt where mud should go)
+        long confirm = Math.max(3, 2L * ServerLag.pingTicks(mc) + 2);
         int unfinished = 0;
         int held = 0;
         for (net.minecraft.core.BlockPos pos : all) {
-            if (schematic.getBlockState(pos).isAir() || BlockCheck.check(mc.level, schematic, pos) == BlockCheck.Result.OK) {
+            if (schematic.getBlockState(pos).isAir()) {
+                continue;
+            }
+            BlockCheck.Result result = BlockCheck.check(mc.level, schematic, pos);
+            if (result == BlockCheck.Result.OK) {
                 continue;
             }
             unfinished++;
-            if (recentlyTried.containsKey(pos) || givenUp(pos)) {
+            if (recentlyTried.containsKey(pos) || givenUp(pos)
+                    || (result == BlockCheck.Result.MISSING && nextToUnconfirmed(pos, now, confirm))) {
                 held++;
                 continue;
             }
@@ -438,8 +456,8 @@ public class AutoBuild {
         EntityPlacer.missing(mc, schematic).forEach((item, count) -> needs.merge(item, count, Integer::sum));
         // Farmland is dirt tilled with a hoe
         if (needs.containsKey(net.minecraft.world.item.Items.DIRT)
-                && !mc.player.getInventory().contains(net.minecraft.tags.ItemTags.HOES)) {
-            needs.put(net.minecraft.world.item.Items.DIAMOND_HOE, 1);
+                && !StateRules.hasUsableHoe(mc.player.getInventory())) {
+            needs.put(net.minecraft.world.item.Items.DIAMOND_HOE, mc.player.getInventory().countItem(net.minecraft.world.item.Items.DIAMOND_HOE) + 1);
         }
         neededWhole.clear();
         neededWhole.putAll(needs);
@@ -771,6 +789,8 @@ public class AutoBuild {
         all.addAll(givenUp.keySet());
         all.addAll(couldNotPlace);
         all.addAll(mover.skippedNow());
+        // Only what's still not right
+        all.removeIf(pos -> BlockCheck.check(mc.level, schematic, pos) == BlockCheck.Result.OK);
         BuildLog.line("IGNORED", all.size() + " blocks left for later or not placeable, " + conflicts.size()
                 + " schematic conflicts (the world has another block that isn't the build's)");
         int n = 0;

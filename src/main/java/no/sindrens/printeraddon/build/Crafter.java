@@ -57,6 +57,9 @@ public class Crafter {
     private RecipeDisplayEntry recipe;
     private boolean needsTable;
     @Nullable
+    private ManualRecipe manual;
+    private int findTries;
+    @Nullable
     private BlockPos table;
     private boolean placedTable;
     private int wait;
@@ -93,6 +96,7 @@ public class Crafter {
                 return false;
             }
             phase = Phase.FIND;
+            findTries = 0;
             crafted = 0;
             startCount = count(player, job.item());
         }
@@ -105,8 +109,28 @@ public class Crafter {
         switch (phase) {
             case FIND -> {
                 recipe = findRecipe(mc, job.item());
+                manual = null;
                 if (recipe == null) {
-                    fail(mc, "no recipe for it in your recipe book, or the ingredients aren't in the inventory");
+                    // Not in the recipe book (or not craftable from what's here yet): by hand, from the known recipe
+                    manual = ManualRecipe.of(job.item());
+                    if (manual != null && manual.canCraft(player.getInventory())) {
+                        PrinterAddon.debug("No recipe book entry for {}: crafting it by hand", job.item());
+                        needsTable = manual.width() > 2 || manual.height() > 2;
+                        if (!needsTable) {
+                            phase = Phase.FILL;
+                            return true;
+                        }
+                        table = findTable(mc);
+                        placedTable = false;
+                        phase = table != null ? Phase.OPEN_TABLE : Phase.PLACE_TABLE;
+                        return true;
+                    }
+                    // The recipe book or the inventory may still be updating after a purchase: a few more tries
+                    if (findTries++ < 3) {
+                        wait = 20 + 2 * ServerLag.pingTicks(mc);
+                        return true;
+                    }
+                    fail(mc, manual == null ? "no recipe for it in your recipe book" : "the ingredients aren't in the inventory");
                     return true;
                 }
                 needsTable = !fitsInInventoryGrid(recipe.display());
@@ -159,6 +183,17 @@ public class Crafter {
                 AbstractContainerMenu menu = needsTable ? player.containerMenu : player.inventoryMenu;
                 if (needsTable && !(menu instanceof CraftingMenu)) {
                     fail(mc, "the crafting table closed");
+                    return true;
+                }
+                if (manual != null) {
+                    // By hand: one set into the grid, the result is taken, again until there are enough
+                    if (!manual.fill(mc, player, menu, needsTable)) {
+                        fail(mc, "the ingredients ran out");
+                        return true;
+                    }
+                    wait = WAIT + ServerLag.pingTicks(mc);
+                    waited = 0;
+                    phase = Phase.TAKE;
                     return true;
                 }
                 // Only as many sets as still needed: each click on the recipe adds one more set to the grid

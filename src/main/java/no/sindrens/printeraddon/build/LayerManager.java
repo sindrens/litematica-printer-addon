@@ -117,7 +117,7 @@ public class LayerManager {
     /** True when the current layer hasn't changed for this many ticks. */
     /** Check the layer again within a few ticks (e.g. after water went in). */
     public void checkSoon() {
-        ticksUntilCheck = Math.min(ticksUntilCheck, 5);
+        ticksUntilCheck = Math.min(ticksUntilCheck, 1);
     }
 
     /**
@@ -223,8 +223,8 @@ public class LayerManager {
         BuildLog.line("LAYER", describeLayers() + ": " + remaining + " unfinished (" + findings.waiting.size()
                 + " waiting for something above, " + findings.water + " water still to go in) | conflicts "
                 + AutoBuild.INSTANCE.conflicts.size() + " | still needs " + findings.needs);
-        if (findings.needsHoe && mc.player != null && !mc.player.getInventory().contains(net.minecraft.tags.ItemTags.HOES)) {
-            findings.needs.put(net.minecraft.world.item.Items.DIAMOND_HOE, 1);
+        if (findings.needsHoe && mc.player != null && !StateRules.hasUsableHoe(mc.player.getInventory())) {
+            findings.needs.put(net.minecraft.world.item.Items.DIAMOND_HOE, mc.player.getInventory().countItem(net.minecraft.world.item.Items.DIAMOND_HOE) + 1);
         }
         updateShoppingList(mc, findings.needs);
         layerNeeds = findings.needs;

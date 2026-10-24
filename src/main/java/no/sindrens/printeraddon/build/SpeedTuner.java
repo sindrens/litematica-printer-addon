@@ -29,6 +29,9 @@ public class SpeedTuner {
     private int interval = -1;
     /** The fastest interval that hasn't placed a wrong block in this build. */
     private int fastestSafe = 1;
+    /** Right blocks since the last wrong one; every this many lifts the limits a wrong block set by one tick. */
+    private int goodSinceMistake;
+    private static final int FORGIVE_AFTER = 300;
     private int goodInARow;
     private int good;
     private int bad;
@@ -153,7 +156,7 @@ public class SpeedTuner {
     }
 
     /** How far above the remembered interval a new build starts. */
-    private static final int START_ABOVE_REMEMBERED = 2;
+    private static final int START_ABOVE_REMEMBERED = 0;
 
     private static java.nio.file.Path file() {
         return fi.dy.masa.malilib.util.FileUtils.getConfigDirectory().resolve(PrinterAddon.MOD_ID).resolve("speed.txt");
@@ -253,12 +256,14 @@ public class SpeedTuner {
     private void slowDown(Minecraft mc, String why) {
         goodInARow = 0;
         calmUntil = tick + CALM_AFTER_MISTAKE;
-        // Never this fast again on this layer
+        // Not this fast again for a while (see the decay in judge)
         fastestSafe = Math.max(fastestSafe, interval() + 1);
+        goodSinceMistake = 0;
         int slower = Math.min(Math.max(Configs.Speed.printerInterval(), PrinterBridge.userInterval()), interval() + 2);
         if (slower != interval) {
             interval = slower;
-            Chat.warn("Speed: printer interval " + interval + " (" + why + "; it won't go below " + fastestSafe + " again on this layer)");
+            Chat.warn("Speed: printer interval " + interval + " (" + why + "; not below " + fastestSafe + " for the next "
+                    + FORGIVE_AFTER + " blocks)");
         }
     }
 
@@ -267,6 +272,18 @@ public class SpeedTuner {
         switch (result) {
             case OK, BUCKET, PRINTER_FIXES -> {
                 good++;
+                // A wrong block now and then isn't always the speed (a block placed against one the server didn't
+                // have yet): after enough right blocks, the limit it set is lifted step by step
+                if (++goodSinceMistake >= FORGIVE_AFTER) {
+                    goodSinceMistake = 0;
+                    if (fastestSafe > 1) {
+                        fastestSafe--;
+                        BuildLog.line("SPEED", FORGIVE_AFTER + " right blocks since the last wrong one: may go down to interval "
+                                + Math.max(fastestSafe, Configs.Speed.AUTO_SPEED_MIN_INTERVAL.getIntegerValue()) + " again");
+                    }
+                    itemFloors.replaceAll((item, floor) -> Math.max(1, floor - 1));
+                    itemFloors.values().removeIf(floor -> floor <= 1);
+                }
                 BuildLog.line("PLACED", pos.toShortString() + " " + AutoBuild.shortState(mc.level.getBlockState(pos))
                         + (result == BlockCheck.Result.OK ? "" : " (" + result + " still to do)") + " | interval " + interval());
                 int min = Math.max(Math.max(fastestSafe, floorForLayer()), Configs.Speed.AUTO_SPEED_MIN_INTERVAL.getIntegerValue());

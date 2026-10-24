@@ -48,7 +48,7 @@ public class InventoryCleaner {
         if (layerNeeds.containsKey(Items.PUMPKIN_SEEDS)) {
             keep.add(Items.PUMPKIN);
         }
-        if (layerNeeds.containsKey(Items.DIAMOND_HOE) || !inventory.contains(net.minecraft.tags.ItemTags.HOES)) {
+        if (layerNeeds.containsKey(Items.DIAMOND_HOE) || !StateRules.hasUsableHoe(inventory)) {
             keep.addAll(Set.of(Items.DIAMOND, Items.DIAMOND_BLOCK, Items.STICK, Items.OAK_PLANKS, Items.OAK_LOG));
         }
         if (layerNeeds.containsKey(Items.RAIL) || layerNeeds.containsKey(Items.POWERED_RAIL)) {

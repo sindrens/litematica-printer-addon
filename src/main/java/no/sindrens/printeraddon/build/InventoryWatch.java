@@ -31,6 +31,8 @@ public class InventoryWatch {
         settleTicks = settleTicksFor(mc);
         Inventory inventory = mc.player.getInventory();
         StringBuilder changes = null;
+        int changed = 0;
+        boolean hand = false;
         for (int slot = 0; slot < last.length; slot++) {
             ItemStack stack = inventory.getItem(slot);
             Item now = stack.isEmpty() ? null : stack.getItem();
@@ -41,16 +43,28 @@ public class InventoryWatch {
                     changes.append(", ");
                 }
                 changes.append(slot).append(": ").append(name(last[slot])).append(" -> ").append(name(now));
+                // A water bucket that's full again (or empty) changes nothing the printer clicks with
+                boolean bucket = isBucket(last[slot]) && isBucket(now);
+                if (!bucket) {
+                    changed++;
+                    hand |= slot == inventory.getSelectedSlot();
+                }
                 last[slot] = now;
             }
         }
-        if (changes != null) {
+        // Only what can make the server's hand differ: the item in hand changed, or items were swapped between
+        // slots (a stack used up, items bought or picked up elsewhere in the inventory don't count)
+        if (changes != null && (hand || changed >= 2)) {
             changedAt = AutoBuild.clientTicks;
             lastChange = changes.toString();
             if (AutoBuild.INSTANCE.isRunning()) {
                 PrinterAddon.trace("Inventory slots changed ({}), waiting {} ticks before placing", lastChange, settleTicks);
             }
         }
+    }
+
+    private static boolean isBucket(@javax.annotation.Nullable Item item) {
+        return item == net.minecraft.world.item.Items.BUCKET || item == net.minecraft.world.item.Items.WATER_BUCKET;
     }
 
     /** The add-on itself just moved an item: same wait, without waiting a tick to notice. */

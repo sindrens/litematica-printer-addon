@@ -319,7 +319,9 @@ public class Mover {
                 }
             }
         }
-        if (inReach.isEmpty() && unfinishedInReach && state == State.WORKING
+        // Also right after arriving: the water just put in lets the blocks around it go in a moment later (the
+        // log showed it flying on to the next leaf every time, leaving the mud and dirt there for a second visit)
+        if (inReach.isEmpty() && unfinishedInReach && (state == State.WORKING || state == State.IDLE)
                 && tick - lastWorkTick < 2L * AutoBuild.INSTANCE.speed.interval() + GRACE_EXTRA_TICKS) {
             if (flying(player)) {
                 player.setDeltaMovement(Vec3.ZERO);
@@ -332,7 +334,8 @@ public class Mover {
         if (!inReach.isEmpty() && inReach.size() <= KEEP_MOVING_LEFT && Configs.Movement.KEEP_MOVING.getBooleanValue()
                 && mode.canFly() && flying(player) && tick - lastEarlyLeave > 10) {
             BlockPos next = bestSpot(mc, player, schematic, reach);
-            if (next != null && hoverPoint(mc, next).distanceToSqr(player.position()) > 4) {
+            // Only to a spot at least 3 blocks away (hops of 1-2 blocks were most of the flights)
+            if (next != null && hoverPoint(mc, next).distanceToSqr(player.position()) > 9) {
                 lastEarlyLeave = tick;
                 target = next;
                 replans = 0;
@@ -399,7 +402,7 @@ public class Mover {
         }
         // Already there (the same spot again): no flight, just keep placing here
         if (state != State.WALKING && state != State.FLYING && mode.canFly() && flying(player)
-                && hoverPoint(mc, nearest).distanceToSqr(player.position()) < 0.6 * 0.6) {
+                && hoverPoint(mc, nearest).distanceToSqr(player.position()) < 1.6 * 1.6) {
             target = nearest;
             state = State.WORKING;
             return;
@@ -1273,6 +1276,8 @@ public class Mover {
     }
 
     private void logArrival(Minecraft mc, LocalPlayer player) {
+        // Arriving counts as work here: the grace for blocks that become placeable a moment later starts now
+        lastWorkTick = tick;
         if (moveStartTick < 0 || !BuildLog.isOpen()) {
             moveStartTick = -1;
             return;
