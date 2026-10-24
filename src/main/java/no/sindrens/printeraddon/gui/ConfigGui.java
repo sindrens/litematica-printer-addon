@@ -104,6 +104,16 @@ public class ConfigGui extends GuiConfigsBase {
             AutoBuild.INSTANCE.stopEverything(mc);
             no.sindrens.printeraddon.shop.ShopScanner.INSTANCE.start(mc);
         });
+        y += 24;
+        // The full log of each build (every step, every flight, a snapshot every 5 s)
+        this.addButton(new ButtonGeneric(x, y, 200, 20, "Open build logs folder"), (button, mouse) -> {
+            java.nio.file.Path folder = no.sindrens.printeraddon.build.BuildLog.folder();
+            try {
+                java.nio.file.Files.createDirectories(folder);
+            } catch (java.io.IOException ignored) {
+            }
+            net.minecraft.util.Util.getPlatform().openPath(folder);
+        });
     }
 
     @Override

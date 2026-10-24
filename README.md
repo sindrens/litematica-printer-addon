@@ -23,6 +23,15 @@ Litematica Printer does the placing; the add-on builds whole schematics in survi
   why not, what's missing).
 - Safety: stops when you take damage or another player comes close, and never uses a nearly broken tool.
 
+## Build log
+
+Every auto build writes its full log to `.minecraft/logs/printer_addon/build-<date>_<time>.log` (the last 20
+are kept; `J`+`B` → "Open build logs folder"). It has every step and message (what went wrong, why it waits,
+wrong blocks, buying), every flight (from where to where, how long it took, how many blocks were in reach on
+arrival), a snapshot every 5 seconds (position, layer, blocks left, blocks placed in those 5 seconds, what it's
+doing, how busy the printer is and why not), and once a minute how many milliseconds each part of the add-on
+took.
+
 ## Install
 
 Put these in `.minecraft/mods` (or the Modrinth profile's `mods` folder), together with this mod's jar:
