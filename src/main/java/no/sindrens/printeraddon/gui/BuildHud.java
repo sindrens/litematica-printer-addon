@@ -39,6 +39,33 @@ public final class BuildHud {
         }
 
         long started = no.sindrens.printeraddon.build.Perf.start();
+        // The text is put together twice a second, not every frame
+        if (AutoBuild.clientTicks - builtAt >= 10 || AutoBuild.clientTicks < builtAt) {
+            builtAt = AutoBuild.clientTicks;
+            build(build);
+        }
+        List<String> lines = cachedLines;
+        List<Integer> colors = cachedColors;
+        Font font = mc.font;
+        int width = 0;
+        for (String line : lines) {
+            width = Math.max(width, font.width(line));
+        }
+        int x = 4;
+        int y = 4;
+        int lineHeight = font.lineHeight + 2;
+        graphics.fill(x - 2, y - 2, x + width + 2, y + lines.size() * lineHeight, BACKGROUND);
+        for (int i = 0; i < lines.size(); i++) {
+            graphics.text(font, lines.get(i), x, y + i * lineHeight, colors.get(i));
+        }
+        no.sindrens.printeraddon.build.Perf.end("on-screen display", started);
+    }
+
+    private static long builtAt = Long.MIN_VALUE / 2;
+    private static List<String> cachedLines = new ArrayList<>();
+    private static List<Integer> cachedColors = new ArrayList<>();
+
+    private static void build(AutoBuild build) {
         List<String> lines = new ArrayList<>();
         List<Integer> colors = new ArrayList<>();
         add(lines, colors, "Printer Addon - " + build.layers.status(), TEXT);
@@ -65,20 +92,8 @@ public final class BuildHud {
             }
             add(lines, colors, sb.toString().replaceAll(", $", ""), WARN);
         }
-
-        Font font = mc.font;
-        int width = 0;
-        for (String line : lines) {
-            width = Math.max(width, font.width(line));
-        }
-        int x = 4;
-        int y = 4;
-        int lineHeight = font.lineHeight + 2;
-        graphics.fill(x - 2, y - 2, x + width + 2, y + lines.size() * lineHeight, BACKGROUND);
-        for (int i = 0; i < lines.size(); i++) {
-            graphics.text(font, lines.get(i), x, y + i * lineHeight, colors.get(i));
-        }
-        no.sindrens.printeraddon.build.Perf.end("on-screen display", started);
+        cachedLines = lines;
+        cachedColors = colors;
     }
 
     private static void add(List<String> lines, List<Integer> colors, String text, int color) {

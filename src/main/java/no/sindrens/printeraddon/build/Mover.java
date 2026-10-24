@@ -29,7 +29,7 @@ import java.util.Set;
  * unfinished block.
  */
 public class Mover {
-    private static final int SCAN_INTERVAL = 10;
+    private static final int SCAN_INTERVAL = 20;
     /** Blocks that couldn't be done are skipped for this long before trying again. */
     private static final int SKIP_TICKS = 20 * 30;
     private static final int MAX_PATH_NODES = 6000;
@@ -51,6 +51,7 @@ public class Mover {
     private final List<BlockPos> unloaded = new ArrayList<>();
     /** Areas (see areaKey) with blocks that aren't loaded yet, with one such block each. */
     private final Map<Long, BlockPos> unloadedAreas = new HashMap<>();
+    private long lastNothingDoable = -100;
     /** Unloaded areas that stayed unloaded with the player right there (never flown to again). */
     private final java.util.Set<Long> unloadable = new java.util.HashSet<>();
     private long nearUnloadedSince = -1;
@@ -476,6 +477,10 @@ public class Mover {
         for (BlockPos pos : sorted) {
             workByArea.computeIfAbsent(areaKey(pos), k -> new ArrayList<>()).add(pos);
         }
+        if (area == null && tick - lastNothingDoable < 20) {
+            // Searched every area a moment ago and nothing could be placed: don't search the whole layer every tick
+            return null;
+        }
         if (area == null || !anyDoable(mc, schematic, workByArea.get(area))) {
             java.util.Set<Long> keys = new java.util.HashSet<>(workByArea.keySet());
             keys.addAll(unloadedAreas.keySet());
@@ -509,6 +514,7 @@ public class Mover {
                 }
             }
             if (next == null) {
+                lastNothingDoable = tick;
                 if (tick - lastNothingDoableReport > 20 * 30 && !sorted.isEmpty()) {
                     lastNothingDoableReport = tick;
                     PrinterAddon.debug("Nothing of the {} unfinished blocks can be placed now; nearest: {}",

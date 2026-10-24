@@ -172,7 +172,8 @@ public class LayerManager {
         if (--ticksUntilCheck > 0) {
             return true;
         }
-        int interval = Configs.Layers.LAYER_CHECK_INTERVAL.getIntegerValue();
+        // At least every 2 seconds: a check reads the whole layer
+        int interval = Math.max(40, Configs.Layers.LAYER_CHECK_INTERVAL.getIntegerValue());
         ticksUntilCheck = interval;
 
         WorldSchematic schematic = SchematicHelper.world();

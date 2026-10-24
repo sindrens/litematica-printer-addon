@@ -113,8 +113,8 @@ public class Configs implements IConfigHandler {
         public static final ConfigBoolean AUTO_LAYER = new ConfigBoolean("autoLayer", true,
                 "While auto build is on, build one Y layer at a time from the bottom and go to the next layer when it's done.",
                 "Auto layer");
-        public static final ConfigInteger LAYER_CHECK_INTERVAL = new ConfigInteger("layerCheckIntervalTicks", 10, 1, 200,
-                "How often (in ticks) to check if the current layer is finished.",
+        public static final ConfigInteger LAYER_CHECK_INTERVAL = new ConfigInteger("layerCheckIntervalTicks", 40, 40, 200,
+                "How often (in ticks) to check if the current layer is finished (at least 40: a check reads the whole layer).",
                 "Layer check interval (ticks)");
         public static final ConfigInteger STUCK_REPORT_SECONDS = new ConfigInteger("stuckReportSeconds", 30, 5, 600,
                 "If the layer hasn't changed for this long, list in chat what is left and why.",

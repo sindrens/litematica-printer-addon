@@ -222,7 +222,8 @@ public class SpeedTuner {
             }
             BlockState now = mc.level.getBlockState(pos);
             BlockState before = seen.put(pos.immutable(), now);
-            if (before != null && (before.isAir() || before.canBeReplaced()) && !now.isAir() && !now.canBeReplaced()) {
+            // A block that appeared, or one that turned into another (dirt tilled to farmland counts as placed too)
+            if (before != null && before.getBlock() != now.getBlock() && !now.isAir() && !now.canBeReplaced()) {
                 appeared.put(pos.immutable(), tick);
                 appearedCount++;
             }

@@ -235,7 +235,7 @@ public class AutoBuild {
         if (statusTicks % 10 == 0) {
             Chat.actionBar(layers.status() + "  |  Next: " + next + "  |  " + doing());
         }
-        if (statusTicks % 100 == 1) {
+        if (statusTicks % 20 == 1) {
             updateMissingWhole(mc, schematic);
         }
         if (statusTicks % 40 == 0 && Configs.Generic.STATUS_FILE.getBooleanValue()) {
@@ -243,11 +243,47 @@ public class AutoBuild {
         }
     }
 
+    /** What the whole schematic still needs, per Y level: one level is read again per call (no lag spike). */
+    private final java.util.Map<Integer, java.util.Map<net.minecraft.world.item.Item, Integer>> wholeByY = new java.util.HashMap<>();
+    private int wholeNextY = Integer.MIN_VALUE;
+
     private void updateMissingWhole(Minecraft mc, fi.dy.masa.litematica.world.WorldSchematic schematic) {
+        java.util.List<SchematicHelper.Area> areas = SchematicHelper.areas();
+        int minY = areas.stream().mapToInt(SchematicHelper.Area::minY).min().orElse(0);
+        int maxY = areas.stream().mapToInt(SchematicHelper.Area::maxY).max().orElse(-1);
+        if (wholeByY.isEmpty()) {
+            // The first time all at once
+            for (int y = minY; y <= maxY; y++) {
+                wholeByY.put(y, needsAt(mc, schematic, areas, y));
+            }
+            wholeNextY = minY;
+        } else {
+            if (wholeNextY < minY || wholeNextY > maxY) {
+                wholeNextY = minY;
+            }
+            wholeByY.put(wholeNextY, needsAt(mc, schematic, areas, wholeNextY));
+            wholeNextY++;
+        }
         java.util.Map<net.minecraft.world.item.Item, Integer> needs = new java.util.LinkedHashMap<>();
+        wholeByY.values().forEach(level -> level.forEach((item, count) -> {
+            if (Fluids.isBucket(item)) {
+                needs.put(item, 1);
+            } else {
+                needs.merge(item, count, Integer::sum);
+            }
+        }));
+        publishWholeNeeds(mc, schematic, needs);
+    }
+
+    private static java.util.Map<net.minecraft.world.item.Item, Integer> needsAt(Minecraft mc,
+            fi.dy.masa.litematica.world.WorldSchematic schematic, java.util.List<SchematicHelper.Area> areas, int y) {
+        java.util.Map<net.minecraft.world.item.Item, Integer> needs = new java.util.HashMap<>();
         net.minecraft.core.BlockPos.MutableBlockPos pos = new net.minecraft.core.BlockPos.MutableBlockPos();
-        for (SchematicHelper.Area area : SchematicHelper.areas()) {
-            for (int y = area.minY(); y <= area.maxY(); y++) {
+        for (SchematicHelper.Area area : areas) {
+            if (y < area.minY() || y > area.maxY()) {
+                continue;
+            }
+            {
                 for (int x = area.minX(); x <= area.maxX(); x++) {
                     for (int z = area.minZ(); z <= area.maxZ(); z++) {
                         pos.set(x, y, z);
@@ -271,6 +307,11 @@ public class AutoBuild {
                 }
             }
         }
+        return needs;
+    }
+
+    private void publishWholeNeeds(Minecraft mc, fi.dy.masa.litematica.world.WorldSchematic schematic,
+                                   java.util.Map<net.minecraft.world.item.Item, Integer> needs) {
         EntityPlacer.missing(mc, schematic).forEach((item, count) -> needs.merge(item, count, Integer::sum));
         // Farmland is dirt tilled with a hoe
         if (needs.containsKey(net.minecraft.world.item.Items.DIRT)
@@ -458,6 +499,7 @@ public class AutoBuild {
         shoppingList.clear();
         missingWhole.clear();
         neededWhole.clear();
+        wholeByY.clear();
         couldntBuy.clear();
         buying = false;
         buyCooldown = 0;

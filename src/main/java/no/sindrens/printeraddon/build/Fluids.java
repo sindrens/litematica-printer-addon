@@ -56,6 +56,10 @@ public class Fluids {
         return pending != null;
     }
 
+    public static boolean isBucket(Item item) {
+        return item == Items.WATER_BUCKET || item == Items.LAVA_BUCKET || item == Items.POWDER_SNOW_BUCKET;
+    }
+
     /** The bucket a spot needs, or null if it needs none. */
     @Nullable
     public static Item bucketFor(BlockState target) {
