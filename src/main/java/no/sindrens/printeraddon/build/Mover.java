@@ -3384,7 +3384,11 @@ public class Mover {
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
 
         for (SchematicHelper.Area area : SchematicHelper.areas()) {
-            for (int y = area.minY(); y <= area.maxY(); y++) {
+            // Only the levels being built: a tall schematic was gone through whole every second (3.7 million spots
+            // of a 239 high cactus tower for its 2 levels: up to 105 ms, a stutter in the flight)
+            int yFrom = oneLayer ? Math.max(area.minY(), layers.getLayer()) : area.minY();
+            int yTo = oneLayer ? Math.min(area.maxY(), layers.getLayerTop()) : area.maxY();
+            for (int y = yFrom; y <= yTo; y++) {
                 for (int x = area.minX(); x <= area.maxX(); x++) {
                     for (int z = area.minZ(); z <= area.maxZ(); z++) {
                         pos.set(x, y, z);

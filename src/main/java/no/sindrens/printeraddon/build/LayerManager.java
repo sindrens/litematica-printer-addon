@@ -323,6 +323,44 @@ public class LayerManager {
         return active && ticksWithoutProgress >= ticks;
     }
 
+    /**
+     * Cactus of the layers being built that stand open on top: placed, air above, and the sand beside that space (that
+     * breaks them when they grow) not in yet. They grow while auto build is stopped and have to be broken one by one
+     * later. For the warning when it stops (see AutoBuild).
+     */
+    public int openCactus(Level level) {
+        WorldSchematic schematic = SchematicHelper.world();
+        if (!active || schematic == null) {
+            return 0;
+        }
+        int open = 0;
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        for (SchematicHelper.Area area : SchematicHelper.areas()) {
+            for (int y = Math.max(layer, area.minY()); y <= Math.min(layerTop, area.maxY()); y++) {
+                for (int x = area.minX(); x <= area.maxX(); x++) {
+                    for (int z = area.minZ(); z <= area.maxZ(); z++) {
+                        pos.set(x, y, z);
+                        if (!level.isLoaded(pos) || !level.getBlockState(pos).is(net.minecraft.world.level.block.Blocks.CACTUS)) {
+                            continue;
+                        }
+                        BlockPos above = pos.above();
+                        if (!level.getBlockState(above).isAir() || !schematic.getBlockState(above).isAir()) {
+                            continue;
+                        }
+                        for (Direction side : Direction.Plane.HORIZONTAL) {
+                            BlockPos beside = above.relative(side);
+                            if (schematic.getBlockState(beside).isSolid() && level.getBlockState(beside).isAir()) {
+                                open++;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return open;
+    }
+
     public void stop() {
         if (active && !buildFinished) {
             saveProgress(Minecraft.getInstance());
@@ -995,6 +1033,12 @@ public class LayerManager {
         }
         layer = Math.max(minY, min);
         layerTop = Math.min(maxY, max);
+        // One layer chosen by hand: paired with the one above when that stands on it, as when it goes on by itself.
+        // Alone, its cactus went in without the sand above them and grew a block or two while it was built (grown
+        // cactus where string goes, each broken by hand from the air: 47 blocks a minute)
+        if (layer == layerTop) {
+            layerTop = Math.max(layerTop, topFor(mc.level, schematic, areas, layer));
+        }
         applyLayer();
         resetProgress();
         String now = describeLayers();

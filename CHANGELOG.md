@@ -90,3 +90,9 @@
 - "Always send logs" sends every run's log by itself (setting of the same name).
 - Every report is listed for the developer, so none get lost.
 - Report titles say what happened: problem, stopped, finished, stopped by you.
+
+## 26.2-0.15.5
+- Auto break mines in straight lanes, standing on the next lane: no circles, no gaps.
+- Smoother flying on tall builds: the movement scan only reads the layers being built.
+- A layer picked by hand keeps its cactus capped (built with the sand layer above).
+- Warns when it stops with cactus open on top (they grow while stopped).

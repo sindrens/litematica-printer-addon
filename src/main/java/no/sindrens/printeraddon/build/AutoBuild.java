@@ -1948,6 +1948,14 @@ public class AutoBuild {
         no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.cancel(null);
         buying = false;
         Configs.Generic.AUTO_BUILD.setBooleanValue(false);
+        // Cactus left open on top grow while it's stopped (into where the string goes, to be broken one by one later)
+        int openCactus = wasRunning && mc.level != null && !"finished".equals(stopNote) ? layers.openCactus(mc.level) : 0;
+        if (openCactus > 0) {
+            BuildLog.line("WARN", openCactus + " cactus of " + layers.describeLayers() + " stand open on top (the sand beside them isn't in yet):"
+                    + " they grow while auto build is stopped");
+            Chat.warn(openCactus + " cactus of " + layers.describeLayers() + " have no sand beside their top yet: they grow while auto build"
+                    + " is stopped, and have to be broken one by one after. Start it again soon to cap them.");
+        }
         layers.stop();
         breaker.stop(mc);
         mover.stop(mc);

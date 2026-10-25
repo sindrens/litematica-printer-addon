@@ -39,12 +39,12 @@ import java.util.Set;
 
 /**
  * Auto break: every block of Litematica's area selection is broken, the top layer first (nothing falls on the player,
- * sand doesn't drop into the gaps), the nearest first, each with the fastest tool, standing where it can (the game
- * breaks 5 times slower in the air, see BlockBreaker). Left alone: the block types switched off in the Auto break tab,
- * containers ("Never break containers"), liquids, what can't be broken, and what holds back lava. A block that only
- * stands on the one below it (cactus, sugar cane, bamboo, flowers, carpets) isn't broken itself: it drops with the
- * block under it (a cactus column on its sand is one break, not four). Drops: put away in the vaults or linked chests
- * when the inventory is full, or ignored ("Auto break: put drops away").
+ * sand doesn't drop into the gaps), each level in straight lanes (see layLanes), each block with the fastest tool,
+ * standing where it can (the game breaks 5 times slower in the air, see BlockBreaker). Left alone: the block types
+ * switched off in the Auto break tab, containers ("Never break containers"), liquids, what can't be broken, and what
+ * holds back lava. A block that only stands on the one below it (cactus, sugar cane, bamboo, flowers, carpets) isn't
+ * broken itself: it drops with the block under it (a cactus column on its sand is one break, not four). Drops: put away
+ * in the vaults or linked chests when the inventory is full, or ignored ("Auto break: put drops away").
  */
 public final class AreaBreaker {
     public static final AreaBreaker INSTANCE = new AreaBreaker();
@@ -75,6 +75,26 @@ public final class AreaBreaker {
     private final Map<Item, Integer> itemsAtStart = new HashMap<>();
     private long fullWarnedAt = -100000;
     private final Safety safety = new Safety();
+
+    /**
+     * Each level is broken in straight lanes 3 rows wide, back and forth along its longer side, from the edge and the
+     * end nearest the player. The player stands on the next lane, still there, while breaking this one: standing
+     * breaks are 5 times faster, and it never has to cross a hole. (The nearest block first broke a ring around the
+     * player, who then had to get over the gap: "it mines in a circle around me".)
+     */
+    private static final int LANE_ROWS = 3;
+    /** Lanes run along X (rows across them are Z), or along Z. */
+    private boolean alongX = true;
+    /** The first row of the first lane, and which way the lanes go across (+1 or -1). */
+    private int acrossOrigin;
+    private int acrossStep = 1;
+    private int alongMin;
+    private int alongMax;
+    private int laneCount = 1;
+    /** Lane 0 runs from alongMin up (else from alongMax down); every other lane the other way. */
+    private boolean firstForward = true;
+    /** The lane being broken: the later ones are left standing (the player stands on them). */
+    private int currentLane;
 
     /** Leave a block out for this long when it can't be got to. */
     private static final int LEAVE_OUT_TICKS = 20 * 60;
@@ -302,9 +322,9 @@ public final class AreaBreaker {
 
     /**
      * For BlockBreaker (Mode.AREA): the block to break next within reach: the highest first (of any level: from one spot
-     * it digs down as far as it reaches), then the nearest. Only one with nothing still to break right above it, so each
-     * column still goes from the top down. Never the block under the feet while standing, nor one left out or that
-     * failed a moment ago.
+     * it digs down as far as it reaches), then in lane order, then the nearest. Only up to the current lane: the later
+     * lanes stay, the player stands on them. Only one with nothing still to break right above it, so each column still
+     * goes from the top down. Never the block under the feet while standing, nor one left out or that failed a moment ago.
      */
     @Nullable
     BlockPos nextInReach(Minecraft mc, LocalPlayer player, double range) {
@@ -318,14 +338,20 @@ public final class AreaBreaker {
         boolean flying = player.getAbilities().flying && !player.onGround();
         BlockPos best = null;
         double bestDistance = Double.MAX_VALUE;
+        long bestOrder = Long.MAX_VALUE;
         int r = (int) Math.ceil(range);
         BlockPos center = BlockPos.containing(eye);
         for (BlockPos pos : BlockPos.betweenClosed(center.offset(-r, -r, -r), center.offset(r, r, r))) {
-            if (pos.getY() < bottom || pos.getY() > layer) {
+            if (pos.getY() < bottom || pos.getY() > layer || laneOf(pos) > currentLane) {
                 continue;
             }
             double distance = eye.distanceToSqr(Vec3.atCenterOf(pos));
-            if (distance > range * range || best != null && (pos.getY() < best.getY() || pos.getY() == best.getY() && distance >= bestDistance)) {
+            if (distance > range * range) {
+                continue;
+            }
+            long order = orderOf(pos);
+            if (best != null && (pos.getY() < best.getY()
+                    || pos.getY() == best.getY() && (order > bestOrder || order == bestOrder && distance >= bestDistance))) {
                 continue;
             }
             if (!flying && pos.equals(underFeet) || leftOut.containsKey(pos) || AutoBuild.INSTANCE.breaker.failedRecently(pos)
@@ -334,8 +360,84 @@ public final class AreaBreaker {
             }
             best = pos.immutable();
             bestDistance = distance;
+            bestOrder = order;
         }
         return best;
+    }
+
+    // ---- lanes
+
+    /** Lays this level's lanes: along its longer side, from the edge and the end nearest the player. */
+    private void layLanes(Vec3 player) {
+        int minX = Integer.MAX_VALUE;
+        int minZ = Integer.MAX_VALUE;
+        int maxX = Integer.MIN_VALUE;
+        int maxZ = Integer.MIN_VALUE;
+        for (int[] b : boxes) {
+            if (layer >= b[1] && layer <= b[4]) {
+                minX = Math.min(minX, b[0]);
+                minZ = Math.min(minZ, b[2]);
+                maxX = Math.max(maxX, b[3]);
+                maxZ = Math.max(maxZ, b[5]);
+            }
+        }
+        if (minX > maxX) {
+            return;
+        }
+        alongX = maxX - minX >= maxZ - minZ;
+        int acrossMin = alongX ? minZ : minX;
+        int acrossMax = alongX ? maxZ : maxX;
+        alongMin = alongX ? minX : minZ;
+        alongMax = alongX ? maxX : maxZ;
+        double across = alongX ? player.z : player.x;
+        double along = alongX ? player.x : player.z;
+        acrossStep = Math.abs(across - acrossMin) <= Math.abs(across - acrossMax) ? 1 : -1;
+        acrossOrigin = acrossStep > 0 ? acrossMin : acrossMax;
+        laneCount = (acrossMax - acrossMin) / LANE_ROWS + 1;
+        firstForward = Math.abs(along - alongMin) <= Math.abs(along - alongMax);
+        currentLane = 0;
+    }
+
+    private int laneOf(BlockPos pos) {
+        int across = alongX ? pos.getZ() : pos.getX();
+        return Math.max(0, (across - acrossOrigin) * acrossStep / LANE_ROWS);
+    }
+
+    /** Lane by lane, and along each lane the way it runs: the order a level is broken in. */
+    private long orderOf(BlockPos pos) {
+        int lane = laneOf(pos);
+        int along = alongX ? pos.getX() : pos.getZ();
+        boolean forward = (lane % 2 == 0) == firstForward;
+        return (long) lane * 1_000_000L + (forward ? along - alongMin : alongMax - along);
+    }
+
+    /**
+     * Where to stand while breaking this block: on the next lane's first row beside it (or the row after), on a block
+     * that's still there, with nothing that hurts near, the block in reach. After the last lane that's the ground
+     * outside the area, if there is any. Null when there's no such spot (then from the air, see hoverFor).
+     */
+    @Nullable
+    private Vec3 standBeside(Minecraft mc, LocalPlayer player, BlockPos pos) {
+        double reach = player.blockInteractionRange() - 0.4;
+        Vec3 center = Vec3.atCenterOf(pos);
+        int nextRow = acrossOrigin + acrossStep * LANE_ROWS * (laneOf(pos) + 1);
+        int along = alongX ? pos.getX() : pos.getZ();
+        for (int extra = 0; extra <= 1; extra++) {
+            for (int shift : new int[]{0, 1, -1}) {
+                int row = nextRow + acrossStep * extra;
+                BlockPos ground = alongX ? new BlockPos(along + shift, pos.getY(), row) : new BlockPos(row, pos.getY(), along + shift);
+                BlockPos feet = ground.above();
+                net.minecraft.world.phys.shapes.VoxelShape shape = mc.level.getBlockState(ground).getCollisionShape(mc.level, ground);
+                if (shape.isEmpty() || shape.max(Direction.Axis.Y) < 0.999 || !FlyPath.fits(mc.level, feet)) {
+                    continue;
+                }
+                Vec3 spot = new Vec3(feet.getX() + 0.5, feet.getY(), feet.getZ() + 0.5);
+                if (Mover.harmNear(mc.level, spot) == null && spot.add(0, player.getEyeHeight(), 0).distanceToSqr(center) <= reach * reach) {
+                    return spot;
+                }
+            }
+        }
+        return null;
     }
 
     // ---- running
@@ -368,6 +470,7 @@ public final class AreaBreaker {
             bottom = Math.min(bottom, b[1]);
         }
         layer = top;
+        layLanes(player.position());
         total = 0;
         for (Map.Entry<Block, Integer> entry : blocksIn(mc, boxes, true).entrySet()) {
             if (!skipped(entry.getKey())) {
@@ -485,6 +588,8 @@ public final class AreaBreaker {
             layer--;
             layerStartedAt = AutoBuild.clientTicks;
             layerBrokenAtStart = breaker.getBrokenCount();
+            // The next level's lanes start where the player is now: back the way it came, no flight across the area
+            layLanes(player.position());
             scanLayer(mc);
         }
         // What's in reach first
@@ -500,22 +605,26 @@ public final class AreaBreaker {
                     + " blocks left on Y " + layer + ", see the build log)");
             return;
         }
-        // Then to the nearest block of the level (a part not loaded yet when nothing loaded is left)
+        // Then to the level's next block in lane order (the nearest part not loaded yet when nothing loaded is left)
         Vec3 at = player.position();
         BlockPos next = null;
-        double nearest = Double.MAX_VALUE;
+        double first = Double.MAX_VALUE;
         // Broken since the last look (or dropped with the block under it): not flown to (it flew to blocks already gone
         // and waited there up to a second)
         layerLeft.removeIf(pos -> !wants(mc.level, pos));
-        for (BlockPos pos : layerLeft.isEmpty() ? layerUnloaded : layerLeft) {
+        boolean loaded = !layerLeft.isEmpty();
+        for (BlockPos pos : loaded ? layerLeft : layerUnloaded) {
             if (leftOut.containsKey(pos) || breaker.failedRecently(pos)) {
                 continue;
             }
-            double distance = at.distanceToSqr(Vec3.atCenterOf(pos));
-            if (distance < nearest) {
-                nearest = distance;
+            double key = loaded ? orderOf(pos) : at.distanceToSqr(Vec3.atCenterOf(pos));
+            if (key < first) {
+                first = key;
                 next = pos;
             }
+        }
+        if (next != null && loaded) {
+            currentLane = laneOf(next);
         }
         if (next == null) {
             // Everything left is left out for now: wait for that to pass (or for the no-progress stop)
@@ -533,10 +642,14 @@ public final class AreaBreaker {
             mover.goTo(null);
             return;
         }
-        // A free spot it can be broken from: right above it may be a cactus (sand under a cactus that drops with it)
+        // Standing on the next lane beside it, else a free spot in the air it can be broken from: right above it may be
+        // a cactus (sand under a cactus that drops with it)
         if (goalSpot == null || !next.equals(goalSpotFor)) {
             goalSpotFor = next;
-            goalSpot = hoverFor(mc, player, next);
+            goalSpot = standBeside(mc, player, next);
+            if (goalSpot == null) {
+                goalSpot = hoverFor(mc, player, next);
+            }
             if (goalSpot == null) {
                 BuildLog.line("AREA", "no free spot to break " + next.toShortString().replace(" ", "") + " from: left out for a minute");
                 leftOut.put(next, AutoBuild.clientTicks + LEAVE_OUT_TICKS);
@@ -658,6 +771,7 @@ public final class AreaBreaker {
     /** For the HUD and the menu. */
     public String status() {
         int broken = AutoBuild.INSTANCE.breaker.getBrokenCount() - brokenAtStart;
-        return "Auto break: Y " + layer + " (" + layerLeft.size() + " left there), " + broken + " of about " + total + " broken";
+        return "Auto break: Y " + layer + ", lane " + (currentLane + 1) + " of " + laneCount + " (" + layerLeft.size() + " left on the level), "
+                + broken + " of about " + total + " broken";
     }
 }
