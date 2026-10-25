@@ -62,8 +62,16 @@ public final class DiscordLink {
         return Configs.Generic.DISCORD_SYNC.getBooleanValue() && !api().isEmpty();
     }
 
+    /** The Printer Addon bot (through the relay on the developer's droplet). */
+    public static final String DEFAULT_API = "http://139.59.156.198:8787/api/v1";
+    /** 0.16.0 had this as its default: saved settings with it get the real address. */
+    private static final String OLD_DEFAULT = "http://localhost:8787/api/v1";
+
     private static String api() {
         String url = Configs.Generic.DISCORD_API.getStringValue().trim();
+        if (url.equals(OLD_DEFAULT)) {
+            url = DEFAULT_API;
+        }
         while (url.endsWith("/")) {
             url = url.substring(0, url.length() - 1);
         }

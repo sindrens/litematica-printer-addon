@@ -99,7 +99,7 @@ public class Configs implements IConfigHandler {
                 "Linked with Discord (J+L): send live status and alerts to your control room on the Printer Addon Discord,\n"
                         + "and take Pause / Resume / Stop from there. Never sends chat, coordinates, chests or vaults.",
                 "Discord sync");
-        public static final ConfigString DISCORD_API = new ConfigString("discordApi", "http://localhost:8787/api/v1",
+        public static final ConfigString DISCORD_API = new ConfigString("discordApi", no.sindrens.printeraddon.discord.DiscordLink.DEFAULT_API,
                 "The Printer Addon bot's address. Leave it as it is unless the developer says otherwise.",
                 "Discord bot address");
 

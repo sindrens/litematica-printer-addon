@@ -104,3 +104,6 @@
 - A message when the build is done or needs you (you choose what).
 - Replies from the developer show up in game.
 - Tells you when a new version is out.
+
+## 26.2-0.16.1
+- Linking with Discord works for everyone (J+L).
