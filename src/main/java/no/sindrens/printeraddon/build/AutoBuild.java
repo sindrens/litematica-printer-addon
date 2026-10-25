@@ -1897,6 +1897,8 @@ public class AutoBuild {
         wholeFirstPass = true;
         wholeNextY = Integer.MIN_VALUE;
         if (Configs.Layers.AUTO_LAYER.getBooleanValue() && !layers.start(mc)) {
+            // Nothing to build (no placement, or every layer done): said in chat, nothing ran to ask about
+            stopNote = "could-not-start";
             stop(mc, null);
             return;
         }
@@ -1919,6 +1921,10 @@ public class AutoBuild {
         }
         return names.isEmpty() ? "?" : names.length() > 40 ? names.substring(0, 40) : names.toString();
     }
+
+    /** Why auto build stops when no reason is shown: "finished", "could-not-start", or null (the player stopped it). */
+    @javax.annotation.Nullable
+    private String stopNote;
 
     /** Stops auto build. {@code reason} is shown as a warning when it isn't the player's own choice. */
     public void stop(Minecraft mc, String reason) {
@@ -1972,7 +1978,10 @@ public class AutoBuild {
             } else if (resumeLater) {
                 RunLog.event("disconnect", "reason=\"" + (disconnectReason.isEmpty() ? "left the build's world" : disconnectReason) + "\"");
             }
-            RunLog.end(mc, reason != null ? reason : resumeLater ? "disconnected" : "stopped-by-you");
+            // Every run's log is worth having: asked about after every stop, the player's own too. Not for a disconnect
+            // (it picks up again once back) and not when nothing could start
+            String ended = reason != null ? reason : resumeLater ? "disconnected" : stopNote != null ? stopNote : "stopped-by-you";
+            RunLog.end(mc, ended, !resumeLater && !"could-not-start".equals(stopNote));
             disconnectReason = "";
             logIgnored(mc);
             BuildLog.line("PERF", Perf.report());
@@ -1987,6 +1996,7 @@ public class AutoBuild {
                 Chat.info("Auto build §cstopped§r.");
             }
         }
+        stopNote = null;
         BuildLog.close();
         // Stopped by the player or done (not a disconnect, an error or a safety stop): the building items go into
         // storage; the next start takes what it needs again
@@ -2269,6 +2279,11 @@ public class AutoBuild {
 
     /** Ticks left to get the player away from a cactus (or other block that hurts), see escapeFromHarm. */
     private int escapeTicks;
+
+    /** Still busy after a stop: flying out of a cactus, or putting the building items away (vault screens). */
+    public boolean busyAfterStop() {
+        return escapeTicks > 0 || puttingAway;
+    }
     private static final int ESCAPE_TICKS = 80;
 
     /**
@@ -2541,6 +2556,7 @@ public class AutoBuild {
         boolean layersGoOn = !layers.isActive() || layers.tick(mc);
         Perf.end("layer check", layersStarted);
         if (!layersGoOn) {
+            stopNote = "finished";
             stop(mc, null);
             return;
         }

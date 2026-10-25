@@ -13,3 +13,6 @@
 
 # The developer's log channel (a Discord webhook): packed into the jar, never into the repository
 src/main/resources/printer_addon/log-channel.txt
+
+# Reports fetched by tools/reports.py (players' logs: never into the repository)
+reports/

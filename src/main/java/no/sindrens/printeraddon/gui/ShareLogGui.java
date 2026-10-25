@@ -44,6 +44,9 @@ public class ShareLogGui extends GuiBase {
     private static final Set<String> picked = new HashSet<>();
     private static boolean withScreenshot = true;
 
+    /** Why the run ended, when this screen came from the question after a run (see StopPromptGui). */
+    @Nullable
+    private final String ended;
     @Nullable
     private final DebugInfo.Recent screenshot;
     @Nullable
@@ -54,6 +57,11 @@ public class ShareLogGui extends GuiBase {
     private GuiTextFieldGeneric buildingField;
 
     public ShareLogGui(@Nullable Screen parent) {
+        this(parent, null);
+    }
+
+    public ShareLogGui(@Nullable Screen parent, @Nullable String ended) {
+        this.ended = ended;
         this.setParent(parent);
         this.setTitle("Report a problem / share the log");
         this.screenshot = DebugInfo.recentScreenshot(this.mc);
@@ -80,6 +88,14 @@ public class ShareLogGui extends GuiBase {
         int width = Math.min(this.width - 20, 480);
         int y = 24;
 
+        if (ended != null) {
+            String line = (LogShare.isFinished(ended) ? "It finished" : "It stopped: " + ended);
+            while (line.length() > 8 && this.getStringWidth(line) > width) {
+                line = line.substring(0, line.length() - 4) + "...";
+            }
+            this.addLabel(x, y, width, 10, 0xFFFFFF55, line);
+            y += 12;
+        }
         this.addLabel(x, y, width, 10, 0xFFFFFFFF, "What went wrong? In your own words (Enter: a new line)");
         y += 11;
         int boxHeight = this.height >= 320 ? 64 : 40;
@@ -161,7 +177,7 @@ public class ShareLogGui extends GuiBase {
         LogShare.Report report = new LogShare.Report(problem.trim(), chosen, building == null ? "" : building.trim(),
                 withScreenshot && screenshot != null ? screenshot.file() : null);
         GuiBase.openGui(null);
-        LogShare.share(this.mc, false, report);
+        LogShare.share(this.mc, false, report, ended);
     }
 
     private void keepTyped() {

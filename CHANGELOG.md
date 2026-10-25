@@ -84,3 +84,9 @@
 ## 26.2-0.15.3
 - Reports reach the developer again (new #player-reports channel).
 - New logo, also shown in Mod Menu.
+
+## 26.2-0.15.4
+- After every run it asks to send the log: Send, Always send logs, Write what happened, Not now.
+- "Always send logs" sends every run's log by itself (setting of the same name).
+- Every report is listed for the developer, so none get lost.
+- Report titles say what happened: problem, stopped, finished, stopped by you.

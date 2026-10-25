@@ -214,6 +214,8 @@ public final class RunLog {
     // ---- start and end of a run
 
     public static void start(Minecraft mc) {
+        // A new run: the question about the last one's log isn't asked any more
+        StopPrompt.cancel();
         active = true;
         what = "-";
         runId = Long.toHexString(Double.doubleToLongBits(Math.random()) ^ System.nanoTime()).substring(0, 6);
@@ -258,8 +260,12 @@ public final class RunLog {
                 "units", "s=seconds t=ticks (20 a second)"));
     }
 
-    /** The run is over: the report, the comparison with the last run on this server, and the record for the next. */
-    public static void end(Minecraft mc, String why) {
+    /**
+     * The run is over: the report, the comparison with the last run on this server, and the record for the next.
+     * {@code ask}: not a disconnect (or a start with nothing to build): the player is asked whether its log may go to
+     * the developer (see LogShare).
+     */
+    public static void end(Minecraft mc, String why, boolean ask) {
         if (!active) {
             return;
         }
@@ -296,7 +302,7 @@ public final class RunLog {
                 "**Biggest costs:** " + (adviceText.isEmpty() ? "-" : adviceText),
                 "**Trips:** " + runTrips + ", purchases " + runPurchases + ", spent $" + Math.round(spent),
                 "**Breaking:** " + AutoBuild.INSTANCE.breaker.summary());
-        LogShare.afterRun(mc);
+        LogShare.afterRun(mc, why, ask);
     }
 
     /** What the run is ("Auto build: farm, Y -56 to 223"), for the shared log's summary. */

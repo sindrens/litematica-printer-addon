@@ -35,6 +35,8 @@ public class ClientTick implements IClientTickHandler {
         }
         AutoBuild.INSTANCE.inWorld(mc);
         no.sindrens.printeraddon.build.Reconnect.whileIn(mc);
+        // After a run: may its log go to the developer? (once no other screen is open)
+        no.sindrens.printeraddon.build.StopPrompt.tick(mc);
 
         if (ShopScanner.INSTANCE.isRunning()) {
             ShopScanner.INSTANCE.tick(mc);

@@ -69,7 +69,19 @@ Every auto build and Auto break writes a log in `logs/printer_addon/`, named by 
 - `game-log.txt`: the game's own log (`logs/latest.log`, errors from any mod) without chat lines.
 - `crash-report.txt`: a crash report from the last day, if there is one.
 
-Nothing private goes: no chat, no Log channel, no chest or vault spots, and your user folder (it has your name in it) is written `~`. The run's log has the build's coordinates, your inventory and your balance. What you wrote is kept until it's sent. Nothing is sent unless you click Send, or turn on **Share logs automatically** (then every run's log and debug go when the run ends). **Log channel** in the settings sends them to your own Discord webhook instead.
+Nothing private goes: no chat, no Log channel, no chest or vault spots, and your user folder (it has your name in it) is written `~`. The run's log has the build's coordinates, your inventory and your balance. What you wrote is kept until it's sent. **Log channel** in the settings sends them to your own Discord webhook instead.
+
+After every auto build or Auto break run (finished, stopped by you, an error, out of items; not a disconnect, which picks up again), it asks whether the run's log may go to the developer: **Send log**, **Always send logs** (from then on every run's log goes by itself; the setting of the same name turns it off), **Write what happened** (the form above, with the reason filled in) or **Not now**. Nothing is sent without one of these.
+
+### Reading the reports (for the developer)
+
+Each report is a message in #player-reports, sent through its webhook. A webhook can read and edit its own messages by id but can't list them, so the add-on also writes each report's id into a small index in that channel (`ReportIndex.java`; the root message's id is in `src/main/resources/printer_addon/report-index.txt`). `tools/reports.py` reads it with the same webhook (`PLAYER_REPORTS_WEBHOOK`, or the git-ignored `log-channel.txt`):
+
+- `sync` fetches every report and its files into `reports/` (git-ignored), `list` shows the open ones first, newest first.
+- `analyze [id]` reads a report critically (`tools/analyze.py`): the add-on's errors and exceptions first, then why it stopped, missed clicks and given-up blocks, where the time went and long stalls, changed settings.
+- `trends` compares versions: blocks a minute, missed clicks, stalls, errors an hour, how runs ended.
+- `mark <id> read|fixed <version>|wontfix` puts a Status on the report in Discord (fixed ones turn gray), `dashboard` updates the overview message.
+- `add <message link>` lists a report sent before the index existed (0.15.3).
 
 ## Building the jar
 

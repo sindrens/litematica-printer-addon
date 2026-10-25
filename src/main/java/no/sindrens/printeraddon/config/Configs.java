@@ -82,11 +82,11 @@ public class Configs implements IConfigHandler {
                         + "Useful when something doesn't work.",
                 "Debug log");
         public static final ConfigBoolean SHARE_LOGS = new ConfigBoolean("shareLogsAutomatically", false,
-                "After each auto build or Auto break, send its build log to the add-on's developer (a Discord channel) to\n"
-                        + "find bugs and make it faster, with the debug: versions, mods, settings, PC, the game log without chat.\n"
-                        + "The log has the build's coordinates, your inventory and balance, the server and your name.\n"
-                        + "Off: only when you send it with 'Report / share log' (J+B).",
-                "Share logs automatically");
+                "After every auto build or Auto break run, its log goes to the add-on's developer (a Discord channel)\n"
+                        + "without asking, with the debug: versions, mods, settings, PC, the game log without chat. The log has\n"
+                        + "the build's coordinates, your inventory and balance, the server and your name.\n"
+                        + "Off: you're asked after each run.",
+                "Always send logs");
         public static final ConfigString LOG_CHANNEL = new ConfigString("logChannel", "",
                 "Where shared logs go: a Discord webhook URL. Empty: the add-on developer's channel.",
                 "Log channel (Discord webhook)");

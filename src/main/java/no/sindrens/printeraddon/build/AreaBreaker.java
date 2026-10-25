@@ -427,7 +427,7 @@ public final class AreaBreaker {
                 why == null ? "stopped" : why, broken, minutes, broken / minutes, leftOut.size(), AutoBuild.INSTANCE.breaker.summary()));
         Chat.info("Auto break " + (why == null ? "stopped" : why) + ": " + broken + " blocks broken"
                 + String.format(Locale.ROOT, " in %.1f min.", minutes));
-        RunLog.end(mc, why == null ? "stopped" : why);
+        RunLog.end(mc, why == null ? "stopped" : why, !"the connection ended".equals(why) && !"left the world".equals(why));
         BuildLog.close();
     }
 

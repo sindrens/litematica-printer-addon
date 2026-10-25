@@ -27,7 +27,9 @@ import java.util.zip.GZIPOutputStream;
 /**
  * Sends a build log to the add-on's developer (a Discord channel, through its webhook), to find bugs and make it
  * faster: when the player sends a report (J+B, "Report / share log": what went wrong, what they were building, see
- * ShareLogGui), or after every run with "Share logs automatically" on. Never otherwise. With the log go a short summary
+ * ShareLogGui), or after a run when the player says yes (see StopPrompt) or has "Always send logs" on. Never
+ * otherwise. Each report is listed for the developer's tool (see
+ * ReportIndex). With the log go a short summary
  * (versions, server, player, what ran, how far it got and how fast, why it ended, where the time went) and the full
  * debug (see DebugInfo): debug.txt, the game's own log without chat, a crash report from the last day, and the
  * screenshot the player adds.
@@ -50,7 +52,10 @@ public final class LogShare {
     public static final int MAX_PROBLEM = 2000;
     public static final int MAX_BUILDING = 200;
     private static volatile boolean sending;
-    private static boolean tipShown;
+    private static final int RED = 0xE74C3C;
+    private static final int ORANGE = 0xF59E0B;
+    private static final int GREEN = 0x22C55E;
+    private static final int BLUE = 0x3498DB;
 
     private LogShare() {
     }
@@ -94,26 +99,45 @@ public final class LogShare {
         return sending;
     }
 
-    /** After each run: sent with "Share logs automatically", else a tip once a session about reporting it. */
-    public static void afterRun(Minecraft mc) {
+    /**
+     * After each run ({@code ask}: not a disconnect): with "Always send logs" its log goes at once, else the player is
+     * asked (see StopPrompt).
+     */
+    public static void afterRun(Minecraft mc, String why, boolean ask) {
         try {
+            if (!ask || channel().isEmpty()) {
+                return;
+            }
             if (Configs.Generic.SHARE_LOGS.getBooleanValue()) {
-                share(mc, true, null);
-            } else if (!tipShown && !channel().isEmpty()) {
-                tipShown = true;
-                Chat.info("Something off, or too slow? J+B -> 'Report / share log': say what went wrong, and this run's log goes"
-                        + " to the add-on's developer (or turn on 'Share logs automatically').");
+                share(mc, true, null, why);
+            } else {
+                StopPrompt.ask(why, RunLog.describeRun().startsWith("Auto break") ? "Auto break" : "Auto build");
             }
         } catch (RuntimeException e) {
             PrinterAddon.LOGGER.warn("[Printer Addon] Couldn't share the log", e);
         }
     }
 
+    /** A run that ended because everything was done ("finished" for auto build, "done" for Auto break). */
+    public static boolean isFinished(String why) {
+        return "finished".equals(why) || "done".equals(why);
+    }
+
+    /** A run the player stopped ("stopped-by-you" for auto build, "stopped" for Auto break). */
+    public static boolean byPlayer(String why) {
+        return "stopped-by-you".equals(why) || "stopped".equals(why);
+    }
+
+    public static void share(Minecraft mc, boolean automatic, @Nullable Report report) {
+        share(mc, automatic, report, null);
+    }
+
     /**
      * Sends the run's log (the one going on now, else the last one, else the newest there is) with the player's report
      * (null: none, as after a run) and the full debug. A report goes without a log too (nothing ran yet).
+     * {@code ended}: why the run ended, when it's sent after a run.
      */
-    public static void share(Minecraft mc, boolean automatic, @Nullable Report report) {
+    public static void share(Minecraft mc, boolean automatic, @Nullable Report report, @Nullable String ended) {
         String url = channel();
         if (url.isEmpty()) {
             Chat.warn("No log channel set (Log channel in the settings): nowhere to send the log to.");
@@ -159,7 +183,7 @@ public final class LogShare {
         Path log = file;
         String text = summary;
         String details = debug;
-        Thread thread = new Thread(() -> send(mc, url, log, head, text, details, crash == null ? null : crash.file(), report, automatic),
+        Thread thread = new Thread(() -> send(mc, url, log, head, text, details, crash == null ? null : crash.file(), report, ended, automatic),
                 "Printer Addon log share");
         thread.setDaemon(true);
         thread.start();
@@ -196,7 +220,7 @@ public final class LogShare {
                         + ", range " + me.aleksilassila.litematica.printer.config.Configs.PRINTING_RANGE.getDoubleValue()
                         + ", speed preset " + Configs.Generic.SPEED_PRESET.getOptionListValue().getStringValue()
                         + ", ping " + ServerLag.pingTicks(mc) * 50 + " ms",
-                "**Sent:** " + (automatic ? "automatically (Share logs automatically is on)" : "by the player (Report / share log)"));
+                "**Sent:** " + (automatic ? "automatically (Always send logs is on)" : "by the player"));
     }
 
     private static String modVersion(String id) {
@@ -204,7 +228,7 @@ public final class LogShare {
     }
 
     private static void send(Minecraft mc, String url, @Nullable Path log, String head, String summary, String debug,
-                             @Nullable Path crash, @Nullable Report report, boolean automatic) {
+                             @Nullable Path crash, @Nullable Report report, @Nullable String ended, boolean automatic) {
         String result;
         try {
             List<String> notes = new ArrayList<>();
@@ -269,6 +293,10 @@ public final class LogShare {
             String player = mc.getUser() == null ? "?" : mc.getUser().getName();
             boolean problem = report != null && report.saysSomething();
             StringBuilder description = new StringBuilder();
+            if (ended != null) {
+                description.append(isFinished(ended) ? "**Finished:** everything was done" : byPlayer(ended) ? "**Stopped by the player**"
+                        : "**Stopped by itself:** " + cut(ended, 500)).append('\n');
+            }
             if (report != null) {
                 if (!report.picked().isEmpty()) {
                     description.append("**Problem:** ").append(String.join(", ", report.picked())).append('\n');
@@ -293,11 +321,25 @@ public final class LogShare {
                 files.append(files.isEmpty() ? "" : ", ").append(part.name());
             }
             description.append("\n**Files:** ").append(files).append(notes.isEmpty() ? "" : " (" + String.join("; ", notes) + ")");
-            String title = problem ? "Problem from " + player + (report.picked().isEmpty() ? "" : ": " + String.join(", ", report.picked()))
-                    : "Log from " + player;
-            String payload = "{\"username\":\"Printer Addon logs\",\"allowed_mentions\":{\"parse\":[]},\"embeds\":[{\"title\":"
+            // The kind, for the title, the color and the developer's index: P problem, S stopped by itself, F finished,
+            // U stopped by the player, L a log sent from the menu
+            char kind = problem ? 'P' : ended == null ? 'L' : isFinished(ended) ? 'F' : byPlayer(ended) ? 'U' : 'S';
+            String title = switch (kind) {
+                case 'P' -> "Problem from " + player + (report.picked().isEmpty() ? "" : ": " + String.join(", ", report.picked()));
+                case 'S' -> "Stopped: " + cut(ended, 120) + " · " + player;
+                case 'F' -> "Finished · " + player;
+                case 'U' -> "Stopped by the player · " + player;
+                default -> "Log from " + player;
+            };
+            int color = switch (kind) {
+                case 'P' -> RED;
+                case 'S' -> ORANGE;
+                case 'F' -> GREEN;
+                default -> BLUE;
+            };
+            String payload = "{\"username\":\"Printer Addon Reports\",\"allowed_mentions\":{\"parse\":[]},\"embeds\":[{\"title\":"
                     + quote(cut(title, 250)) + ",\"description\":" + quote(cut(description.toString(), 4000))
-                    + ",\"color\":" + (problem ? 15158332 : 3447003)
+                    + ",\"color\":" + color
                     + (shot != null ? ",\"image\":{\"url\":\"attachment://screenshot.png\"}" : "") + "}]}";
 
             String boundary = "PrinterAddon" + Long.toHexString(System.nanoTime());
@@ -317,13 +359,22 @@ public final class LogShare {
             }
             write(body, "--" + boundary + "--\r\n");
             HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(15)).build();
-            HttpRequest request = HttpRequest.newBuilder(URI.create(url))
+            // wait=true: Discord answers with the message, whose id goes into the developer's index
+            HttpRequest request = HttpRequest.newBuilder(URI.create(url + (url.contains("?") ? "&" : "?") + "wait=true"))
                     .timeout(Duration.ofSeconds(120))
                     .header("Content-Type", "multipart/form-data; boundary=" + boundary)
                     .POST(HttpRequest.BodyPublishers.ofByteArray(body.toByteArray()))
                     .build();
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
             int status = response.statusCode();
+            if (status / 100 == 2 && url.equals(developerChannel())) {
+                try {
+                    String id = com.google.gson.JsonParser.parseString(response.body()).getAsJsonObject().get("id").getAsString();
+                    ReportIndex.add(client, url, id, kind);
+                } catch (RuntimeException e) {
+                    PrinterAddon.LOGGER.warn("[Printer Addon] The report went, but couldn't be listed: {}", e.toString());
+                }
+            }
             result = status / 100 == 2 ? null : "the channel answered " + status + (status == 429 ? " (too many logs at once, try again in a minute)"
                     : status == 404 || status == 401 ? " (the webhook doesn't exist any more)" : status == 413 ? " (the files are too big)" : "");
         } catch (IOException | RuntimeException e) {
@@ -333,11 +384,11 @@ public final class LogShare {
             result = "interrupted";
         }
         String failed = result;
-        String what = report != null && report.saysSomething() ? "Your report" : log == null ? "The debug" : "Log " + log.getFileName();
+        String what = report != null && report.saysSomething() ? "Your report" : log == null ? "The debug" : "The log";
         sending = false;
         mc.execute(() -> {
             if (failed == null) {
-                Chat.info(what + " went to the add-on's developer" + (automatic ? " (Share logs automatically is on)" : "") + ". Thanks!");
+                Chat.info(what + " went to the add-on's developer" + (automatic ? " (Always send logs is on)" : "") + ". Thanks!");
                 BuildLog.lineOrKeep("SHARE", "sent " + (log == null ? "a report without a log" : log.getFileName()));
                 if (report != null) {
                     no.sindrens.printeraddon.gui.ShareLogGui.clearDraft();
