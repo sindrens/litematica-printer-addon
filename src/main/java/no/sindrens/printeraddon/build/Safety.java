@@ -9,6 +9,8 @@ import javax.annotation.Nullable;
 
 /** Reasons to stop building right away. */
 public class Safety {
+    /** Brushing a cactus doesn't stop the build until health is down to this (half of it). */
+    private static final float PLANT_DAMAGE_STOP = 10;
     private float lastHealth = -1;
 
     public void reset() {
@@ -25,10 +27,21 @@ public class Safety {
 
         float health = player.getHealth();
         boolean tookDamage = lastHealth >= 0 && health < lastHealth - 0.01f;
+        float lost = lastHealth - health;
         lastHealth = health;
 
         if (tookDamage && Configs.Safety.STOP_ON_DAMAGE.getBooleanValue()) {
-            return "you took damage";
+            // A cactus (or berry bush) of the build brushed on the way: half a heart, nobody attacking. Building goes on
+            // while there's plenty of health left
+            net.minecraft.world.damagesource.DamageSource source = player.getLastDamageSource();
+            boolean plant = source != null && (source.is(net.minecraft.world.damagesource.DamageTypes.CACTUS)
+                    || source.is(net.minecraft.world.damagesource.DamageTypes.SWEET_BERRY_BUSH));
+            if (!plant || health < PLANT_DAMAGE_STOP) {
+                return "you took damage";
+            }
+            BuildLog.line("SAFETY", String.format("brushed a %s at %.1f %.1f %.1f: -%.1f health, %.1f left, building on",
+                    source.is(net.minecraft.world.damagesource.DamageTypes.CACTUS) ? "cactus" : "berry bush",
+                    player.getX(), player.getY(), player.getZ(), lost, health));
         }
 
         if (Configs.Safety.STOP_NEAR_PLAYERS.getBooleanValue()) {

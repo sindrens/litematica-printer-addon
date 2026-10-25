@@ -21,7 +21,7 @@ import java.nio.file.Path;
 public class Configs implements IConfigHandler {
     private static final String CONFIG_FILE_NAME = PrinterAddon.MOD_ID + ".json";
     /** 2: the fastest automatic interval went from 2 to 1. */
-    private static final int CONFIG_VERSION = 4;
+    private static final int CONFIG_VERSION = 5;
 
     public static class Generic {
         public static final ConfigBoolean ADDON_ENABLED = new ConfigBoolean("addonEnabled", true,
@@ -153,11 +153,12 @@ public class Configs implements IConfigHandler {
                         + "minecarts. Off: the printer places every block and the add-on only moves, breaks wrong blocks, gets the\n"
                         + "items and sets the printer's settings. Water (waterlogged blocks) is always put in with a bucket.",
                 "Add-on places blocks itself");
-        public static final ConfigBoolean USE_AIR_PLACE = new ConfigBoolean("useAirPlaceForFloatingBlocks", false,
-                "When every missing block within reach floats (nothing next to it to place it against), turn on the\n"
-                        + "printer's 'printInAir' for exactly one block, then off again. Off by default: placing against air is what\n"
-                        + "anticheats look for, and they cancel those blocks.",
-                "Use printer's air place");
+        public static final ConfigBoolean USE_AIR_PLACE = new ConfigBoolean("useAirPlaceForFloatingBlocks", true,
+                "Blocks with nothing beside or under them to place them against (the string at the bottom of a cactus farm)\n"
+                        + "are placed in the air with the printer's 'printInAir': for the whole layer when all its blocks come out\n"
+                        + "right that way (string, sand, cactus, plain blocks), else one block at a time. Only while such blocks are\n"
+                        + "left. If the server doesn't keep blocks placed in the air, it stops by itself and says so.",
+                "Air place floating blocks");
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
                 AUTO_LAYER, LAYERS_TOGETHER, ADDON_PLACES, LAYER_CHECK_INTERVAL, STUCK_REPORT_SECONDS, SKIP_STUCK_SECONDS, EXTRA_BLOCKS_BLOCK_LAYER,
@@ -340,10 +341,10 @@ public class Configs implements IConfigHandler {
                 "Find the fastest printer interval that still places right, per kind of block: start at the preset's interval,\n"
                         + "go faster after a run of correct blocks, one tick slower as soon as a block comes out wrong.",
                 "Automatic speed");
-        public static final ConfigInteger AUTO_SPEED_MIN_INTERVAL = new ConfigInteger("autoSpeedMinInterval", 1, 1, 40,
+        public static final ConfigInteger AUTO_SPEED_MIN_INTERVAL = new ConfigInteger("autoSpeedMinInterval", 3, 3, 40,
                 "Automatic speed never goes below this printer interval. It only gets there while every block comes out\n"
-                        + "right, and slows down again at the first wrong one. At 2 it places at most about 5 blocks a second\n"
-                        + "(every block takes at least two printer actions); at 1 about twice that. Raise it if a server complains.",
+                        + "right, and slows down again at the first wrong one. Never below 3: at 1 and 2 servers kick the player\n"
+                        + "for too many clicks. Raise it if a server still complains.",
                 "Automatic speed: fastest interval");
         public static final ConfigInteger MAX_PLACEMENTS_PER_SECOND = new ConfigInteger("maxPlacementsPerSecond", 0, 0, 40,
                 "For servers with a strict anticheat: the printer places at most this many blocks per second. 0 = no limit\n"
@@ -356,7 +357,7 @@ public class Configs implements IConfigHandler {
         public static final ConfigInteger AUTO_SPEED_STEP_BLOCKS = new ConfigInteger("autoSpeedStepBlocks", 10, 5, 1000,
                 "Automatic speed goes one tick faster after this many correct blocks in a row.",
                 "Automatic speed: blocks per step");
-        public static final ConfigInteger PRINTER_INTERVAL = new ConfigInteger("customPrinterInterval", 12, 1, 40,
+        public static final ConfigInteger PRINTER_INTERVAL = new ConfigInteger("customPrinterInterval", 12, 3, 40,
                 "Custom preset: the printer's printing interval (lower is faster). Below 12 the printer often places blocks wrong.",
                 "Custom: printer interval");
         public static final ConfigInteger BREAK_COOLDOWN = new ConfigInteger("customBreakCooldownTicks", 2, 0, 100,
@@ -439,6 +440,13 @@ public class Configs implements IConfigHandler {
                 if (version < 4) {
                     // Two layers at once was off for a while until a stand-still it ran into was fixed (0.14.1)
                     Layers.LAYERS_TOGETHER.setBooleanValue(true);
+                }
+                if (version < 5) {
+                    // At intervals 1 and 2 the player's server kicked the player (too many clicks)
+                    Speed.AUTO_SPEED_MIN_INTERVAL.setIntegerValue(Math.max(3, Speed.AUTO_SPEED_MIN_INTERVAL.getIntegerValue()));
+                    Speed.PRINTER_INTERVAL.setIntegerValue(Math.max(3, Speed.PRINTER_INTERVAL.getIntegerValue()));
+                    // Air place was off: the floating string at the bottom of a cactus farm was never placed
+                    Layers.USE_AIR_PLACE.setBooleanValue(true);
                 }
             }
         }

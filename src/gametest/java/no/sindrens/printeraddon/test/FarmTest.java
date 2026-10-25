@@ -159,7 +159,7 @@ public class FarmTest implements FabricClientGameTest {
                 // The player's interval on their server now (PRINTER_ADDON_INTERVAL to try another)
                 String interval = System.getenv("PRINTER_ADDON_INTERVAL");
                 me.aleksilassila.litematica.printer.config.Configs.PRINTING_INTERVAL.setIntegerValue(
-                        interval == null || interval.isBlank() ? 2 : Integer.parseInt(interval.trim()));
+                        interval == null || interval.isBlank() ? 3 : Integer.parseInt(interval.trim()));
                 // PRINTER_ADDON_LANES=0: spot by spot only (to compare with flying in lanes)
                 String lanes = System.getenv("PRINTER_ADDON_LANES");
                 if (lanes != null) {

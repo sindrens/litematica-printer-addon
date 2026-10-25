@@ -51,6 +51,12 @@ public class ClientTick implements IClientTickHandler {
             return;
         }
         no.sindrens.printeraddon.build.CostEstimate.tick(mc);
+        // The printer never faster than interval 3, also when used by hand: at 1 and 2 the server kicks the player
+        if (me.aleksilassila.litematica.printer.config.Configs.PRINTING_INTERVAL.getIntegerValue()
+                < no.sindrens.printeraddon.build.SpeedTuner.MIN_INTERVAL) {
+            me.aleksilassila.litematica.printer.config.Configs.PRINTING_INTERVAL.setIntegerValue(
+                    no.sindrens.printeraddon.build.SpeedTuner.MIN_INTERVAL);
+        }
         if (AutoBuild.INSTANCE.isRunning()) {
             no.sindrens.printeraddon.build.Resume.whileRunning(mc);
         } else {

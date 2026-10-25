@@ -135,6 +135,7 @@ public final class PrinterBridge {
 
     /** The printer's interval right now (each kind of block has its own, set as the printer picks the block). */
     public static void applyInterval(int interval) {
+        interval = Math.max(SpeedTuner.MIN_INTERVAL, interval);
         if (Generic.APPLY_SPEED_TO_PRINTER.getBooleanValue() && Configs.PRINTING_INTERVAL.getIntegerValue() != interval) {
             Configs.PRINTING_INTERVAL.setIntegerValue(interval);
         }
@@ -145,6 +146,16 @@ public final class PrinterBridge {
      * server lets the player reach (farther gives ghost blocks), and rotation and block interaction on.
      */
     public static void applySettings(LocalPlayer player) {
+        // Into the air only for blocks with nothing to place them against (anticheats look for it): for the whole
+        // layer when all its blocks come out right that way (the string at the bottom of a cactus farm), else the
+        // add-on's air place turns it on for one block at a time
+        if (AutoBuild.INSTANCE.layers.airLayer()) {
+            if (!Configs.PRINT_IN_AIR.getBooleanValue()) {
+                Configs.PRINT_IN_AIR.setBooleanValue(true);
+            }
+        } else if (Configs.PRINT_IN_AIR.getBooleanValue() && !AutoBuild.INSTANCE.airPlace.isActive()) {
+            Configs.PRINT_IN_AIR.setBooleanValue(false);
+        }
         if (!Generic.APPLY_SPEED_TO_PRINTER.getBooleanValue()) {
             return;
         }
@@ -157,11 +168,6 @@ public final class PrinterBridge {
         }
         if (!Configs.INTERACT_BLOCKS.getBooleanValue()) {
             Configs.INTERACT_BLOCKS.setBooleanValue(true);
-        }
-        // Never into the air (anticheats cancel it); only the add-on's own air place, if switched on, turns it on
-        // for one floating block at a time
-        if (Configs.PRINT_IN_AIR.getBooleanValue() && !AutoBuild.INSTANCE.airPlace.isActive()) {
-            Configs.PRINT_IN_AIR.setBooleanValue(false);
         }
         // Litematica: easy place would click as well; picking blocks never swaps tools out of the hotbar
         if (LITEMATICA.EASY_PLACE_MODE.getBooleanValue()) {

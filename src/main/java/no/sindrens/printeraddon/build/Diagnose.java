@@ -54,8 +54,8 @@ public final class Diagnose {
         if (build.rails.isTemp(pos)) {
             sb.append(" | temporary rail spot");
         }
-        if (AirPlace.isCandidate(mc.level, pos, target)) {
-            sb.append(" | floating: air place");
+        if (AirPlace.needsAirPlace(mc.level, schematic, pos, target)) {
+            sb.append(AutoBuild.INSTANCE.airPlace.allowed() ? " | floating: air place" : " | floating: air place is off");
         }
 
         if (result == BlockCheck.Result.MISSING || result == BlockCheck.Result.PRINTER_FIXES) {

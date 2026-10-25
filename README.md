@@ -23,7 +23,7 @@ Put these in your `mods` folder:
 4. To use a chest, look at it, press `J`+`B` and click "Link".
 5. Press `J`+`B` and click Start.
 
-It builds layer by layer from the bottom, flying over each layer in straight lanes while the printer places all the way. With "Build layers together" (on by default), a layer whose blocks stand on the layer below, like seeds on farmland or redstone dust on observers and pistons, is built together with that layer in the same lanes. Lanes stop at tall walls, such as the walls of a farm: it finishes one side lane by lane, then the other, and doesn't fly over parts that are already built. If you're kicked or the server restarts, it joins again, runs your "Commands back to the build" and carries on. The same happens when the server times out and the network moves you to its lobby: by default it types `/server Skyblock`, which puts you back where you were. Starting it again also retries the blocks it skipped last time.
+It builds layer by layer from the bottom, flying over each layer in straight lanes while the printer places all the way. With "Build layers together" (on by default), a layer whose blocks stand on the layer below, like seeds on farmland, redstone dust on observers and pistons, cactus on sand, or sand on string, is built together with that layer in the same lanes. Lanes stop at tall walls, such as the walls of a farm: it finishes one side lane by lane, then the other, and doesn't fly over parts that are already built. If you're kicked or the server restarts, it joins again, runs your "Commands back to the build" and carries on. The same happens when the server times out and the network moves you to its lobby: by default it types `/server Skyblock`, which puts you back where you were. Starting it again also retries the blocks it skipped last time.
 
 Your inventory can start empty. It takes what it needs from your vaults and linked chests and buys the rest. Before a lane it tops up what the lane needs, and on the last shop trip of a layer it also buys for the next one. Anything that costs under $50,000 a stack is bought in whole stacks; what's left over goes into your vaults.
 
@@ -46,7 +46,10 @@ When you stop it, or the build is done, it puts the building items back in your 
 - Don't click in the shop or `/pv` while it's buying.
 - At start it asks how much it may spend in the shop (or click "No limit").
 - It uses `/feed` and `/craft` if you have permission.
-- It stops when you take damage or another player comes close.
+- It stops when you take damage or another player comes close. Brushing a cactus of the build doesn't stop it while you have more than half your health, and it flies a little higher over cactus.
+- Blocks with nothing beside or under them to place them against, like the string at the bottom of a cactus farm, are placed in the air. If the server throws those blocks out, it stops doing that and tells you.
+- The printer interval never goes below 3: at 1 and 2 the server kicks you.
+- It never flies past the world border, such as the edge of your island.
 - With the add-on off, Litematica Printer works as normal.
 - A farm that's already running (pistons firing) doesn't hold up a layer. Pumpkins or melons that grew where a stem belongs are broken, so the stem can be planted.
 - If the server won't let it craft a tool, it goes on without it. Once the server has refused two recipes put in by hand, it only crafts what's in your recipe book there, and remembers that between games.

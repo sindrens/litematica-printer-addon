@@ -122,9 +122,13 @@ public final class PlacementOrder {
         return null;
     }
 
-    /** A block that stands on the block under it (seeds and crops, redstone dust, rails, carpets): goes in right after it. */
+    /**
+     * A block that stands on the block under it and goes in right after it: seeds and crops, redstone dust, rails,
+     * carpets, a cactus on its sand, and sand or gravel (the printer only places those once there's something under
+     * them, else they'd fall).
+     */
     public static boolean standsOnBelow(BlockState target) {
-        return needsSupport(target) && !(target.getBlock() instanceof FallingBlock);
+        return needsSupport(target) || target.getBlock() instanceof net.minecraft.world.level.block.CactusBlock;
     }
 
     /**

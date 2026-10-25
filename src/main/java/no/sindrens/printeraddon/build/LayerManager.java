@@ -123,6 +123,66 @@ public class LayerManager {
         return layerTop;
     }
 
+    /**
+     * The layers being built have blocks that only air place can put in (string floating at the bottom of a cactus
+     * farm), and all their missing blocks come out right placed in the air: the printer places in the air meanwhile.
+     */
+    private boolean airLayer;
+    /** The layers that was worked out for (a new layer isn't air placed until it's been looked at). */
+    private int airFor = Integer.MIN_VALUE;
+    private int airForTop = Integer.MIN_VALUE;
+
+    public boolean airLayer() {
+        return active && airLayer && airFor == layer && airForTop == layerTop;
+    }
+
+    /** Blocks that hurt where they are (the whole block counts, not only what the player bumps into). */
+    private static final java.util.Set<net.minecraft.world.level.block.Block> HURT_TO_TOUCH = java.util.Set.of(
+            Blocks.CACTUS, Blocks.SWEET_BERRY_BUSH);
+    /** How much higher to hover over layers with those: the head still stays under the block 2 up. */
+    private static final double HURT_LIFT = 0.2;
+    private int liftLayer = Integer.MIN_VALUE;
+    private int liftTop = Integer.MIN_VALUE;
+    private double lift;
+
+    /**
+     * How far over the hover height to fly over the layers being built: a little more when the top one has a cactus
+     * (flying right on top of it, the feet were a hair in a cactus's block now and then; it hurt and stopped the
+     * build), else nothing (a cactus lower down is a block or more under the feet).
+     */
+    public double hoverLift() {
+        if (!active) {
+            return 0;
+        }
+        if (liftLayer != layer || liftTop != layerTop) {
+            liftLayer = layer;
+            liftTop = layerTop;
+            lift = hasHurting() ? HURT_LIFT : 0;
+        }
+        return lift;
+    }
+
+    private boolean hasHurting() {
+        WorldSchematic schematic = SchematicHelper.world();
+        if (schematic == null) {
+            return false;
+        }
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        for (SchematicHelper.Area area : SchematicHelper.areas()) {
+            if (layerTop < area.minY() || layerTop > area.maxY()) {
+                continue;
+            }
+            for (int x = area.minX(); x <= area.maxX(); x++) {
+                for (int z = area.minZ(); z <= area.maxZ(); z++) {
+                    if (HURT_TO_TOUCH.contains(schematic.getBlockState(pos.set(x, layerTop, z)).getBlock())) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
     public int getLayer() {
         return layer;
     }
@@ -131,6 +191,8 @@ public class LayerManager {
     public boolean start(Minecraft mc) {
         deadEndsLayer = Integer.MIN_VALUE;
         deadEndsTop = Integer.MIN_VALUE;
+        airLayer = false;
+        liftLayer = Integer.MIN_VALUE;
         List<SchematicHelper.Area> areas = SchematicHelper.areas();
         int[] range = SchematicHelper.yRange(areas);
         WorldSchematic schematic = SchematicHelper.world();
@@ -263,6 +325,8 @@ public class LayerManager {
             restoreLayerRange();
         }
         active = false;
+        airLayer = false;
+        liftLayer = Integer.MIN_VALUE;
     }
 
     /** A finished layer (or one the build went past). */
@@ -465,6 +529,19 @@ public class LayerManager {
         }
         updateShoppingList(mc, findings.needs);
         layerNeeds = findings.needs;
+        boolean air = findings.floating > 0 && findings.notAirSafe == 0 && AutoBuild.INSTANCE.airPlace.allowed();
+        if (air != airLayer()) {
+            BuildLog.line("AIRPLACE", air ? describeLayers() + ": " + findings.floating + " blocks float (nothing beside or under"
+                    + " them to place them against): the printer places in the air until they're in"
+                    : describeLayers() + ": nothing left that floats, air place off");
+            if (air) {
+                Chat.quiet(findings.floating + " block" + (findings.floating == 1 ? "" : "s") + " of " + describeLayers()
+                        + " float: placing them in the air.");
+            }
+        }
+        airLayer = air;
+        airFor = layer;
+        airForTop = layerTop;
 
         // Everything left waits for something higher up (an ascending rail, an observer watching a block above):
         // don't hold up the layer, place those later
@@ -884,7 +961,7 @@ public class LayerManager {
                     }
                     if (!target.getFluidState().isEmpty()) {
                         water++;
-                    } else if (PlacementOrder.standsOnBelow(target) && !schematic.getBlockState(pos.below()).isAir()) {
+                    } else if (onLowerLayer(schematic, pos, target)) {
                         onTop++;
                         kinds.merge(blockName(target), 1, Integer::sum);
                     } else {
@@ -900,6 +977,29 @@ public class LayerManager {
                     water > 0 ? ", " + water + " with water" : ""));
         }
         return together ? y + 1 : y;
+    }
+
+    /**
+     * A block of the upper layer that can only go in once the lower one is there: it stands on it, or it's string
+     * hanging on the side of one that does (the cactus beside it in a cactus farm).
+     */
+    private static boolean onLowerLayer(WorldSchematic schematic, BlockPos pos, BlockState target) {
+        if (standsOn(schematic, pos, target)) {
+            return true;
+        }
+        if (target.getBlock() instanceof net.minecraft.world.level.block.TripWireBlock) {
+            for (Direction direction : Direction.Plane.HORIZONTAL) {
+                BlockPos side = pos.relative(direction);
+                if (standsOn(schematic, side, schematic.getBlockState(side))) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static boolean standsOn(WorldSchematic schematic, BlockPos pos, BlockState target) {
+        return !target.isAir() && PlacementOrder.standsOnBelow(target) && !schematic.getBlockState(pos.below()).isAir();
     }
 
     private int scanLayers(Level level, WorldSchematic schematic, List<SchematicHelper.Area> areas,
@@ -1103,6 +1203,10 @@ public class LayerManager {
         int tilling;
         /** Unfinished blocks that hold water (waterlogged or water), for the build log. */
         int water;
+        /** Missing blocks with nothing beside or under them to place them against, now or later (see AirPlace). */
+        int floating;
+        /** Missing blocks that could come out wrong placed in the air (they face a way, see AirPlace#airSafe). */
+        int notAirSafe;
     }
 
     /**
@@ -1173,6 +1277,12 @@ public class LayerManager {
                             ItemStack item = StateRules.itemFor(target);
                             if (!item.isEmpty()) {
                                 findings.needs.merge(item.getItem(), 1, Integer::sum);
+                            }
+                            if (AirPlace.floatsForGood(level, schematic, pos)) {
+                                findings.floating++;
+                            }
+                            if (!AirPlace.airSafe(target)) {
+                                findings.notAirSafe++;
                             }
                         }
                         if (findings != null && (result == BlockCheck.Result.MISSING || result == BlockCheck.Result.PRINTER_FIXES)

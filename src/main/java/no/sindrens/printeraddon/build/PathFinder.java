@@ -150,11 +150,22 @@ public final class PathFinder {
     }
 
     public static boolean isPassable(Level level, BlockPos pos) {
-        if (!level.isLoaded(pos)) {
+        if (!level.isLoaded(pos) || !insideBorder(level, pos)) {
             return false;
         }
         BlockState state = level.getBlockState(pos);
         return state.getCollisionShape(level, pos).isEmpty() && !DANGEROUS.contains(state.getBlock());
+    }
+
+    /**
+     * The whole block is inside the world border. On the player's skyblock server that's the island's edge: the player
+     * can't go past it, and a lane ending one block beyond it had the player fly up along it for good, taking it for a
+     * wall.
+     */
+    public static boolean insideBorder(Level level, BlockPos pos) {
+        net.minecraft.world.level.border.WorldBorder border = level.getWorldBorder();
+        return pos.getX() >= border.getMinX() && pos.getX() + 1 <= border.getMaxX()
+                && pos.getZ() >= border.getMinZ() && pos.getZ() + 1 <= border.getMaxZ();
     }
 
     private static boolean isSupport(Level level, BlockPos pos) {

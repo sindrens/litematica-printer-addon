@@ -1367,10 +1367,14 @@ public class Mover {
         return p -> Math.abs((lanesAlongX ? p.getZ() : p.getX()) - c) <= half;
     }
 
-    /** Where the player flies over a block of the layer: the hover height above the layers being built. */
+    /**
+     * Where the player flies over a block of the layer: the hover height above the layers being built (a little more
+     * over a cactus, see LayerManager#hoverLift).
+     */
     private static Vec3 laneHover(BlockPos pos) {
-        int hoverY = AutoBuild.INSTANCE.layers.getLayerTop() + Configs.Movement.HOVER_HEIGHT.getIntegerValue();
-        return new Vec3(pos.getX() + 0.5, hoverY, pos.getZ() + 0.5);
+        LayerManager layers = AutoBuild.INSTANCE.layers;
+        int hoverY = layers.getLayerTop() + Configs.Movement.HOVER_HEIGHT.getIntegerValue();
+        return new Vec3(pos.getX() + 0.5, hoverY + layers.hoverLift(), pos.getZ() + 0.5);
     }
 
     /**
@@ -1515,9 +1519,10 @@ public class Mover {
                     && AutoBuild.INSTANCE.rails.selfPlaceFacing(mc.level, schematic, p, schematic.getBlockState(p)) != null) {
                 return true;
             }
-            // Air place does floating blocks and chains the printer can't do the normal way
-            return Configs.Layers.USE_AIR_PLACE.getBooleanValue() && result == BlockCheck.Result.MISSING
-                    && AirPlace.isCandidate(mc.level, p, schematic.getBlockState(p));
+            // Air place does blocks with nothing beside or under them, now or later (not sand waiting for the string
+            // under it: that waits, the printer can't place it)
+            return AutoBuild.INSTANCE.airPlace.allowed() && result == BlockCheck.Result.MISSING
+                    && AirPlace.needsAirPlace(mc.level, schematic, p, schematic.getBlockState(p));
         });
     }
 
@@ -2164,9 +2169,11 @@ public class Mover {
             }
         }
         int hoverY = baseY + Configs.Movement.HOVER_HEIGHT.getIntegerValue();
+        // A little higher over a cactus (the feet a hair in its block hurt)
+        double lift = layers.isActive() ? layers.hoverLift() : 0;
         BlockPos pos = new BlockPos(goalBlock.getX() + offsets[column][0], hoverY, goalBlock.getZ() + offsets[column][1]);
         if (canHover(mc, pos)) {
-            return new Vec3(pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5);
+            return new Vec3(pos.getX() + 0.5, pos.getY() + lift, pos.getZ() + 0.5);
         }
         // Something is in the way there (a building, a wall): the nearest free spot around it, low first, from
         // where the block is still in reach. Never a spot inside blocks
@@ -2193,9 +2200,26 @@ public class Mover {
         }
         if (best == null) {
             // Nowhere to stand: the flight there finds no way and the block is left for later (see fly)
-            return new Vec3(pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5);
+            return new Vec3(pos.getX() + 0.5, pos.getY() + lift, pos.getZ() + 0.5);
         }
-        return new Vec3(best.getX() + 0.5, best.getY(), best.getZ() + 0.5);
+        return new Vec3(best.getX() + 0.5, best.getY() + lift, best.getZ() + 0.5);
+    }
+
+    /**
+     * The turns of a way at the target's own height get its lift as well (a little over the layer over a cactus, see
+     * LayerManager#hoverLift): else the way there runs that much lower, the feet in the cactus's block.
+     */
+    private static List<Vec3> withLift(List<Vec3> way, Vec3 target) {
+        int goalY = (int) Math.floor(target.y + 0.01);
+        double lift = target.y - goalY;
+        if (lift < 0.05) {
+            return way;
+        }
+        List<Vec3> lifted = new ArrayList<>(way.size());
+        for (Vec3 point : way) {
+            lifted.add(Math.abs(point.y - goalY) < 1.0e-6 ? new Vec3(point.x, target.y, point.z) : point);
+        }
+        return lifted;
     }
 
     /** The player fits there (2 blocks of free space) and isn't in the way of blocks still to be placed. */
@@ -2273,6 +2297,8 @@ public class Mover {
             state = State.IDLE;
             return;
         }
+        // Never to a point the player can't get to past the world border (the island's edge)
+        flyTarget = insideBorder(player, flyTarget);
         if (!ensureFlying(player)) {
             return;
         }
@@ -2286,6 +2312,7 @@ public class Mover {
             if (!found) {
                 return;
             }
+            flyPath = withLift(flyPath, flyTarget);
         }
         // Flying blind towards a part that isn't loaded: something coming up ahead (a building) is flown around, not
         // climbed (checked twice a second, the way around is worked out with what's loaded by now)
@@ -2409,10 +2436,31 @@ public class Mover {
             double side = Math.max(-0.1, Math.min(0.1, off * 0.4));
             motion = lanesAlongX ? new Vec3(motion.x, motion.y, motion.z + side) : new Vec3(motion.x + side, motion.y, motion.z);
         }
-        if (player.horizontalCollision) {
+        // Up over what's in the way; not up along the world border (the island's edge), which is no wall to get over
+        if (player.horizontalCollision && !atBorder(player)) {
             motion = new Vec3(motion.x, Math.max(motion.y, 0.3), motion.z);
         }
         steer(player, motion);
+    }
+
+    /** The point moved in where the player's box (0.6 wide) would reach past the world border. */
+    private static Vec3 insideBorder(LocalPlayer player, Vec3 point) {
+        net.minecraft.world.level.border.WorldBorder border = player.level().getWorldBorder();
+        double margin = 0.31;
+        if (border.getMaxX() - border.getMinX() < 2 * margin || border.getMaxZ() - border.getMinZ() < 2 * margin) {
+            return point;
+        }
+        double x = Math.max(border.getMinX() + margin, Math.min(border.getMaxX() - margin, point.x));
+        double z = Math.max(border.getMinZ() + margin, Math.min(border.getMaxZ() - margin, point.z));
+        return x == point.x && z == point.z ? point : new Vec3(x, point.y, z);
+    }
+
+    /** The player's box touches the world border. */
+    private static boolean atBorder(LocalPlayer player) {
+        net.minecraft.world.level.border.WorldBorder border = player.level().getWorldBorder();
+        net.minecraft.world.phys.AABB box = player.getBoundingBox();
+        return box.minX - border.getMinX() < 0.05 || border.getMaxX() - box.maxX < 0.05
+                || box.minZ - border.getMinZ() < 0.05 || border.getMaxZ() - box.maxZ < 0.05;
     }
 
     /** Flights longer than this are flown in parts when the whole way can't be found at once. */

@@ -43,8 +43,9 @@ public class SpeedTuner {
     private static final int RECENT = 10;
 
     /** One click of the printer, waiting for its result: how the spot and its neighbours looked when it clicked. */
+    /** {@code air}: clicked in the air (nothing beside or under it, the printer's air place on). */
     private record Pick(BlockPos pos, @Nullable Item item, int interval, long tick, @Nullable Item before,
-                        BlockState[] states, double distance) {
+                        BlockState[] states, double distance, boolean air) {
     }
 
     private enum Outcome { RIGHT, WRONG, LANDED_NEXT, NOTHING, PENDING }
@@ -117,7 +118,7 @@ public class SpeedTuner {
 
     /** The interval to use now: the one of the block the printer works on (the starting one until it's tuned). */
     public int interval() {
-        int start = Math.max(1, PrinterBridge.userInterval());
+        int start = Math.max(MIN_INTERVAL, PrinterBridge.userInterval());
         if (!Configs.Speed.AUTO_SPEED.getBooleanValue()) {
             return start;
         }
@@ -131,7 +132,7 @@ public class SpeedTuner {
 
     private int startInterval() {
         if (interval < 0) {
-            int start = Math.max(1, PrinterBridge.userInterval());
+            int start = Math.max(MIN_INTERVAL, PrinterBridge.userInterval());
             interval = start;
             // Start a little above what the last build on this server got to, instead of from the top again
             Integer remembered = remembered();
@@ -144,12 +145,18 @@ public class SpeedTuner {
     }
 
     private static int minInterval() {
-        return Math.max(1, Configs.Speed.AUTO_SPEED_MIN_INTERVAL.getIntegerValue());
+        return Math.max(MIN_INTERVAL, Configs.Speed.AUTO_SPEED_MIN_INTERVAL.getIntegerValue());
     }
+
+    /**
+     * The printer never goes faster than this, for any block: at 1 and 2 the player's server kicked the player (too
+     * many clicks).
+     */
+    public static final int MIN_INTERVAL = 3;
 
     /** The slowest an item is ever set to: the player's own interval (or what a mistake needs, if that's slower). */
     private static int slowest() {
-        return Math.max(Math.max(1, PrinterBridge.userInterval()), Configs.Speed.printerInterval());
+        return Math.max(Math.max(MIN_INTERVAL, PrinterBridge.userInterval()), Configs.Speed.printerInterval());
     }
 
     private ItemSpeed speedOf(@Nullable Item item) {
@@ -218,7 +225,8 @@ public class SpeedTuner {
         }
         // How far from the eye, for learning how far clicks still work here (see ReachStats)
         double distance = mc.player == null ? -1 : Math.sqrt(mc.player.getEyePosition().distanceToSqr(net.minecraft.world.phys.Vec3.atCenterOf(pos)));
-        picks.add(new Pick(pos.immutable(), item, interval(), AutoBuild.clientTicks, before, states, distance));
+        boolean air = PrinterBridge.isAirPlace() && AirPlace.isCandidate(mc.level, pos, states[0]);
+        picks.add(new Pick(pos.immutable(), item, interval(), AutoBuild.clientTicks, before, states, distance, air));
     }
 
     /**
@@ -310,6 +318,9 @@ public class SpeedTuner {
                 + ", " + age + " ticks after the click";
         s.recent[s.recentCount++ % RECENT] = outcome != Outcome.NOTHING;
         ReachStats.clicked(pick.distance(), outcome != Outcome.NOTHING);
+        if (pick.air()) {
+            AutoBuild.INSTANCE.airPlace.judged(pick.pos(), outcome != Outcome.NOTHING);
+        }
         switch (outcome) {
             case RIGHT -> {
                 good++;
@@ -321,13 +332,13 @@ public class SpeedTuner {
                 // have yet): after enough right blocks, the limit it set is lifted step by step
                 if (++s.sinceMistake >= FORGIVE_AFTER) {
                     s.sinceMistake = 0;
-                    if (s.floor > 1) {
+                    if (s.floor > MIN_INTERVAL) {
                         s.floor--;
                         BuildLog.line("SPEED", name(pick.item()) + ": " + FORGIVE_AFTER + " right since the last wrong one, may go down to "
                                 + Math.max(s.floor, minInterval()) + " again");
                     }
                     for (Switch change : switches.values()) {
-                        change.floor = Math.max(1, change.floor - 1);
+                        change.floor = Math.max(MIN_INTERVAL, change.floor - 1);
                     }
                 }
                 speedUp(pick.item(), s);
@@ -512,15 +523,15 @@ public class SpeedTuner {
                     Item item = item(parts[1]);
                     if (item != null) {
                         ItemSpeed s = newSpeed(item);
-                        s.floor = Math.max(s.floor, Integer.parseInt(parts[2]));
+                        s.floor = Math.max(Math.max(s.floor, MIN_INTERVAL), Integer.parseInt(parts[2]));
                         s.interval = Math.max(s.interval, s.floor);
                     }
                 } else if (parts[1].equals("block") && parts.length >= 8) {
                     Item item = item(parts[2]);
                     if (item != null) {
                         ItemSpeed s = newSpeed(item);
-                        s.interval = Math.max(1, Integer.parseInt(parts[3]));
-                        s.floor = Math.max(1, Integer.parseInt(parts[4]));
+                        s.interval = Math.max(MIN_INTERVAL, Integer.parseInt(parts[3]));
+                        s.floor = Math.max(MIN_INTERVAL, Integer.parseInt(parts[4]));
                         s.right = Integer.parseInt(parts[5]);
                         s.wrong = Integer.parseInt(parts[6]);
                         s.nothing = Integer.parseInt(parts[7]);
@@ -530,7 +541,7 @@ public class SpeedTuner {
                     Item to = item(parts[3]);
                     if (from != null && to != null) {
                         Switch change = switches.computeIfAbsent(switchKey(from, to), k -> new Switch());
-                        change.floor = Math.max(1, Integer.parseInt(parts[4]));
+                        change.floor = Math.max(MIN_INTERVAL, Integer.parseInt(parts[4]));
                         change.count = Integer.parseInt(parts[5]);
                         change.wrong = Integer.parseInt(parts[6]);
                     }

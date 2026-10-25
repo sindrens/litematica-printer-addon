@@ -326,7 +326,7 @@ public final class FlyPath {
                     for (int z = (int) Math.floor(sz[s] - 0.3); z <= (int) Math.floor(sz[s] + 0.3) && ok; z++) {
                         for (int dy = 0; dy <= 1 && ok; dy++) {
                             BlockPos pos = new BlockPos(x, y + dy, z);
-                            ok = level.isLoaded(pos) ? PathFinder.isPassable(level, pos) : unloadedIsFree;
+                            ok = PathFinder.insideBorder(level, pos) && (level.isLoaded(pos) ? PathFinder.isPassable(level, pos) : unloadedIsFree);
                         }
                     }
                 }
@@ -472,7 +472,8 @@ public final class FlyPath {
                 for (double oz : new double[]{-0.3, 0.3}) {
                     for (double oy : new double[]{0.0, 0.9, 1.8}) {
                         BlockPos pos = BlockPos.containing(p.x + ox, p.y + oy, p.z + oz);
-                        if (!PathFinder.isPassable(level, pos) && !(unloadedIsFree && !level.isLoaded(pos))) {
+                        if (!PathFinder.insideBorder(level, pos)
+                                || !PathFinder.isPassable(level, pos) && !(unloadedIsFree && !level.isLoaded(pos))) {
                             return false;
                         }
                     }

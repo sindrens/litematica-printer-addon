@@ -13,6 +13,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import no.sindrens.printeraddon.PrinterAddon;
 import no.sindrens.printeraddon.config.Configs;
+import no.sindrens.printeraddon.util.Chat;
 
 import javax.annotation.Nullable;
 import java.util.HashMap;
@@ -35,6 +36,8 @@ public class AirPlace {
     /** Check for misplaced blocks this long after placing. */
     private static final int VERIFY_AFTER = 10;
     private static final int SKIP_TICKS = 20 * 30;
+    /** This many clicks in the air with none kept: the server doesn't allow it. */
+    private static final int REFUSED_AFTER = 12;
 
     @Nullable
     private BlockPos anchor;
@@ -46,6 +49,11 @@ public class AirPlace {
     private final Map<BlockPos, Long> skipped = new HashMap<>();
     /** Blocks air place put where the schematic has air: to be broken. */
     private final Set<BlockPos> misplaced = new HashSet<>();
+    /** Clicks in the air since the build started, and how many of them the server kept. */
+    private int airClicks;
+    private int airKept;
+    /** The server took none of the first clicks in the air: no more air place this build. */
+    private boolean refused;
 
     public void reset() {
         anchor = null;
@@ -54,6 +62,34 @@ public class AirPlace {
         before.clear();
         skipped.clear();
         misplaced.clear();
+        airClicks = 0;
+        airKept = 0;
+        refused = false;
+    }
+
+    /** Air place may be used: switched on, and the server hasn't thrown out every block placed in the air so far. */
+    public boolean allowed() {
+        return Configs.Layers.USE_AIR_PLACE.getBooleanValue() && !refused;
+    }
+
+    /**
+     * What came of a printer click on a floating spot while air place was on: the block stayed, or nothing was
+     * there after the server's answer. None of the first ones stayed: the server (its anticheat) cancels blocks placed
+     * in the air, so it's stopped for this build instead of clicking on for nothing.
+     */
+    public void judged(BlockPos pos, boolean kept) {
+        airClicks++;
+        if (kept) {
+            airKept++;
+        }
+        if (!refused && airKept == 0 && airClicks >= REFUSED_AFTER) {
+            refused = true;
+            stop();
+            BuildLog.line("AIRPLACE", "the server kept none of " + airClicks + " blocks placed in the air (the last at "
+                    + pos.toShortString() + "): air place is off for this build");
+            Chat.warn("The server doesn't keep blocks placed in the air (" + airClicks + " tries, none stayed). Air place is off"
+                    + " for this build: floating blocks (nothing beside or under them) are left for later.");
+        }
     }
 
     public void stop() {
@@ -116,7 +152,8 @@ public class AirPlace {
             return;
         }
 
-        if (!Configs.Layers.USE_AIR_PLACE.getBooleanValue() || breakerBusy || verifyIn > 0 || !PrinterBridge.isIdle()) {
+        // The whole layer is air placed (see LayerManager#airLayer): nothing to do one block at a time
+        if (!allowed() || AutoBuild.INSTANCE.layers.airLayer() || breakerBusy || verifyIn > 0 || !PrinterBridge.isIdle()) {
             idleTicks = 0;
             return;
         }
@@ -174,7 +211,7 @@ public class AirPlace {
             if (!PlacementOrder.isReady(mc.level, schematic, pos, target)) {
                 continue;
             }
-            if (!isCandidate(mc.level, pos, target)) {
+            if (!needsAirPlace(mc.level, schematic, pos, target)) {
                 continue;
             }
 
@@ -196,6 +233,46 @@ public class AirPlace {
      */
     public static boolean isCandidate(Level level, BlockPos pos, BlockState target) {
         return !hasSupport(level, pos);
+    }
+
+    /**
+     * Nothing beside or under it to place it against, now or later in the schematic (a block above doesn't count: in a
+     * cactus farm that's the sand that needs this string under it first). Only air place can put it in.
+     */
+    public static boolean floatsForGood(Level level, WorldSchematic schematic, BlockPos pos) {
+        if (hasSupport(level, pos)) {
+            return false;
+        }
+        for (Direction direction : Direction.values()) {
+            if (direction == Direction.UP) {
+                continue;
+            }
+            BlockState planned = schematic.getBlockState(pos.relative(direction));
+            if (!planned.isAir() && !planned.canBeReplaced() && planned.getFluidState().isEmpty()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Only air place can put it in: it floats for good (see floatsForGood), and it isn't sand or the like over nothing
+     * (that would fall; the printer waits for the block under it). Sand waiting for the string under it in a cactus
+     * farm was air placed one at a time: 2 s of nothing each time, the printer can't place it.
+     */
+    public static boolean needsAirPlace(Level level, WorldSchematic schematic, BlockPos pos, BlockState target) {
+        return !(target.getBlock() instanceof net.minecraft.world.level.block.FallingBlock) && floatsForGood(level, schematic, pos);
+    }
+
+    /**
+     * Comes out right placed in the air whatever face the printer says it clicked: nothing that faces a way, lies along
+     * an axis, sits in a half of the block or turns (string's connections, a cactus's or sugar cane's age don't count).
+     */
+    public static boolean airSafe(BlockState target) {
+        net.minecraft.world.level.block.Block block = target.getBlock();
+        return target.getProperties().isEmpty() || block instanceof net.minecraft.world.level.block.TripWireBlock
+                || block instanceof net.minecraft.world.level.block.CactusBlock
+                || block instanceof net.minecraft.world.level.block.SugarCaneBlock;
     }
 
     private static boolean hasSupport(Level level, BlockPos pos) {
