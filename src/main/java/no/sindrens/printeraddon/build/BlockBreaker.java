@@ -282,9 +282,10 @@ public class BlockBreaker {
             if (!shouldBreak(result, mode, pos)) {
                 continue;
             }
-            // A cactus grown where the schematic has air, with a block of the layer still to go in beside it: it
-            // breaks by itself once that's placed (breaking it takes 3 s while flying, 5 times slower than standing)
-            if (result == BlockCheck.Result.EXTRA && popsByItself(mc.level, schematic, pos)) {
+            // A cactus that grew up (or the flower on it), with the layer's sand still to go in beside it somewhere
+            // down its column: the whole column drops by itself once that's placed (breaking each takes 3 s while
+            // flying, 5 times slower than standing: 74 blocks a minute on the player's server)
+            if (fallsByItself(mc.level, schematic, pos)) {
                 continue;
             }
 
@@ -322,13 +323,25 @@ public class BlockBreaker {
     }
 
     /**
-     * A cactus that will break by itself: beside it the schematic has a solid block of the layers being built that's
-     * still missing (a cactus can't stand next to one, it drops as soon as that's placed).
+     * A cactus (or a cactus flower on one) that will drop by itself: down its column, a cactus has beside it a solid
+     * block of the layers being built that's still missing and can go in now. A cactus can't stand next to one: it
+     * drops as soon as that's placed, and everything on top of it with it.
      */
-    private static boolean popsByItself(net.minecraft.world.level.Level level, WorldSchematic schematic, BlockPos pos) {
-        if (!level.getBlockState(pos).is(net.minecraft.world.level.block.Blocks.CACTUS)) {
-            return false;
+    public static boolean fallsByItself(net.minecraft.world.level.Level level, WorldSchematic schematic, BlockPos pos) {
+        BlockPos at = pos;
+        if (level.getBlockState(at).is(net.minecraft.world.level.block.Blocks.CACTUS_FLOWER)) {
+            at = at.below();
         }
+        for (int steps = 0; steps < 4 && level.getBlockState(at).is(net.minecraft.world.level.block.Blocks.CACTUS); steps++) {
+            if (popsByItself(level, schematic, at)) {
+                return true;
+            }
+            at = at.below();
+        }
+        return false;
+    }
+
+    private static boolean popsByItself(net.minecraft.world.level.Level level, WorldSchematic schematic, BlockPos pos) {
         LayerManager layers = AutoBuild.INSTANCE.layers;
         if (!layers.isActive() || pos.getY() < layers.getLayer() || pos.getY() > layers.getLayerTop()) {
             return false;
@@ -336,10 +349,16 @@ public class BlockBreaker {
         for (Direction direction : Direction.Plane.HORIZONTAL) {
             BlockPos side = pos.relative(direction);
             BlockState wanted = schematic.getBlockState(side);
-            if (!wanted.isAir() && wanted.isSolid() && level.getBlockState(side).canBeReplaced()
-                    && BlockCheck.check(level, schematic, side) == BlockCheck.Result.MISSING) {
-                return true;
+            if (wanted.isAir() || !wanted.isSolid() || !level.getBlockState(side).canBeReplaced()
+                    || BlockCheck.check(level, schematic, side) != BlockCheck.Result.MISSING) {
+                continue;
             }
+            // Sand only goes in on what holds it (its string)
+            if (wanted.getBlock() instanceof net.minecraft.world.level.block.FallingBlock
+                    && net.minecraft.world.level.block.FallingBlock.isFree(level.getBlockState(side.below()))) {
+                continue;
+            }
+            return true;
         }
         return false;
     }

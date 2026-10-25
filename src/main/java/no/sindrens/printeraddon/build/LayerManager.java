@@ -979,12 +979,56 @@ public class LayerManager {
             }
         }
         boolean together = water == 0 && onTop >= TOGETHER_MIN && others * TOGETHER_OTHERS <= onTop;
+        // Cactus on the upper layer whose sand comes one layer higher: built with that layer instead. Paired with the
+        // layer below, the cactus stood open on top until the next pass, and grew a block or two with a flower on it
+        // (552 flowers where string and sand go, grown cactus to break, the player brushing them)
+        if (together && cactusOpenOnTop(level, schematic, areas, y + 1)) {
+            BuildLog.line("LAYER", "Y " + (y + 1) + " not built together with Y " + y + ": its cactus would stand open on top until Y "
+                    + (y + 2) + " is built; Y " + (y + 1) + " goes with Y " + (y + 2) + " instead");
+            return y;
+        }
         if (onTop > 0) {
             BuildLog.line("LAYER", String.format("Y %d %s Y %d: on Y %d, %d blocks still to place stand on Y %d %s, %d others%s",
                     y + 1, together ? "built together with" : "not built together with", y, y + 1, onTop, y, kinds, others,
                     water > 0 ? ", " + water + " with water" : ""));
         }
         return together ? y + 1 : y;
+    }
+
+    /**
+     * Layer {@code y} has cactus still to go in, and the layer above it has blocks still to go in that stand on layer
+     * {@code y} (the sand on its string, beside the space each cactus grows into): built with that layer, the cactus
+     * can't grow while it waits.
+     */
+    private boolean cactusOpenOnTop(Level level, WorldSchematic schematic, List<SchematicHelper.Area> areas, int y) {
+        if (y + 1 > maxY || doneLayers.contains(y + 1)) {
+            return false;
+        }
+        int cactus = 0;
+        int above = 0;
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        for (SchematicHelper.Area area : areas) {
+            if (y < area.minY() || y + 1 > area.maxY()) {
+                continue;
+            }
+            for (int x = area.minX(); x <= area.maxX(); x++) {
+                for (int z = area.minZ(); z <= area.maxZ(); z++) {
+                    pos.set(x, y, z);
+                    BlockState target = schematic.getBlockState(pos);
+                    if (target.getBlock() instanceof net.minecraft.world.level.block.CactusBlock
+                            && BlockCheck.check(level, schematic, pos) == BlockCheck.Result.MISSING) {
+                        cactus++;
+                    }
+                    pos.set(x, y + 1, z);
+                    BlockState up = schematic.getBlockState(pos);
+                    if (!up.isAir() && up.getFluidState().isEmpty() && onLowerLayer(schematic, pos, up)
+                            && BlockCheck.check(level, schematic, pos) == BlockCheck.Result.MISSING) {
+                        above++;
+                    }
+                }
+            }
+        }
+        return cactus >= TOGETHER_MIN && above >= TOGETHER_MIN;
     }
 
     /**

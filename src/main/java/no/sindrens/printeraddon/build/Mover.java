@@ -3015,6 +3015,11 @@ public class Mover {
                         if (result.needsBreaking() && AutoBuild.INSTANCE.isConflict(pos, result, mc.level.getBlockState(pos))) {
                             continue;
                         }
+                        // A cactus that grew up, or the flower on it, that drops by itself once the sand beside its
+                        // column goes in: nothing to fly to or wait for (the spot is placeable after)
+                        if (result != BlockCheck.Result.MISSING && BlockBreaker.fallsByItself(mc.level, schematic, pos)) {
+                            continue;
+                        }
                         if (result == BlockCheck.Result.MISSING && mc.level.getBlockState(pos).isAir()) {
                             AutoBuild.INSTANCE.markEmpty(pos);
                         }
