@@ -28,5 +28,20 @@ public class TestCommands implements ModInitializer {
                     FakeShop.openMain(context.getSource().getPlayerOrException());
                     return 1;
                 })));
+        // A PlayerVaults-like /pv N: a double chest of its own per number, kept while the game runs
+        CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
+                dispatcher.register(Commands.literal("pv").then(Commands.argument("number",
+                        com.mojang.brigadier.arguments.IntegerArgumentType.integer(1, 99)).executes(context -> {
+                    ServerPlayer player = context.getSource().getPlayerOrException();
+                    int number = com.mojang.brigadier.arguments.IntegerArgumentType.getInteger(context, "number");
+                    net.minecraft.world.SimpleContainer vault = VAULTS.computeIfAbsent(number, n -> new net.minecraft.world.SimpleContainer(54));
+                    player.openMenu(new net.minecraft.world.SimpleMenuProvider(
+                            (id, inventory, p) -> net.minecraft.world.inventory.ChestMenu.sixRows(id, inventory, vault),
+                            Component.literal("Vault #" + number)));
+                    return 1;
+                }))));
     }
+
+    /** The vaults of /pv (see above), by number. */
+    public static final java.util.Map<Integer, net.minecraft.world.SimpleContainer> VAULTS = new java.util.HashMap<>();
 }

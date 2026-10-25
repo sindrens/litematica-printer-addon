@@ -28,6 +28,8 @@ public final class PlacementOrder {
     /** Lower goes first. */
     /** A block leaving the reach within this many ticks is placed first (see order). */
     private static final double URGENT_TICKS = 10;
+    /** A block leaving the reach within this many ticks goes first whatever is in hand. */
+    private static final double LAST_CHANCE_TICKS = 4;
 
     public static int tier(WorldSchematic schematic, BlockPos pos, BlockState target) {
         if (needsSupport(target)) {
@@ -244,7 +246,12 @@ public final class PlacementOrder {
         for (BlockPos pos : ready) {
             left.put(pos, ticksLeft.applyAsDouble(pos));
         }
+        // Of those about to go, the item in hand first unless one is all but gone: string and sand of a cactus farm
+        // went string, sand, string, sand (3491 item switches for 9220 blocks)
         ready.sort(Comparator.<BlockPos>comparingInt(pos -> left.get(pos) < URGENT_TICKS ? 0 : 1)
+                .thenComparingInt(pos -> left.get(pos) < LAST_CHANCE_TICKS ? 0 : 1)
+                .thenComparingInt(pos -> left.get(pos) < URGENT_TICKS && inHand != null
+                        && !StateRules.itemFor(schematic.getBlockState(pos)).is(inHand) ? 1 : 0)
                 .thenComparingDouble(pos -> left.get(pos) < URGENT_TICKS ? left.get(pos) : 0)
                 .thenComparing(usual));
         return ready;

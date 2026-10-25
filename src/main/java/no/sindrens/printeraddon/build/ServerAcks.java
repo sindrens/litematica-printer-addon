@@ -25,6 +25,8 @@ public final class ServerAcks {
     }
 
     private static final Map<BlockPos, Click> waiting = new HashMap<>();
+    /** When the server answered the last click on each spot (kept a little while). */
+    private static final Map<BlockPos, Long> answeredAt = new HashMap<>();
     @Nullable
     private static BlockPos lastTried;
     private static int sent;
@@ -38,6 +40,7 @@ public final class ServerAcks {
 
     public static void reset() {
         waiting.clear();
+        answeredAt.clear();
         lastTried = null;
         sent = 0;
         answered = 0;
@@ -67,22 +70,60 @@ public final class ServerAcks {
     /** The server has done every click up to this sequence number. */
     public static void acked(int sequence) {
         long now = AutoBuild.clientTicks;
-        for (Iterator<Click> it = waiting.values().iterator(); it.hasNext(); ) {
-            Click click = it.next();
+        if (answeredAt.size() > 512) {
+            answeredAt.values().removeIf(at -> now - at > TIMEOUT);
+        }
+        for (Iterator<Map.Entry<BlockPos, Click>> it = waiting.entrySet().iterator(); it.hasNext(); ) {
+            Map.Entry<BlockPos, Click> entry = it.next();
+            Click click = entry.getValue();
             if (click.sequence() <= sequence) {
+                answeredAt.put(entry.getKey(), now);
                 long took = now - click.tick();
                 minuteAnswers++;
                 minuteTicks += took;
                 minuteMax = Math.max(minuteMax, took);
                 answered++;
+                ServerWatch.onAnswer(took);
                 it.remove();
             }
         }
     }
 
+    /** How long (ticks) the oldest click still without an answer has waited; 0 when none waits. */
+    public static int oldestWaiting() {
+        long oldest = 0;
+        long now = AutoBuild.clientTicks;
+        for (Click click : waiting.values()) {
+            // Never answered at all (dropped by the server): not waited for after the timeout
+            long age = now - click.tick();
+            if (age < TIMEOUT * 5) {
+                oldest = Math.max(oldest, age);
+            }
+        }
+        return (int) oldest;
+    }
+
+    /** Clicks still without an answer. */
+    public static int waitingCount() {
+        return waiting.size();
+    }
+
     /** The server answers (or it's too early to tell). */
     public static boolean works() {
         return answered > 0 || sent < NO_ANSWER_AFTER;
+    }
+
+    /**
+     * The block at this spot can't be trusted to be on the server yet: its click is still unanswered, or was answered
+     * less than {@code ticks} ago (the block update and the answer can come in either order). Sand or gravel placed on
+     * it would fall if it isn't there after all.
+     */
+    public static boolean unconfirmed(BlockPos pos, int ticks) {
+        if (isWaiting(pos)) {
+            return true;
+        }
+        Long at = answeredAt.get(pos);
+        return at != null && AutoBuild.clientTicks - at < ticks;
     }
 
     /** This spot was clicked and the server hasn't answered yet. */

@@ -15,4 +15,10 @@ public class ClientCommonPacketListenerMixin {
     private void printer_addon$disconnected(DisconnectionDetails details, CallbackInfo ci) {
         AutoBuild.INSTANCE.disconnected(details.reason() == null ? "?" : details.reason().getString());
     }
+
+    /** Every packet sent, counted by kind for the build log (how many a second the build sends, see ServerWatch). */
+    @Inject(method = "send(Lnet/minecraft/network/protocol/Packet;)V", at = @At("HEAD"))
+    private void printer_addon$sent(net.minecraft.network.protocol.Packet<?> packet, CallbackInfo ci) {
+        no.sindrens.printeraddon.build.ServerWatch.onPacketOut(packet);
+    }
 }

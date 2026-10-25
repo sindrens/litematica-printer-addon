@@ -517,7 +517,7 @@ public class LayerManager {
         }
         tillingLeft = findings.tilling;
         // Tilling needs a hoe: one from storage, else crafted (see Tools); enough for the tilling left
-        if (findings.tilling > 0 && mc.player != null && !Tools.hasUsableHoe(mc.player.getInventory())) {
+        if (findings.tilling > 0 && mc.player != null && !Tools.covered(Tools.HOE, mc.player.getInventory())) {
             findings.needs.put(Tools.HOE, Tools.hoesFor(findings.tilling - Tools.hoeUses(mc.player.getInventory()), mc.player.getInventory()));
         }
         // A pickaxe and a shovel for breaking wrong blocks (a hopper or an observer drops nothing without a pickaxe),
@@ -630,7 +630,9 @@ public class LayerManager {
             lastPlaced = placed;
             ticksWithoutProgress = 0;
             reportedStuck = false;
-        } else {
+        } else if (mc.player == null || !AutoBuild.INSTANCE.mover.isTravelling(mc.player)) {
+            // Flying to the next blocks isn't standing still: no "nothing placed" warning for a long flight (a flight
+            // that never gets anywhere is caught by the watchdog, see AutoBuild)
             ticksWithoutProgress += interval;
         }
 
@@ -695,7 +697,7 @@ public class LayerManager {
         }
     }
 
-    private static String blockName(BlockState state) {
+    static String blockName(BlockState state) {
         return net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(state.getBlock()).getPath();
     }
 
@@ -704,7 +706,7 @@ public class LayerManager {
         Findings findings = new Findings();
         deferredNeeds(mc.level, schematic, left, findings);
         tillingLeft = findings.tilling;
-        if (findings.tilling > 0 && mc.player != null && !Tools.hasUsableHoe(mc.player.getInventory())) {
+        if (findings.tilling > 0 && mc.player != null && !Tools.covered(Tools.HOE, mc.player.getInventory())) {
             findings.needs.put(Tools.HOE, Tools.hoesFor(findings.tilling - Tools.hoeUses(mc.player.getInventory()), mc.player.getInventory()));
         }
         updateShoppingList(mc, findings.needs);
@@ -879,7 +881,9 @@ public class LayerManager {
     private static boolean unfinished(Level level, WorldSchematic schematic, BlockPos pos, BlockCheck.Result result, boolean extraCounts) {
         return switch (result) {
             case OK -> false;
-            case EXTRA -> extraCounts;
+            // A block of the "always break" list (a cactus flower where the farm has air): the layer isn't done
+            // while it's there, so the player goes there and it's broken
+            case EXTRA -> extraCounts || BlockBreaker.breakAnyway(level, schematic, pos);
             // Something that mustn't be broken (a container, an unbreakable block) where the schematic wants another
             // block: never done by the add-on, so it doesn't hold the layer up; listed at the end, to fix by hand (a
             // hopper of the player's own where the redstone goes kept a layer waiting 30 s, and the build 20 s more).

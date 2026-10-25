@@ -143,7 +143,27 @@ public class FarmTest implements FabricClientGameTest {
             if (System.getenv("PRINTER_ADDON_OBSTACLE") != null) {
                 server.runCommand("fill 60 -58 8 63 -41 11 stone_bricks");
             }
-            restock(context, server);
+            // PRINTER_ADDON_SHOP=1: nothing is given, everything is bought in the fake /shop and kept in /pv 1 and 2
+            // (to test buying in bulk into the vaults)
+            boolean shop = System.getenv("PRINTER_ADDON_SHOP") != null;
+            if (shop) {
+                FakeShop.reset();
+                TestCommands.VAULTS.clear();
+                context.runOnClient(mc -> {
+                    Configs.Shop.SHOP_COMMAND.setValueFromString("shop");
+                    Configs.Shop.SHOP_SECTION.setValueFromString("minecraft:paper");
+                    Configs.Shop.PROBE_BUY_SCREEN.setBooleanValue(true);
+                    no.sindrens.printeraddon.shop.ShopScanner.INSTANCE.start(mc);
+                });
+                int scanTicks = 0;
+                while (scanTicks < 20 * 60 * 5 && context.computeOnClient(mc -> no.sindrens.printeraddon.shop.ShopScanner.INSTANCE.isRunning())) {
+                    context.waitTicks(10);
+                    scanTicks += 10;
+                }
+                System.out.println("FARM TEST: shop scanned in " + scanTicks / 20 + " s");
+            } else {
+                restock(context, server);
+            }
             context.waitTicks(20);
 
             context.runOnClient(mc -> {
@@ -154,8 +174,9 @@ public class FarmTest implements FabricClientGameTest {
                 Configs.Generic.STATUS_FILE.setBooleanValue(true);
                 // The player's own Litematica Printer settings on their server: range 4.5, interval 12
                 me.aleksilassila.litematica.printer.config.Configs.PRINTING_RANGE.setDoubleValue(4.5);
-                // No /pv in singleplayer
-                Configs.Shop.VAULTS.setValueFromString("");
+                // No /pv in singleplayer, except the test's own (PRINTER_ADDON_SHOP)
+                Configs.Shop.VAULTS.setValueFromString(shop ? "1,2" : "");
+                Configs.Shop.AUTO_BUY.setBooleanValue(shop || Configs.Shop.AUTO_BUY.getBooleanValue());
                 // The player's interval on their server now (PRINTER_ADDON_INTERVAL to try another)
                 String interval = System.getenv("PRINTER_ADDON_INTERVAL");
                 me.aleksilassila.litematica.printer.config.Configs.PRINTING_INTERVAL.setIntegerValue(
@@ -208,7 +229,7 @@ public class FarmTest implements FabricClientGameTest {
                 if (ticks % SCREENSHOT_SAVE_EVERY == 0) {
                     context.takeScreenshot("rec");
                 }
-                if (ticks % RESTOCK_EVERY == 0) {
+                if (ticks % RESTOCK_EVERY == 0 && !shop) {
                     restock(context, server);
                 }
                 // Stuck = no block placed at all for a while (a big layer like the hopper floor takes long)

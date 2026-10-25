@@ -88,6 +88,10 @@ public final class BuildHud {
                 average > 0 ? String.format("%.0f", average) : "-", build.speed.describe()), GREY);
         int busy = build.stats.printerBusyPercent();
         add(lines, colors, "Printer busy " + busy + "%" + (busy < 80 ? " (mostly idle because: " + build.stats.printerIdleReason() + ")" : ""), GREY);
+        String guard = no.sindrens.printeraddon.build.ServerWatch.describe();
+        if (guard != null) {
+            add(lines, colors, "Speed guard: " + guard, WARN);
+        }
         add(lines, colors, "Doing: " + build.doing(), GREY);
         add(lines, colors, build.spendingLine(), GREY);
 

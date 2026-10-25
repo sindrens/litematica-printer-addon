@@ -21,7 +21,7 @@ import java.nio.file.Path;
 public class Configs implements IConfigHandler {
     private static final String CONFIG_FILE_NAME = PrinterAddon.MOD_ID + ".json";
     /** 2: the fastest automatic interval went from 2 to 1. */
-    private static final int CONFIG_VERSION = 5;
+    private static final int CONFIG_VERSION = 6;
 
     public static class Generic {
         public static final ConfigBoolean ADDON_ENABLED = new ConfigBoolean("addonEnabled", true,
@@ -114,13 +114,18 @@ public class Configs implements IConfigHandler {
         public static final ConfigBoolean LOOK_AT_BLOCKS = new ConfigBoolean("lookAtBlocks", false,
                 "Tell the server you look at the block being broken (your camera stays free). For servers with strict anticheat.",
                 "Look at blocks when breaking");
+        public static final ConfigString ALWAYS_BREAK = new ConfigString("alwaysBreakBlocks", "cactus_flower",
+                "Blocks broken wherever they are in the schematic's area while auto build is on, also where the schematic\n"
+                        + "has air and in layers already built (when the player comes by). Block ids, comma separated, e.g.\n"
+                        + "cactus_flower, or minecraft:cobweb. Empty: none.",
+                "Always break these blocks");
         public static final ConfigBoolean SKIP_CONTAINERS = new ConfigBoolean("skipContainers", true,
                 "Never break chests, barrels, hoppers, shulker boxes, furnaces etc., even if they are wrong.",
                 "Never break containers");
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
                 BREAK_WRONG_BLOCKS, BREAK_WRONG_STATE, BREAK_RANGE, MIN_TOOL_DURABILITY, BREAK_TIMEOUT_SECONDS,
-                WRONG_FOR_TICKS, MAX_BREAKS_PER_BLOCK, LOOK_AT_BLOCKS, SKIP_CONTAINERS);
+                WRONG_FOR_TICKS, MAX_BREAKS_PER_BLOCK, LOOK_AT_BLOCKS, ALWAYS_BREAK, SKIP_CONTAINERS);
     }
 
     public static class Layers {
@@ -269,6 +274,12 @@ public class Configs implements IConfigHandler {
                         + "own materials, never tools, renamed or enchanted items. What the shop doesn't buy stays in your\n"
                         + "inventory (dropped only when the build is stuck for room).",
                 "Sell leftovers when storage is full");
+        public static final ConfigBoolean STOCK_UP = new ConfigBoolean("stockUpVaults", true,
+                "Buy in bulk into your vaults (and linked chests): when the shop has to be used, a whole inventory of one\n"
+                        + "item is bought at a time and put away, up to what the build still needs and the vaults have room for;\n"
+                        + "the inventory is then filled from the vaults. The next trips only open a vault (2 s instead of 14 s in\n"
+                        + "the shop). The more vaults and chests it may use, the more it buys ahead.",
+                "Buy in bulk into vaults");
         public static final ConfigInteger BUY_WHEN_LEFT = new ConfigInteger("buyWhenLeft", 8, 0, 64,
                 "Only get more of an item (from linked chests or the shop) once this many or fewer are left in the inventory.\n"
                         + "How much is bought is shared between the items the layer needs, and a few slots always stay free.",
@@ -307,7 +318,7 @@ public class Configs implements IConfigHandler {
                 "Craft command");
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                FETCH_FROM_CHESTS, VAULTS, PUT_AWAY_ON_STOP, VAULT_COMMAND, AUTO_BUY, SELL_LEFTOVERS, BUY_WHEN_LEFT, STACKS_BELOW, PREFER_BLOCKS, USE_CRAFT_COMMAND, CRAFT_COMMAND,
+                FETCH_FROM_CHESTS, VAULTS, PUT_AWAY_ON_STOP, VAULT_COMMAND, AUTO_BUY, STOCK_UP, SELL_LEFTOVERS, BUY_WHEN_LEFT, STACKS_BELOW, PREFER_BLOCKS, USE_CRAFT_COMMAND, CRAFT_COMMAND,
                 SHOP_COMMAND, SHOP_SECTION, PROBE_BUY_SCREEN, MAX_PAGES, WAIT_TIMEOUT_TICKS);
     }
 
@@ -341,11 +352,16 @@ public class Configs implements IConfigHandler {
                 "Find the fastest printer interval that still places right, per kind of block: start at the preset's interval,\n"
                         + "go faster after a run of correct blocks, one tick slower as soon as a block comes out wrong.",
                 "Automatic speed");
-        public static final ConfigInteger AUTO_SPEED_MIN_INTERVAL = new ConfigInteger("autoSpeedMinInterval", 3, 3, 40,
+        public static final ConfigInteger AUTO_SPEED_MIN_INTERVAL = new ConfigInteger("autoSpeedMinInterval", 2, 2, 40,
                 "Automatic speed never goes below this printer interval. It only gets there while every block comes out\n"
-                        + "right, and slows down again at the first wrong one. Never below 3: at 1 and 2 servers kick the player\n"
-                        + "for too many clicks. Raise it if a server still complains.",
+                        + "right, and slows down again at the first wrong one. Never below 2 (at 1 the server kicked the player).\n"
+                        + "The speed guard slows down by itself when the server is slow to answer.",
                 "Automatic speed: fastest interval");
+        public static final ConfigBoolean SPEED_GUARD = new ConfigBoolean("speedGuard", true,
+                "Watches how fast the server answers the clicks. A click without an answer for 2 seconds: placing waits\n"
+                        + "for it, then goes on at at most 8 blocks a second, more again step by step after 30 s each. Answers\n"
+                        + "slow on average set a limit too. Every 10 s the build log gets a SERVER line with what it saw.",
+                "Speed guard");
         public static final ConfigInteger MAX_PLACEMENTS_PER_SECOND = new ConfigInteger("maxPlacementsPerSecond", 0, 0, 40,
                 "For servers with a strict anticheat: the printer places at most this many blocks per second. 0 = no limit\n"
                         + "(the printer's interval decides).",
@@ -357,7 +373,7 @@ public class Configs implements IConfigHandler {
         public static final ConfigInteger AUTO_SPEED_STEP_BLOCKS = new ConfigInteger("autoSpeedStepBlocks", 10, 5, 1000,
                 "Automatic speed goes one tick faster after this many correct blocks in a row.",
                 "Automatic speed: blocks per step");
-        public static final ConfigInteger PRINTER_INTERVAL = new ConfigInteger("customPrinterInterval", 12, 3, 40,
+        public static final ConfigInteger PRINTER_INTERVAL = new ConfigInteger("customPrinterInterval", 12, 2, 40,
                 "Custom preset: the printer's printing interval (lower is faster). Below 12 the printer often places blocks wrong.",
                 "Custom: printer interval");
         public static final ConfigInteger BREAK_COOLDOWN = new ConfigInteger("customBreakCooldownTicks", 2, 0, 100,
@@ -374,7 +390,7 @@ public class Configs implements IConfigHandler {
                 "Custom: fly speed");
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                AUTO_SPEED, AUTO_SPEED_MIN_INTERVAL, AUTO_SPEED_STEP_BLOCKS, MAX_PLACEMENTS_PER_SECOND, LAG_PAUSE_TPS, PRINTER_INTERVAL, BREAK_COOLDOWN, SHOP_CLICK_DELAY, WALK_SPEED, FLY_SPEED);
+                AUTO_SPEED, AUTO_SPEED_MIN_INTERVAL, SPEED_GUARD, AUTO_SPEED_STEP_BLOCKS, MAX_PLACEMENTS_PER_SECOND, LAG_PAUSE_TPS, PRINTER_INTERVAL, BREAK_COOLDOWN, SHOP_CLICK_DELAY, WALK_SPEED, FLY_SPEED);
 
         public static double walkSpeed() {
             SpeedPreset preset = preset();
@@ -447,6 +463,12 @@ public class Configs implements IConfigHandler {
                     Speed.PRINTER_INTERVAL.setIntegerValue(Math.max(3, Speed.PRINTER_INTERVAL.getIntegerValue()));
                     // Air place was off: the floating string at the bottom of a cactus farm was never placed
                     Layers.USE_AIR_PLACE.setBooleanValue(true);
+                }
+                if (version < 6) {
+                    // 2 is the fastest again (the speed guard slows down when the server can't keep up)
+                    if (Speed.AUTO_SPEED_MIN_INTERVAL.getIntegerValue() == 3) {
+                        Speed.AUTO_SPEED_MIN_INTERVAL.setIntegerValue(2);
+                    }
                 }
             }
         }

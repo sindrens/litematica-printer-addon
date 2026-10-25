@@ -40,6 +40,7 @@ public class PrinterMixin {
             AutoBuild.INSTANCE.lastQueuedTick = AutoBuild.clientTicks;
             if (AutoBuild.INSTANCE.isRunning()) {
                 AutoBuild.INSTANCE.stats.placed();
+                no.sindrens.printeraddon.build.ServerWatch.onPlaced();
             }
         }
         // Each free turn, exactly what happened: placed, or why not (from what it was offered in this very turn)

@@ -149,10 +149,11 @@ public class SpeedTuner {
     }
 
     /**
-     * The printer never goes faster than this, for any block: at 1 and 2 the player's server kicked the player (too
-     * many clicks).
+     * The printer never goes faster than this, for any block: at 1 the player's server kicked the player (too many
+     * clicks). At 2 to 4 the printer places a block a tick at most anyway (ten of its actions a tick at interval 1, two
+     * per block); ServerWatch slows down when the server can't keep up.
      */
-    public static final int MIN_INTERVAL = 3;
+    public static final int MIN_INTERVAL = 2;
 
     /** The slowest an item is ever set to: the player's own interval (or what a mistake needs, if that's slower). */
     private static int slowest() {

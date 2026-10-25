@@ -80,6 +80,38 @@ public final class Tools {
         return bestSlot(kind, inventory) >= 0;
     }
 
+    /**
+     * There's a tool of this kind to work with: a plain one, or one of the player's own at least as good as diamond
+     * that isn't about to break. A netherite pickaxe and shovel in the inventory still had a diamond pickaxe and shovel
+     * asked for: diamonds and sticks were taken from the vaults, crafting was refused by the server, and it all went
+     * back (5 s and two slots).
+     */
+    public static boolean covered(Item kind, Inventory inventory) {
+        if (has(kind, inventory)) {
+            return true;
+        }
+        for (int slot = 0; slot < Inventory.INVENTORY_SIZE; slot++) {
+            ItemStack stack = inventory.getItem(slot);
+            if (usablePrivate(kind, stack) && rank(stack.getItem()) >= rank(Items.DIAMOND_PICKAXE)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Uses left in the player's own hoes at least as good as diamond, down to where they're put away. */
+    public static int privateHoeUses(Inventory inventory) {
+        long uses = 0;
+        for (int slot = 0; slot < Inventory.INVENTORY_SIZE; slot++) {
+            ItemStack stack = inventory.getItem(slot);
+            if (usablePrivate(HOE, stack) && rank(stack.getItem()) >= rank(Items.DIAMOND_HOE)) {
+                int reserve = Math.max(Configs.Breaking.MIN_TOOL_DURABILITY.getIntegerValue(), stack.getMaxDamage() / 20);
+                uses += Math.max(0, Math.min(100000, left(stack)) - reserve);
+            }
+        }
+        return (int) Math.min(Integer.MAX_VALUE, uses);
+    }
+
     /** How many plain tools of this kind the inventory has (the player's own don't count). */
     public static int count(Item kind, Inventory inventory) {
         int count = 0;
@@ -116,9 +148,12 @@ public final class Tools {
         return best;
     }
 
-    /** How good the material is: diamond 5, iron 4, stone 3, gold 2, wood 1 (netherite is the player's own). */
+    /** How good the material is: netherite 6, diamond 5, iron 4, stone 3, gold 2, wood 1. */
     public static int rank(Item item) {
         String id = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(item).getPath();
+        if (id.startsWith("netherite_")) {
+            return 6;
+        }
         if (id.startsWith("diamond_")) {
             return 5;
         }
@@ -150,13 +185,13 @@ public final class Tools {
             axe |= state.is(net.minecraft.tags.BlockTags.MINEABLE_WITH_AXE);
         }
         java.util.List<Item> missing = new java.util.ArrayList<>();
-        if (pickaxe && !has(PICKAXE, inventory) && !Crafter.refused(PICKAXE)) {
+        if (pickaxe && !covered(PICKAXE, inventory) && !Crafter.refused(PICKAXE)) {
             missing.add(PICKAXE);
         }
-        if (shovel && !has(SHOVEL, inventory) && !Crafter.refused(SHOVEL)) {
+        if (shovel && !covered(SHOVEL, inventory) && !Crafter.refused(SHOVEL)) {
             missing.add(SHOVEL);
         }
-        if (axe && !has(AXE, inventory) && !Crafter.refused(AXE)) {
+        if (axe && !covered(AXE, inventory) && !Crafter.refused(AXE)) {
             missing.add(AXE);
         }
         return missing;

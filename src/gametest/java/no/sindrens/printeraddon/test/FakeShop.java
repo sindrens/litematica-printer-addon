@@ -59,7 +59,8 @@ public final class FakeShop {
             Items.CONCRETE.green(), Items.CONCRETE.yellow(), Items.CONCRETE.orange(), Items.SMOOTH_STONE, Items.ANDESITE,
             Items.DIORITE, Items.GRANITE, Items.DEEPSLATE, Items.TUFF, Items.CALCITE, Items.CLAY,
             // page 2
-            Items.CHERRY_LEAVES, Items.REDSTONE_BLOCK, Items.COBBLESTONE_SLAB, Items.IRON_CHAIN, Items.CAULDRON};
+            Items.CHERRY_LEAVES, Items.REDSTONE_BLOCK, Items.COBBLESTONE_SLAB, Items.IRON_CHAIN, Items.CAULDRON,
+            Items.STRING, Items.CACTUS};
 
     public static void openMain(ServerPlayer player) {
         Menu menu = new Menu("Shop");

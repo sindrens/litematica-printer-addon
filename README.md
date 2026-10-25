@@ -27,6 +27,8 @@ It builds layer by layer from the bottom, flying over each layer in straight lan
 
 Your inventory can start empty. It takes what it needs from your vaults and linked chests and buys the rest. Before a lane it tops up what the lane needs, and on the last shop trip of a layer it also buys for the next one. Anything that costs under $50,000 a stack is bought in whole stacks; what's left over goes into your vaults.
 
+With "Buy in bulk into vaults" (on by default), a trip to the shop buys a whole inventory of one item at a time and puts it in your vaults, as far as there's room and the build still needs it. The next trips only open a vault, which takes about 2 seconds instead of about 14 in the shop. The more vaults and chests it may use, the more it buys ahead.
+
 It uses plain diamond tools (hoe, pickaxe, shovel, axe) until they break. If there's none in your inventory, vaults or chests, it crafts one from diamonds, or from a block of diamond it buys. Your own tools (enchanted, renamed or netherite) are used only when there's nothing else, and are put away before they break.
 
 When you stop it, or the build is done, it puts the building items back in your vaults. It warns you when they're getting full; link a chest for more room. You can clear out your vaults at any time, because it buys whatever is missing.
@@ -48,7 +50,10 @@ When you stop it, or the build is done, it puts the building items back in your 
 - It uses `/feed` and `/craft` if you have permission.
 - It stops when you take damage or another player comes close. Brushing a cactus of the build doesn't stop it while you have more than half your health, and it flies a little higher over cactus.
 - Blocks with nothing beside or under them to place them against, like the string at the bottom of a cactus farm, are placed in the air. If the server throws those blocks out, it stops doing that and tells you.
-- The printer interval never goes below 3: at 1 and 2 the server kicks you.
+- The printer interval never goes below 2. The speed guard watches how fast the server answers each click. If a click gets no answer for 2 seconds, placing waits, then it goes on at no more than 8 blocks a second and speeds up again step by step. Every 10 seconds the build log gets a SERVER line with blocks a second, answer times, the server's ticks per second, the ping and the packets sent.
+- It doesn't craft a diamond pickaxe or shovel when you have a netherite or diamond one of your own.
+- Blocks on the "Always break these blocks" list (cactus_flower by default) are broken wherever they are in the schematic's area, also where the schematic has air.
+- Your own blocks standing where the schematic wants something else are left alone. The build log and chat sum them up once, instead of listing every block.
 - It never flies past the world border, such as the edge of your island.
 - With the add-on off, Litematica Printer works as normal.
 - A farm that's already running (pistons firing) doesn't hold up a layer. Pumpkins or melons that grew where a stem belongs are broken, so the stem can be planted.

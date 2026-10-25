@@ -178,7 +178,47 @@ public class BlockBreaker {
         player.swing(InteractionHand.MAIN_HAND);
     }
 
+    /** The blocks of the "Always break these blocks" option (read again when it changes). */
+    private static String alwaysBreakText;
+    private static java.util.Set<net.minecraft.world.level.block.Block> alwaysBreak = java.util.Set.of();
+
+    /** One of the blocks the player wants gone wherever they are in the schematic (cactus flowers on the farm). */
+    public static boolean alwaysBreak(BlockState state) {
+        String text = Configs.Breaking.ALWAYS_BREAK.getStringValue();
+        if (!text.equals(alwaysBreakText)) {
+            alwaysBreakText = text;
+            java.util.Set<net.minecraft.world.level.block.Block> blocks = new java.util.HashSet<>();
+            for (String part : text.split("[,;\\s]+")) {
+                String id = part.trim().toLowerCase(java.util.Locale.ROOT);
+                if (id.isEmpty()) {
+                    continue;
+                }
+                net.minecraft.resources.Identifier key = net.minecraft.resources.Identifier.tryParse(id.contains(":") ? id : "minecraft:" + id);
+                if (key != null) {
+                    net.minecraft.core.registries.BuiltInRegistries.BLOCK.getOptional(key).ifPresent(block -> {
+                        if (block != net.minecraft.world.level.block.Blocks.AIR) {
+                            blocks.add(block);
+                        }
+                    });
+                }
+            }
+            alwaysBreak = blocks;
+        }
+        return !alwaysBreak.isEmpty() && alwaysBreak.contains(state.getBlock());
+    }
+
+    /** Broken as one of the "always break" blocks: there, and not what the schematic wants there. */
+    public static boolean breakAnyway(net.minecraft.world.level.Level level, WorldSchematic schematic, BlockPos pos) {
+        BlockState state = level.getBlockState(pos);
+        return alwaysBreak(state) && schematic.getBlockState(pos).getBlock() != state.getBlock();
+    }
+
     private static boolean shouldBreak(BlockCheck.Result result, Mode mode, BlockPos pos) {
+        net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+        WorldSchematic schematic = SchematicHelper.world();
+        if (mode == Mode.WRONG && mc.level != null && schematic != null && breakAnyway(mc.level, schematic, pos)) {
+            return true;
+        }
         return switch (mode) {
             // A container the printer put in the wrong spot during this build may be broken too
             case WRONG -> (result.needsBreaking() && !AutoBuild.INSTANCE.isConflict(pos, result,
@@ -219,7 +259,8 @@ public class BlockBreaker {
                 bestDistance = distance;
                 continue;
             }
-            if (!DataManager.getRenderLayerRange().isPositionWithinRange(pos)) {
+            // Only the layers being built; "always break" blocks anywhere in the schematic's area
+            if (!DataManager.getRenderLayerRange().isPositionWithinRange(pos) && !(mode == Mode.WRONG && breakAnyway(mc.level, schematic, pos))) {
                 continue;
             }
             // A temporary rail stays until the rail helper releases it

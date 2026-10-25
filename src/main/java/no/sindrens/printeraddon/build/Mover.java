@@ -297,6 +297,8 @@ public class Mover {
      * now and then instead of 66, or a little lower for a moment after coming down to it.
      */
     private static final double FEET_SLACK = 0.2;
+    /** The last tick the printer couldn't place (flying too fast, paused): a stall is only counted after it. */
+    private long lastPrinterFree = -1000;
     /** How fast to glide now (from what's in reach, see glideSpeed). */
     private double glideSpeed = GLIDE_MAX;
     private long lastRetarget;
@@ -595,7 +597,13 @@ public class Mover {
         // Never waiting for good on blocks the printer doesn't take: 3 s in reach, nothing placed, nothing else going
         // on (no breaking, no bucket, no lag), and they're left out for 30 s. A lane stood still for minutes on
         // "placing 10 in reach" that the printer called not ready (a test of two layers at once)
-        if (!inReach.isEmpty() && tick - lastPlacementTick > 60 && tick - lastNotTakenAt > 60 && PrinterBridge.isIdle()
+        // Only time the printer could have placed counts: not while flying too fast for it, or paused for anything
+        // else (a leftover sand block was left out for 30 s each time it was flown to, after 3 s of flying there)
+        if (isTravelling(player) || AutoBuild.INSTANCE.shouldPausePrinter()) {
+            lastPrinterFree = tick;
+        }
+        if (!inReach.isEmpty() && tick - lastPlacementTick > 60 && tick - lastNotTakenAt > 60 && tick - lastPrinterFree > 60
+                && PrinterBridge.isIdle()
                 && !AutoBuild.INSTANCE.breaker.isBusy() && !AutoBuild.INSTANCE.fluids.isBusy() && !ServerLag.shouldWait(mc)) {
             lastNotTakenAt = tick;
             StringBuilder why = new StringBuilder();
@@ -1075,6 +1083,26 @@ public class Mover {
                 best = part;
             }
         }
+        // The layer's first lane: the edge nearest the player, then across in order. From the middle it swept to one
+        // edge and flew back over the half it had done for the other (lane 11 down to 1, then back to 12)
+        if (laneIndex < 0 && parts.size() > 1) {
+            LanePart low = null;
+            LanePart high = null;
+            for (LanePart part : parts) {
+                if (low == null || part.index() < low.index()) {
+                    low = part;
+                }
+                if (high == null || part.index() > high.index()) {
+                    high = part;
+                }
+            }
+            LanePart edge = partDistance(at, low) <= partDistance(at, high) ? low : high;
+            if (edge != best) {
+                BuildLog.line("SWEEP", "starting at the edge nearest the player: lane " + (edge.index() + 1) + " (lane "
+                        + (best.index() + 1) + " was nearest, in the middle)");
+                best = edge;
+            }
+        }
         laneIndex = best.index();
         int c = best.c();
         flownParts.computeIfAbsent(c, k -> new ArrayList<>()).add(new int[]{best.lo(), best.hi()});
@@ -1490,7 +1518,8 @@ public class Mover {
                 return false;
             }
             BlockCheck.Result result = BlockCheck.check(mc.level, schematic, p);
-            if (result.needsBreaking() || result == BlockCheck.Result.PROTECTED) {
+            if (result.needsBreaking() || result == BlockCheck.Result.PROTECTED
+                    || result == BlockCheck.Result.EXTRA && BlockBreaker.breakAnyway(mc.level, schematic, p)) {
                 return true;
             }
             if (result == BlockCheck.Result.BUCKET) {
@@ -2853,8 +2882,10 @@ public class Mover {
                         if (result == BlockCheck.Result.MISSING && mc.level.getBlockState(pos).isAir()) {
                             AutoBuild.INSTANCE.markEmpty(pos);
                         }
-                        if (result == BlockCheck.Result.OK || result == BlockCheck.Result.EXTRA
-                                || result == BlockCheck.Result.UNLOADED) {
+                        // Where the schematic has air: nothing to do, unless it's one of the "always break" blocks (a
+                        // cactus flower on the farm), which is flown to like a wrong block
+                        if (result == BlockCheck.Result.OK || result == BlockCheck.Result.UNLOADED
+                                || result == BlockCheck.Result.EXTRA && !BlockBreaker.breakAnyway(mc.level, schematic, pos)) {
                             continue;
                         }
 

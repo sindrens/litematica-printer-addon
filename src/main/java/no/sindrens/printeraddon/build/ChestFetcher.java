@@ -143,6 +143,15 @@ public class ChestFetcher {
         return storageFull;
     }
 
+    /** Free slots in the storage spots that have been open, as they were then (unknown ones don't count). */
+    public int knownFreeSlots() {
+        int free = 0;
+        for (Fill f : fill.values()) {
+            free += Math.max(0, f.total() - f.used());
+        }
+        return free;
+    }
+
     /** True if there's anywhere to take from or store to (linked chests or vaults). */
     public static boolean hasStorage(Minecraft mc) {
         return Configs.Shop.FETCH_FROM_CHESTS.getBooleanValue() && !spots(mc).isEmpty();

@@ -27,6 +27,8 @@ public class AutoBuild {
     public final EntityPlacer entities = new EntityPlacer();
     public final Crafter crafter = new Crafter();
     public final ChestFetcher fetcher = new ChestFetcher();
+    /** Bulk buying into the vaults (see StockUp). */
+    public final StockUp stock = new StockUp();
     public final InventoryWatch inventory = new InventoryWatch();
     /** What the printer was last offered (for the idle analysis in the debug log). */
     public long lastOfferedTick;
@@ -431,10 +433,19 @@ public class AutoBuild {
             if (Minecraft.getInstance().player != null && mover.isTravelling(Minecraft.getInstance().player)) {
                 return "flying";
             }
-            // Optional cap for strict anticheats: no more than this many placements per second
+            // The server slow to answer the clicks: wait for its answer, then slower for a while (see ServerWatch)
+            if (ServerWatch.stalled()) {
+                return "server slow to answer";
+            }
+            // Optional cap for strict anticheats: no more than this many placements per second; and the speed
+            // guard's limit while the server catches up
             int cap = Configs.Speed.MAX_PLACEMENTS_PER_SECOND.getIntegerValue();
+            int guard = ServerWatch.cap();
+            if (guard > 0 && (cap <= 0 || guard < cap)) {
+                cap = guard;
+            }
             if (cap > 0 && stats.placedInLastSecond() >= cap) {
-                return "placement cap";
+                return guard == cap ? "speed guard limit" : "placement cap";
             }
             // A swap still on its way to the server would make the printer click with the wrong item
             inventory.update(Minecraft.getInstance());
@@ -560,7 +571,12 @@ public class AutoBuild {
             boolean waiting = acks ? ServerAcks.isWaiting(pos) : recentlyTried.containsKey(pos);
             boolean nextToWaiting = result == BlockCheck.Result.MISSING
                     && (acks ? ServerAcks.nextToWaiting(pos) : nextToUnconfirmed(pos, now, confirm));
-            if (waiting || givenUp(pos) || nextToWaiting || heldForBelow(mc, schematic, pos)) {
+            // Sand, gravel, concrete powder: only once the server surely has the block under it (string placed a
+            // moment before; the sand fell or placed nothing 53 times on the player's server)
+            boolean onUnconfirmed = acks && result == BlockCheck.Result.MISSING
+                    && schematic.getBlockState(pos).getBlock() instanceof net.minecraft.world.level.block.FallingBlock
+                    && ServerAcks.unconfirmed(pos.below(), 3);
+            if (waiting || givenUp(pos) || nextToWaiting || onUnconfirmed || heldForBelow(mc, schematic, pos) || itemSettling(mc, schematic, pos)) {
                 held++;
                 continue;
             }
@@ -588,6 +604,53 @@ public class AutoBuild {
             }
         }
         return ordered;
+    }
+
+    /**
+     * The printer's air place (on for a layer with floating blocks) is used for this spot: only when it has nothing
+     * beside or under it to be placed against, now or later. Everything else is clicked against its neighbour.
+     */
+    public boolean airPlaceAt(net.minecraft.core.BlockPos pos) {
+        Minecraft mc = Minecraft.getInstance();
+        fi.dy.masa.litematica.world.WorldSchematic schematic = SchematicHelper.world();
+        if (mc.level == null || schematic == null) {
+            return true;
+        }
+        return AirPlace.needsAirPlace(mc.level, schematic, pos, schematic.getBlockState(pos));
+    }
+
+    /** An item with no stack on the hotbar for this long is taken from the inventory by the printer itself. */
+    private static final int OFF_HOTBAR_WAIT = 6;
+    /** Since when each item has had no stack on the hotbar (while there are some in the inventory). */
+    private final java.util.Map<net.minecraft.world.item.Item, Long> offHotbarSince = new java.util.HashMap<>();
+
+    /**
+     * The item for this block was just swapped into its slot: placed in a moment, once the server surely has it. Or it
+     * has no stack on the hotbar right now (used up): the add-on puts one there in a tick or two. Taking it from the
+     * inventory, the printer swaps it into the hand and the item in hand goes out; the next block of that kind swaps it
+     * back, each time with a pause (string and sand in a cactus farm: 16% of the printer's turns).
+     */
+    private boolean itemSettling(Minecraft mc, fi.dy.masa.litematica.world.WorldSchematic schematic, net.minecraft.core.BlockPos pos) {
+        net.minecraft.world.item.ItemStack stack = StateRules.itemFor(schematic.getBlockState(pos));
+        if (stack.isEmpty()) {
+            return false;
+        }
+        net.minecraft.world.item.Item item = stack.getItem();
+        net.minecraft.world.entity.player.Inventory inv = mc.player.getInventory();
+        if (inventory.settlingFor(inv, item)) {
+            return true;
+        }
+        for (int slot = 0; slot < net.minecraft.world.entity.player.Inventory.getSelectionSize(); slot++) {
+            if (inv.getItem(slot).is(item)) {
+                offHotbarSince.remove(item);
+                return false;
+            }
+        }
+        if (inv.countItem(item) == 0) {
+            return false;
+        }
+        long since = offHotbarSince.computeIfAbsent(item, k -> clientTicks);
+        return clientTicks - since < OFF_HOTBAR_WAIT;
     }
 
     /** Counts farmland still to till in the per-level needs (never an item that's bought). */
@@ -824,7 +887,7 @@ public class AutoBuild {
                                    java.util.Map<net.minecraft.world.item.Item, Integer> needs) {
         EntityPlacer.missing(mc, schematic).forEach((item, count) -> needs.merge(item, count, Integer::sum));
         // Farmland is dirt tilled with a hoe (see Tools: from storage, else crafted)
-        if (wholeTilling > 0 && !Tools.hasUsableHoe(mc.player.getInventory())) {
+        if (wholeTilling > 0 && !Tools.covered(Tools.HOE, mc.player.getInventory())) {
             needs.put(Tools.HOE, 1);
         }
         if (Configs.Breaking.BREAK_WRONG_BLOCKS.getBooleanValue()) {
@@ -886,10 +949,78 @@ public class AutoBuild {
         }
         if (conflicts.add(pos.immutable())) {
             fi.dy.masa.litematica.world.WorldSchematic schematic = SchematicHelper.world();
-            BuildLog.line("CONFLICT", pos.toShortString() + ": the world has " + current + ", the schematic wants "
-                    + (schematic != null ? schematic.getBlockState(pos) : "?") + " (left alone, not counted)");
+            String wanted = schematic != null ? LayerManager.blockName(schematic.getBlockState(pos)) : "?";
+            ConflictGroup group = conflictGroups.computeIfAbsent(LayerManager.blockName(current) + " where " + wanted + " goes", k -> new ConflictGroup());
+            group.add(pos);
+            // The first few one by one; the rest in the summary (2881 lines of glass where string goes, twice)
+            if (conflicts.size() <= CONFLICTS_LISTED) {
+                BuildLog.line("CONFLICT", pos.toShortString() + ": the world has " + current + ", the schematic wants "
+                        + (schematic != null ? schematic.getBlockState(pos) : "?") + " (left alone, not counted)");
+            }
+            conflictsChanged = true;
         }
         return true;
+    }
+
+    /** Conflicts written one by one to the build log, the rest only counted (see conflictSummary). */
+    private static final int CONFLICTS_LISTED = 20;
+    /** Conflicts by what's there and what the schematic wants: how many and where. */
+    private final java.util.Map<String, ConflictGroup> conflictGroups = new java.util.LinkedHashMap<>();
+    private boolean conflictsChanged;
+    private long conflictsLoggedAt = -100000;
+    private boolean conflictsTold;
+
+    private static final class ConflictGroup {
+        int count;
+        int minX = Integer.MAX_VALUE;
+        int minY = Integer.MAX_VALUE;
+        int minZ = Integer.MAX_VALUE;
+        int maxX = Integer.MIN_VALUE;
+        int maxY = Integer.MIN_VALUE;
+        int maxZ = Integer.MIN_VALUE;
+
+        void add(net.minecraft.core.BlockPos pos) {
+            count++;
+            minX = Math.min(minX, pos.getX());
+            minY = Math.min(minY, pos.getY());
+            minZ = Math.min(minZ, pos.getZ());
+            maxX = Math.max(maxX, pos.getX());
+            maxY = Math.max(maxY, pos.getY());
+            maxZ = Math.max(maxZ, pos.getZ());
+        }
+
+        @Override
+        public String toString() {
+            return count + " (Y " + (minY == maxY ? minY : minY + " to " + maxY) + ", x " + minX + " to " + maxX + ", z " + minZ + " to " + maxZ + ")";
+        }
+    }
+
+    /** "1440 purple_stained_glass where tripwire goes (Y 286 to 293, ...); ..." */
+    private String conflictSummary() {
+        StringBuilder sb = new StringBuilder();
+        conflictGroups.entrySet().stream().sorted((a, b) -> Integer.compare(b.getValue().count, a.getValue().count))
+                .forEach(e -> sb.append(sb.length() == 0 ? "" : "; ").append(e.getValue().count).append(' ').append(e.getKey())
+                        .append(e.getValue().toString().substring(String.valueOf(e.getValue().count).length())));
+        return sb.toString();
+    }
+
+    /** The conflicts found so far, in the build log at most every 30 s while there are new ones; said once in chat. */
+    private void logConflicts() {
+        if (!conflictsChanged || clientTicks - conflictsLoggedAt < 20 * 30) {
+            return;
+        }
+        conflictsChanged = false;
+        conflictsLoggedAt = clientTicks;
+        BuildLog.line("CONFLICT", conflicts.size() + " so far, left alone: " + conflictSummary());
+        if (!conflictsTold && conflicts.size() >= 10) {
+            conflictsTold = true;
+            ConflictGroup biggest = conflictGroups.values().stream().max(java.util.Comparator.comparingInt(g -> g.count)).orElse(null);
+            String what = conflictGroups.entrySet().stream().max(java.util.Comparator.comparingInt(e -> e.getValue().count))
+                    .map(java.util.Map.Entry::getKey).orElse("?");
+            Chat.warn(conflicts.size() + " blocks of yours stand where the schematic wants something else (most: " + biggest.count
+                    + " " + what + " at Y " + (biggest.minY == biggest.maxY ? biggest.minY : biggest.minY + "-" + biggest.maxY)
+                    + "). They're left alone and skipped; move the schematic or the blocks if that's wrong.");
+        }
     }
 
     /**
@@ -952,6 +1083,8 @@ public class AutoBuild {
     private long lastAutoRescan = -100000000L;
     /** Storage was looked in on this trip already (once per trip: a vault with nothing that fits isn't opened again). */
     private boolean fetchedThisTrip;
+    /** The vaults were filled on this trip already (once per trip, see StockUp). */
+    private boolean stockedThisTrip;
     /** The last inventory plan written to the log (written again only when it changes, or after a while). */
     private String lastPlanLine = "";
     private long lastPlanLineAt = -100000;
@@ -1044,6 +1177,7 @@ public class AutoBuild {
         }
         if (!goesOn) {
             fetchedThisTrip = false;
+            stockedThisTrip = false;
         }
 
         InventoryBudget.Plan plan = InventoryBudget.plan(inventory, layerNeeds, neededWhole, cleaner.storable(inventory));
@@ -1071,7 +1205,7 @@ public class AutoBuild {
         });
         // The hoe won't last the layer: another one on this trip, instead of a trip of its own when it breaks
         int tilling = layers.tillingLeft();
-        int hoeUses = Tools.hoeUses(inventory);
+        int hoeUses = Tools.hoeUses(inventory) + Tools.privateHoeUses(inventory);
         if (tilling > hoeUses && hoeUses < 150 && !wants.containsKey(Tools.HOE)) {
             wants.put(Tools.HOE, Tools.hoesFor(tilling - hoeUses, inventory));
         }
@@ -1139,6 +1273,22 @@ public class AutoBuild {
         if (!autoBuy) {
             pauseIfOut(mc, outOfSomething);
             return false;
+        }
+
+        // The shop has to be used and the build needs much more than fits: whole inventories into the vaults first,
+        // one step a round (buy, put away, buy...); then the trip takes the inventory's share from the vaults
+        if (stock.isActive() || !stockedThisTrip && stock.start(mc, list, neededWhole, fetcher)) {
+            stockedThisTrip = true;
+            if (stock.step(mc, this)) {
+                tripGoesOn = true;
+                buyCooldown = 0;
+                mover.stop(mc);
+                return true;
+            }
+            fetchedThisTrip = false;
+            tripGoesOn = true;
+            buyCooldown = 0;
+            return true;
         }
 
         // In the shop only what's worth a purchase: what's (nearly) used up, a stack or more, or the rest of the
@@ -1239,6 +1389,20 @@ public class AutoBuild {
             crafter.craft(step.item(), step.count());
         }
         craftAfterBuying = java.util.List.of();
+        return false;
+    }
+
+    /** A purchase for StockUp, within the spending limit. False when nothing could be started. */
+    boolean startPurchase(Minecraft mc, java.util.Map<net.minecraft.world.item.Item, Integer> toBuy) {
+        double budget = spendLimit < 0 ? Double.MAX_VALUE : spendLimit - spentTotal;
+        if (budget <= 1) {
+            return false;
+        }
+        if (no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.start(mc, toBuy, budget)) {
+            buying = true;
+            mover.stop(mc);
+            return true;
+        }
         return false;
     }
 
@@ -1429,6 +1593,9 @@ public class AutoBuild {
         emptyDuringBuild.clear();
         triedDuringBuild.clear();
         conflicts.clear();
+        conflictGroups.clear();
+        conflictsChanged = false;
+        conflictsTold = false;
         schematicBlocks.clear();
         deferred.clear();
         couldNotPlace.clear();
@@ -1453,6 +1620,7 @@ public class AutoBuild {
         speed.reset();
         recentlyTried.clear();
         ServerAcks.reset();
+        ServerWatch.reset();
         triesAt.clear();
         givenUp.clear();
         unsealFor.clear();
@@ -1472,6 +1640,7 @@ public class AutoBuild {
         airPlaceWasOn = PrinterBridge.isAirPlace();
         PrinterBridge.setAirPlace(false);
         airPlace.reset();
+        stock.reset();
         fluids.reset();
         rails.reset();
         entities.reset();
@@ -1509,6 +1678,7 @@ public class AutoBuild {
         breaker.stop(mc);
         mover.stop(mc);
         airPlace.stop();
+        stock.reset();
         eater.reset(mc);
         if (savedRenderDistance > 0) {
             mc.options.renderDistance().set(savedRenderDistance);
@@ -1570,13 +1740,8 @@ public class AutoBuild {
             }
             BuildLog.line("IGNORED", Diagnose.explain(mc, schematic, pos));
         }
-        n = 0;
-        for (net.minecraft.core.BlockPos pos : conflicts) {
-            if (n++ >= 2000) {
-                break;
-            }
-            BuildLog.line("CONFLICT", pos.toShortString() + ": is " + shortState(mc.level.getBlockState(pos)) + ", schematic wants "
-                    + shortState(schematic.getBlockState(pos)));
+        if (!conflicts.isEmpty()) {
+            BuildLog.line("CONFLICT", conflicts.size() + " in all, left alone: " + conflictSummary());
         }
     }
 
@@ -1937,6 +2102,8 @@ public class AutoBuild {
         }
 
         speed.tick(mc);
+        ServerWatch.tick(mc);
+        logConflicts();
 
         // Eating: nothing else happens meanwhile (only between other jobs, never in the middle of one)
         if (eater.isBusy() || (!breaker.isBusy() && !crafter.isBusy() && !fetcher.isBusy() && !airPlace.isActive()
@@ -1971,6 +2138,12 @@ public class AutoBuild {
                 tripGoesOn = true;
             }
             buyCooldown = 40;
+            if (stock.isActive()) {
+                // Filling the vaults: on to putting it away at once
+                buyer.notBought().forEach(stock::notBought);
+                tripGoesOn = true;
+                buyCooldown = 0;
+            }
             // Then craft what the purchase was for
             for (CraftPlan.Step step : craftAfterBuying) {
                 crafter.craft(step.item(), step.count());
