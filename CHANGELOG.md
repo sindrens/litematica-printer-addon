@@ -74,3 +74,9 @@
 - Clearer build report: holes, wrong blocks, your own blocks.
 - Log files named by date, what ran and version.
 - Share last log goes to the developer's Discord.
+
+## 26.2-0.15.2
+- Report / share log (J+B): write what went wrong, click what fits, say what you built.
+- Your F2 screenshot can go with it.
+- Full debug with it: mods, settings, PC, game log (no chat), crash report.
+- The log of the run going on is sent, not the last one.

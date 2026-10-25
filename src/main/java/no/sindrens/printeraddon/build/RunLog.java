@@ -317,6 +317,21 @@ public final class RunLog {
         return lastFile;
     }
 
+    /** What the run going on is, or the last one was ("Auto build: farm, Y -56 to 223"); "-" before the first. */
+    static String describeRun() {
+        return what;
+    }
+
+    /** The .jsonl of the run going on now, written out up to this moment; null when none is going on. */
+    @Nullable
+    static Path runningFile() {
+        if (!active || currentFile == null) {
+            return null;
+        }
+        flushJson();
+        return currentFile;
+    }
+
     public static String lastSummary() {
         return lastSummary;
     }

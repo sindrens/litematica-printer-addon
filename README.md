@@ -59,11 +59,19 @@ Drops: with "Auto break: put drops away" on (the default), once the inventory is
 
 ## Sharing a log
 
-Every auto build and Auto break writes a log in `logs/printer_addon/`, named by when, what and which version, so the newest sorts last: `2026-10-25 16.45.12 auto build Pumpkin_farm v0.15.1.jsonl`. **Share last log** in the J+B menu sends the last one to the add-on's developer (a Discord channel), with the add-on, Minecraft, Litematica and printer versions, the server, your name, what ran, how far it got and where the time went. Nothing is sent unless you click it, or turn on **Share logs automatically** (then every run's log goes when the run ends). The log has the build's coordinates, your inventory and your balance. **Log channel** in the settings sends them to your own Discord webhook instead.
+Every auto build and Auto break writes a log in `logs/printer_addon/`, named by when, what and which version, so the newest sorts last: `2026-10-25 16.45.12 auto build Pumpkin_farm v0.15.1.jsonl`.
+
+**Report / share log** in the J+B menu opens a short form: write what went wrong (or leave it empty), click what fits (skips blocks, too slow, gets stuck, shop, tilling, error...), and check what you were building (filled in from your schematic). A screenshot you took with F2 in the last 15 minutes can go with it. **Send to the developer** sends it to the add-on's developer (a Discord channel) with the run's log (the one going on, else the last one) and the full debug:
+
+- `debug.txt`: what you wrote, where you are and what's running, your hotbar and inventory, PC (OS, Java, CPU, memory, graphics card, window, fps), every mod and its version, every setting of the add-on, Litematica Printer and Litematica, the schematic placements, recent runs and learned speeds.
+- `game-log.txt`: the game's own log (`logs/latest.log`, errors from any mod) without chat lines.
+- `crash-report.txt`: a crash report from the last day, if there is one.
+
+Nothing private goes: no chat, no Log channel, no chest or vault spots, and your user folder (it has your name in it) is written `~`. The run's log has the build's coordinates, your inventory and your balance. What you wrote is kept until it's sent. Nothing is sent unless you click Send, or turn on **Share logs automatically** (then every run's log and debug go when the run ends). **Log channel** in the settings sends them to your own Discord webhook instead.
 
 ## Building the jar
 
-The developer's log channel (a Discord webhook) goes into the jar from `src/main/resources/printer_addon/log-channel.txt` (the URL reversed, Base64), which is never committed: a webhook URL in a public repository gets found and spammed. Without the file the jar builds the same, and "Share last log" asks for a Log channel.
+The developer's log channel (a Discord webhook) goes into the jar from `src/main/resources/printer_addon/log-channel.txt` (the URL reversed, Base64), which is never committed: a webhook URL in a public repository gets found and spammed. Without the file the jar builds the same, and "Report / share log" asks for a Log channel.
 
 ## Good to know
 

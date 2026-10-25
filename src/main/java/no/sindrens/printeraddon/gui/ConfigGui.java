@@ -91,13 +91,11 @@ public class ConfigGui extends GuiConfigsBase {
                 AutoBuild.INSTANCE.putAway(mc, true);
             });
         }
-        // The last run's log to the add-on's developer (see LogShare): only on this click, or with "Share logs automatically"
-        ButtonGeneric share = new ButtonGeneric(x + 390, y, 130, 20, no.sindrens.printeraddon.build.LogShare.isSending() ? "Sending the log..." : "Share last log");
+        // What went wrong and the run's log to the add-on's developer (see ShareLogGui): only from there, or with
+        // "Share logs automatically"
+        ButtonGeneric share = new ButtonGeneric(x + 390, y, 130, 20, no.sindrens.printeraddon.build.LogShare.isSending() ? "Sending the log..." : "Report / share log");
         share.setEnabled(!no.sindrens.printeraddon.build.LogShare.isSending());
-        this.addButton(share, (button, mouse) -> {
-            GuiBase.openGui(null);
-            no.sindrens.printeraddon.build.LogShare.share(mc, false);
-        });
+        this.addButton(share, (button, mouse) -> GuiBase.openGui(new ShareLogGui(this)));
         y += 30;
 
         // The chest the crosshair was on when the menu opened

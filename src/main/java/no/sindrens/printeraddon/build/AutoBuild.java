@@ -1909,7 +1909,7 @@ public class AutoBuild {
     }
 
     /** The names of the schematic placements switched on ("Pumpkin_farm"), for the log's name and summary. */
-    private static String placementNames() {
+    public static String placementNames() {
         StringBuilder names = new StringBuilder();
         for (fi.dy.masa.litematica.schematic.placement.SchematicPlacement placement
                 : fi.dy.masa.litematica.data.DataManager.getSchematicPlacementManager().getAllSchematicsPlacements()) {
