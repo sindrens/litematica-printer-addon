@@ -162,8 +162,18 @@ public class Mover {
 
     /** Go within reach of this spot (null to stop). Returns true once it's within reach. */
     public boolean goTo(@Nullable BlockPos pos) {
-        if (pos == null || !pos.equals(errand)) {
+        return goTo(pos, null);
+    }
+
+    /** Where to fly for the errand, when not just above it (Auto break: a free spot beside it, see AreaBreaker). */
+    @Nullable
+    private Vec3 errandSpot;
+
+    /** As goTo, flying to this point to get within reach (null: just above the spot). */
+    public boolean goTo(@Nullable BlockPos pos, @Nullable Vec3 spot) {
+        if (pos == null || !pos.equals(errand) || !java.util.Objects.equals(spot, errandSpot)) {
             errand = pos == null ? null : pos.immutable();
+            errandSpot = pos == null ? null : spot;
             errandReached = false;
             if (state == State.FLYING || state == State.WALKING) {
                 state = State.IDLE;
@@ -575,7 +585,8 @@ public class Mover {
         WorldSchematic schematic = SchematicHelper.world();
         MoveMode mode = Configs.Movement.mode();
 
-        if (player == null || mc.level == null || schematic == null || mode == MoveMode.OFF) {
+        // Without a schematic only an errand (Auto break flies to the blocks of an area that way, see AreaBreaker)
+        if (player == null || mc.level == null || mode == MoveMode.OFF || schematic == null && errand == null) {
             return;
         }
 
@@ -587,7 +598,7 @@ public class Mover {
             lastPlacementTick = tick;
         }
 
-        if (--ticksUntilScan <= 0) {
+        if (schematic != null && --ticksUntilScan <= 0) {
             ticksUntilScan = SCAN_INTERVAL;
             long started = Perf.start();
             scan(mc, schematic);
@@ -617,11 +628,14 @@ public class Mover {
                 stuckTicks = 0;
                 lastDistance = Double.MAX_VALUE;
                 if (ensureFlying(player)) {
-                    flyTarget = new Vec3(errand.getX() + 0.5, errand.getY() + 1.2, errand.getZ() + 0.5);
+                    flyTarget = errandSpot != null ? errandSpot : new Vec3(errand.getX() + 0.5, errand.getY() + 1.2, errand.getZ() + 0.5);
                     state = State.FLYING;
                 }
             }
             move(mc, player, mode);
+            return;
+        }
+        if (schematic == null) {
             return;
         }
 
@@ -1640,6 +1654,13 @@ public class Mover {
     /** Flying along a lane now (not to its start): for the run log's time by category. */
     public boolean onLane() {
         return laneFlight() && !laneApproach;
+    }
+
+    /** Rises away from a cactus about to touch the body (see keepClearOfHarm), without moving otherwise (Auto break). */
+    public void keepClear(Minecraft mc) {
+        if (mc.player != null && mc.level != null && flying(mc.player)) {
+            keepClearOfHarm(mc.level, mc.player);
+        }
     }
 
     /** Flying to the start of the next lane (placing what's in reach on the way). */

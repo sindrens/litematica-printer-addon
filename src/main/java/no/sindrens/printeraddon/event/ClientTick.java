@@ -26,6 +26,7 @@ public class ClientTick implements IClientTickHandler {
             AutoBuild.INSTANCE.outOfWorld(mc);
             // Lost the connection or logged out: stop, but keep the resume file
             AutoBuild.INSTANCE.stopForDisconnect(mc);
+            no.sindrens.printeraddon.build.AreaBreaker.INSTANCE.stop(mc, "the connection ended");
             no.sindrens.printeraddon.build.Resume.onDisconnect();
             no.sindrens.printeraddon.build.ServerLag.reset();
             // Kicked or the server restarting: joining again when it's time
@@ -63,5 +64,6 @@ public class ClientTick implements IClientTickHandler {
             no.sindrens.printeraddon.build.Resume.whileIdle(mc);
         }
         AutoBuild.INSTANCE.tick(mc);
+        no.sindrens.printeraddon.build.AreaBreaker.INSTANCE.tick(mc);
     }
 }

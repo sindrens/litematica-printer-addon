@@ -247,8 +247,21 @@ public class FarmTest implements FabricClientGameTest {
                 if (together != null) {
                     Configs.Layers.LAYERS_TOGETHER.setBooleanValue(!together.equals("0"));
                 }
-                AutoBuild.INSTANCE.start(mc);
+                // PRINTER_ADDON_BREAK=1: the farm built (PRINTER_ADDON_PREBUILT_LAYERS=99) is broken again by Auto break
+                if (System.getenv("PRINTER_ADDON_BREAK") != null) {
+                    List<int[]> boxes = new java.util.ArrayList<>();
+                    for (SchematicHelper.Area a : SchematicHelper.areas()) {
+                        boxes.add(new int[]{a.minX(), a.minY(), a.minZ(), a.maxX(), a.maxY(), a.maxZ()});
+                    }
+                    no.sindrens.printeraddon.build.AreaBreaker.INSTANCE.start(mc, boxes);
+                } else {
+                    AutoBuild.INSTANCE.start(mc);
+                }
             });
+            if (System.getenv("PRINTER_ADDON_BREAK") != null) {
+                breakTest(context, reportFile);
+                return;
+            }
 
             long started = System.currentTimeMillis();
             int ticks = 0;
@@ -320,6 +333,50 @@ public class FarmTest implements FabricClientGameTest {
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    /** Auto break of the whole schematic area: how long it took, how many were broken and how many are left. */
+    private static void breakTest(ClientGameTestContext context, java.nio.file.Path reportFile) throws IOException {
+        long started = System.currentTimeMillis();
+        String minutesEnv = System.getenv("PRINTER_ADDON_TEST_MINUTES");
+        int maxTicks = minutesEnv == null || minutesEnv.isBlank() ? MAX_TICKS : Integer.parseInt(minutesEnv.trim()) * 20 * 60;
+        int before = context.computeOnClient(FarmTest::blocksInArea);
+        int ticks = 0;
+        while (ticks < maxTicks && context.computeOnClient(mc -> no.sindrens.printeraddon.build.AreaBreaker.INSTANCE.isRunning())) {
+            context.waitTicks(SCREENSHOT_EVERY);
+            ticks += SCREENSHOT_EVERY;
+            if (ticks % (20 * 20) == 0) {
+                int left = context.computeOnClient(FarmTest::blocksInArea);
+                System.out.println("FARM TEST: auto break: " + (before - left) + " of " + before + " gone after " + ticks / 20 + " s game time ("
+                        + (System.currentTimeMillis() - started) / 1000 + " s real)");
+            }
+            if (ticks % SCREENSHOT_SAVE_EVERY == 0) {
+                context.takeScreenshot("rec");
+            }
+        }
+        context.runOnClient(mc -> no.sindrens.printeraddon.build.AreaBreaker.INSTANCE.stop(mc, "test time is up"));
+        int left = context.computeOnClient(FarmTest::blocksInArea);
+        int gameTicks = ticks;
+        String report = "AUTO BREAK: " + before + " blocks, " + (before - left) + " gone, " + left + " left, " + gameTicks / 20 + " s game time, "
+                + (System.currentTimeMillis() - started) / 1000 + " s real, "
+                + Math.round((before - left) * 60.0 / Math.max(1, gameTicks / 20.0)) + " a minute | "
+                + context.computeOnClient(mc -> AutoBuild.INSTANCE.breaker.summary()) + "\n";
+        Files.writeString(reportFile, report);
+        System.out.println("FARM TEST: " + report);
+    }
+
+    /** Blocks (not air, not liquid) in the schematic's area. */
+    private static int blocksInArea(net.minecraft.client.Minecraft mc) {
+        int count = 0;
+        for (SchematicHelper.Area a : SchematicHelper.areas()) {
+            for (net.minecraft.core.BlockPos pos : net.minecraft.core.BlockPos.betweenClosed(a.minX(), a.minY(), a.minZ(), a.maxX(), a.maxY(), a.maxZ())) {
+                net.minecraft.world.level.block.state.BlockState state = mc.level.getBlockState(pos);
+                if (!state.isAir() && !(state.getBlock() instanceof net.minecraft.world.level.block.LiquidBlock)) {
+                    count++;
+                }
+            }
+        }
+        return count;
     }
 
     /** Gives what the current layer still needs, as much as fits in the inventory. */

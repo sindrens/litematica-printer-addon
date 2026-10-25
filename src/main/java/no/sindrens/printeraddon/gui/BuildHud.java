@@ -40,7 +40,8 @@ public final class BuildHud {
     private static void render(GuiGraphicsExtractor graphics, DeltaTracker delta) {
         Minecraft mc = Minecraft.getInstance();
         AutoBuild build = AutoBuild.INSTANCE;
-        if (!Configs.Generic.SHOW_HUD.getBooleanValue() || !build.isRunning() || mc.player == null) {
+        boolean breaking = no.sindrens.printeraddon.build.AreaBreaker.INSTANCE.isRunning();
+        if (!Configs.Generic.SHOW_HUD.getBooleanValue() || !build.isRunning() && !breaking || mc.player == null) {
             return;
         }
 
@@ -48,7 +49,17 @@ public final class BuildHud {
         // The text is put together twice a second, not every frame
         if (AutoBuild.clientTicks - builtAt >= 10 || AutoBuild.clientTicks < builtAt) {
             builtAt = AutoBuild.clientTicks;
-            build(build);
+            if (breaking) {
+                // Auto break: its own line, and what it breaks with
+                List<String> lines = new ArrayList<>();
+                List<Integer> colors = new ArrayList<>();
+                add(lines, colors, "Printer Addon - " + no.sindrens.printeraddon.build.AreaBreaker.INSTANCE.status(), TEXT);
+                add(lines, colors, "Holding " + mc.player.getMainHandItem().getHoverName().getString() + " | stop: J+Q", TEXT);
+                cachedLines = lines;
+                cachedColors = colors;
+            } else {
+                build(build);
+            }
         }
         List<String> lines = cachedLines;
         List<Integer> colors = cachedColors;

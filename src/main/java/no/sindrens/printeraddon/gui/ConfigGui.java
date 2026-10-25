@@ -51,6 +51,8 @@ public class ConfigGui extends GuiConfigsBase {
 
         if (tab == Tab.BUILD) {
             addBuildTab(10, 52);
+        } else if (tab == Tab.BREAK_AREA) {
+            addBreakTab(10, 52);
         } else if (tab != Tab.HOTKEYS) {
             // Where the search is (MaLiLib's: the magnifier at the top left of the list)
             this.addLabel(this.width - 230, 30, 220, 10, 0xFFAAAAAA, tab == Tab.ALL
@@ -88,6 +90,13 @@ public class ConfigGui extends GuiConfigsBase {
                 AutoBuild.INSTANCE.putAway(mc, true);
             });
         }
+        // The last run's log to the add-on's developer (see LogShare): only on this click, or with "Share logs automatically"
+        ButtonGeneric share = new ButtonGeneric(x + 390, y, 130, 20, no.sindrens.printeraddon.build.LogShare.isSending() ? "Sending the log..." : "Share last log");
+        share.setEnabled(!no.sindrens.printeraddon.build.LogShare.isSending());
+        this.addButton(share, (button, mouse) -> {
+            GuiBase.openGui(null);
+            no.sindrens.printeraddon.build.LogShare.share(mc, false);
+        });
         y += 30;
 
         // The chest the crosshair was on when the menu opened
@@ -144,6 +153,94 @@ public class ConfigGui extends GuiConfigsBase {
         });
     }
 
+    /** The page of the Auto break tab's list of blocks. */
+    private static int blockPage;
+
+    /**
+     * Auto break: Litematica's selected area, start and stop, what happens to the drops, and the blocks in the area,
+     * each to click on to skip that kind (all oak logs stay) or break it again.
+     */
+    private void addBreakTab(int x, int y) {
+        Minecraft mc = Minecraft.getInstance();
+        no.sindrens.printeraddon.build.AreaBreaker breaker = no.sindrens.printeraddon.build.AreaBreaker.INSTANCE;
+        List<int[]> boxes = no.sindrens.printeraddon.build.AreaBreaker.selection();
+        this.addLabel(x, y, 500, 10, 0xFFFFFFFF, "Selected area (Litematica's area selection): "
+                + no.sindrens.printeraddon.build.AreaBreaker.describe(boxes));
+        y += 14;
+        if (boxes.isEmpty() && !breaker.isRunning()) {
+            this.addLabel(x, y + 5, 520, 10, 0xFFAAAAAA, "Select an area with Litematica's area selection tool (corner 1 and corner 2), then open this tab again.");
+            return;
+        }
+        boolean running = breaker.isRunning();
+        this.addButton(new ButtonGeneric(x, y, 200, 20, running ? "Stop breaking" : "Break the selected area"), (button, mouse) -> {
+            GuiBase.openGui(null);
+            if (running) {
+                breaker.stop(mc, null);
+            } else {
+                breaker.start(mc);
+            }
+        });
+        boolean pickUp = Configs.Breaking.PICK_UP_ITEMS.getBooleanValue();
+        this.addButton(new ButtonGeneric(x + 210, y, 240, 20, "Drops: " + (pickUp ? "\u00a7aput away\u00a7r (vaults, linked chests)" : "\u00a7eignored\u00a7r")),
+                (button, mouse) -> {
+                    Configs.Breaking.PICK_UP_ITEMS.setBooleanValue(!pickUp);
+                    Configs.saveToFile();
+                    this.initGui();
+                });
+        y += 24;
+        if (running) {
+            this.addLabel(x, y, 520, 10, 0xFFFFFF55, breaker.status());
+            y += 14;
+        }
+        java.util.Map<net.minecraft.world.level.block.Block, Integer> blocks = no.sindrens.printeraddon.build.AreaBreaker.blocksIn(mc, boxes, false);
+        int toBreak = 0;
+        for (java.util.Map.Entry<net.minecraft.world.level.block.Block, Integer> entry : blocks.entrySet()) {
+            if (!no.sindrens.printeraddon.build.AreaBreaker.skipped(entry.getKey())) {
+                toBreak += entry.getValue();
+            }
+        }
+        this.addLabel(x, y + 5, 420, 10, 0xFFFFFFFF, toBreak + " blocks to break" + (no.sindrens.printeraddon.build.AreaBreaker.countedAll()
+                ? "" : " (counted up to 4 million spots)") + ". Click a block to skip it, again to break it:");
+        this.addButton(new ButtonGeneric(x + 430, y, 90, 20, "Count again"), (button, mouse) -> {
+            no.sindrens.printeraddon.build.AreaBreaker.blocksIn(mc, boxes, true);
+            this.initGui();
+        });
+        y += 24;
+        List<java.util.Map.Entry<net.minecraft.world.level.block.Block, Integer>> entries = new java.util.ArrayList<>(blocks.entrySet());
+        int rows = Math.max(1, (this.height - y - 34) / 22);
+        int perPage = rows * 2;
+        int pages = Math.max(1, (entries.size() + perPage - 1) / perPage);
+        blockPage = Math.max(0, Math.min(blockPage, pages - 1));
+        for (int i = blockPage * perPage; i < Math.min(entries.size(), (blockPage + 1) * perPage); i++) {
+            net.minecraft.world.level.block.Block block = entries.get(i).getKey();
+            boolean skip = no.sindrens.printeraddon.build.AreaBreaker.skipped(block);
+            int index = i - blockPage * perPage;
+            int bx = x + (index / rows) * 255;
+            int by = y + (index % rows) * 22;
+            this.addButton(new ButtonGeneric(bx, by, 250, 20, block.getName().getString() + " " + entries.get(i).getValue() + ": "
+                    + (skip ? "\u00a7cskip" : "\u00a7abreak")), (button, mouse) -> {
+                no.sindrens.printeraddon.build.AreaBreaker.toggleSkip(block);
+                this.initGui();
+            });
+        }
+        if (pages > 1) {
+            int py = y + rows * 22 + 4;
+            ButtonGeneric previous = new ButtonGeneric(x, py, 60, 20, "< Back");
+            previous.setEnabled(blockPage > 0);
+            this.addButton(previous, (button, mouse) -> {
+                blockPage--;
+                this.initGui();
+            });
+            this.addLabel(x + 70, py + 5, 100, 10, 0xFFAAAAAA, "Page " + (blockPage + 1) + " of " + pages);
+            ButtonGeneric next = new ButtonGeneric(x + 170, py, 60, 20, "Next >");
+            next.setEnabled(blockPage < pages - 1);
+            this.addButton(next, (button, mouse) -> {
+                blockPage++;
+                this.initGui();
+            });
+        }
+    }
+
     @Override
     protected int getConfigWidth() {
         return tab == Tab.HOTKEYS ? super.getConfigWidth() : 160;
@@ -152,7 +249,7 @@ public class ConfigGui extends GuiConfigsBase {
     @Override
     public List<ConfigOptionWrapper> getConfigs() {
         List<? extends IConfigBase> configs = switch (tab) {
-            case BUILD -> List.<IConfigBase>of();
+            case BUILD, BREAK_AREA -> List.<IConfigBase>of();
             case IMPORTANT -> Configs.important();
             case ALL -> Configs.all();
             case GENERIC -> Configs.Generic.OPTIONS;
@@ -169,6 +266,7 @@ public class ConfigGui extends GuiConfigsBase {
 
     private enum Tab {
         BUILD("Build"),
+        BREAK_AREA("Auto break"),
         IMPORTANT("Important"),
         ALL("All settings"),
         GENERIC("Generic"),

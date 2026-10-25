@@ -215,6 +215,7 @@ public final class RunLog {
 
     public static void start(Minecraft mc) {
         active = true;
+        what = "-";
         runId = Long.toHexString(Double.doubleToLongBits(Math.random()) ^ System.nanoTime()).substring(0, 6);
         version = net.fabricmc.loader.api.FabricLoader.getInstance().getModContainer(PrinterAddon.MOD_ID)
                 .map(m -> m.getMetadata().getVersion().getFriendlyString()).orElse("?");
@@ -278,11 +279,46 @@ public final class RunLog {
                 "breaking", AutoBuild.INSTANCE.breaker.summary(), "junkThrown", runJunkThrown, "straysStored", runStraysStored,
                 "guard", ServerWatch.summary(), "times", run.breakdown());
         emit("RUN-END", report);
-        emit("RUN-ADVICE", kv("top3", advice(ticks)));
+        String adviceText = advice(ticks);
+        emit("RUN-ADVICE", kv("top3", adviceText));
         compareWithLast();
         saveRun(spent);
         active = false;
         closeJson();
+        // For sharing the log (see LogShare): what ran and how it went, in a few lines
+        lastFile = currentFile;
+        lastSummary = String.join("\n",
+                "**Ran:** " + what,
+                "**Ended:** " + why + " after " + seconds(ticks),
+                "**Placed:** " + run.placed + " (" + round(run.placed * 60 / secs) + " a minute) | clicks " + runClicks + ", missed "
+                        + runMissed + ", wrong " + runWrong + ", given up " + giveUps.values().stream().mapToInt(Integer::intValue).sum(),
+                "**Time went to:** " + run.top(5),
+                "**Biggest costs:** " + (adviceText.isEmpty() ? "-" : adviceText),
+                "**Trips:** " + runTrips + ", purchases " + runPurchases + ", spent $" + Math.round(spent),
+                "**Breaking:** " + AutoBuild.INSTANCE.breaker.summary());
+        LogShare.afterRun(mc);
+    }
+
+    /** What the run is ("Auto build: farm, Y -56 to 223"), for the shared log's summary. */
+    private static String what = "-";
+    /** The .jsonl being written, and the one of the last run that ended (see LogShare). */
+    @Nullable
+    private static Path currentFile;
+    @Nullable
+    private static Path lastFile;
+    private static String lastSummary = "";
+
+    public static void what(String text) {
+        what = text;
+    }
+
+    @Nullable
+    public static Path lastFile() {
+        return lastFile;
+    }
+
+    public static String lastSummary() {
+        return lastSummary;
     }
 
     /**
@@ -1101,6 +1137,10 @@ public final class RunLog {
     }
 
     private static void saveRun(double spent) {
+        // Only builds are compared (an Auto break run places nothing, and a short one says little)
+        if (run.placed < 100) {
+            return;
+        }
         try {
             StringBuilder cats = new StringBuilder();
             for (Cat cat : CATS) {
@@ -1186,7 +1226,8 @@ public final class RunLog {
             return;
         }
         try {
-            json = Files.newBufferedWriter(file.resolveSibling(file.getFileName().toString().replace(".log", ".jsonl")), StandardCharsets.UTF_8);
+            currentFile = file.resolveSibling(file.getFileName().toString().replace(".log", ".jsonl"));
+            json = Files.newBufferedWriter(currentFile, StandardCharsets.UTF_8);
             // What happened since the last build (joining again, getting back to the build) comes first
             for (String[] line : BuildLog.takePending()) {
                 json.write("{\"run\":\"" + runId + "\",\"time\":\"" + line[0] + "\",\"t\":" + line[1] + ",\"type\":" + quote(line[2])

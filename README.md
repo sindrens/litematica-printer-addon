@@ -45,6 +45,22 @@ When you stop it, or the build is done, it puts the building items back in your 
 | `J`+`Q` | Stop everything |
 | `J`+`A` | Add-on on/off |
 
+## Auto break
+
+Breaks everything in an area, for example a farm you want gone:
+
+1. Select the area with Litematica's area selection (its selection tool: corner 1 and corner 2).
+2. Press `J`+`B` and open the **Auto break** tab. It shows the area and every kind of block in it with how many there are. Click a kind to leave it standing (`skip`, in red), click it again to break it.
+3. Click **Break the selected area**. Stop it with the same button or `J`+`Q`.
+
+It breaks the top level first and works down, the nearest blocks first, each with your fastest tool for it (Efficiency counts, your own enchanted tools too, never one about to break). It flies to a free spot within reach of each block (never into a cactus) and stands where it can, since breaking in the air is 5 times slower. A cactus, sugar cane, bamboo, flower or carpet that stands on a block it breaks isn't broken itself: it drops with that block, so a cactus column on its sand is one break. It never breaks containers ("Never break containers"), liquids, what can't be broken, or a block that holds back lava.
+
+Drops: with "Auto break: put drops away" on (the default), once the inventory is full what was broken goes into your vaults (`/pv`) or linked chests; off, the drops are ignored and breaking goes on. The build log (`AREA` lines) has each level's time and the end result.
+
+## Sharing a log
+
+Every auto build and Auto break writes a log (`logs/printer_addon/build-<date>.jsonl`). **Share last log** in the J+B menu sends the last one to the add-on's developer (a Discord channel), with the add-on, Minecraft, Litematica and printer versions, the server, your name, what ran, how far it got and where the time went. Nothing is sent unless you click it, or turn on **Share logs automatically** (then every run's log goes when the run ends). The log has the build's coordinates, your inventory and your balance. **Log channel** in the settings sends them to your own Discord webhook instead.
+
 ## Good to know
 
 - Don't click in the shop or `/pv` while it's buying.

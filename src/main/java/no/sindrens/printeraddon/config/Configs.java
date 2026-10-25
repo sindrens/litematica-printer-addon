@@ -81,13 +81,21 @@ public class Configs implements IConfigHandler {
                 "Write every step (which block is broken, why it stopped...) to the game log (logs/latest.log).\n"
                         + "Useful when something doesn't work.",
                 "Debug log");
+        public static final ConfigBoolean SHARE_LOGS = new ConfigBoolean("shareLogsAutomatically", false,
+                "After each auto build or Auto break, send its build log to the add-on's developer (a Discord channel) to\n"
+                        + "find bugs and make it faster. The log has the build's coordinates, your inventory and balance, the\n"
+                        + "server and your name. Off: only when you click 'Share last log' (J+B).",
+                "Share logs automatically");
+        public static final ConfigString LOG_CHANNEL = new ConfigString("logChannel", "",
+                "Where shared logs go: a Discord webhook URL. Empty: the add-on developer's channel.",
+                "Log channel (Discord webhook)");
         public static final ConfigBoolean TEXT_LOG = new ConfigBoolean("textBuildLog", false,
                 "Also write each build log as plain text (build-<date>.log) next to the .jsonl file.\n"
                         + "The .jsonl has the same lines; send that one when something went wrong.",
                 "Text build log");
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                ADDON_ENABLED, AUTO_BUILD, SHOW_HUD, RESUME_AFTER_REJOIN, RECONNECT, BACK_COMMANDS, BUILD_RENDER_DISTANCE, SPEED_PRESET, APPLY_SPEED_TO_PRINTER, TURN_VIEW_FOR_PRINTER, CHAT_MESSAGES, DETAILED_CHAT, STATUS_FILE, DEBUG_LOG, TEXT_LOG);
+                ADDON_ENABLED, AUTO_BUILD, SHOW_HUD, RESUME_AFTER_REJOIN, RECONNECT, BACK_COMMANDS, BUILD_RENDER_DISTANCE, SPEED_PRESET, APPLY_SPEED_TO_PRINTER, TURN_VIEW_FOR_PRINTER, CHAT_MESSAGES, DETAILED_CHAT, STATUS_FILE, DEBUG_LOG, TEXT_LOG, SHARE_LOGS, LOG_CHANNEL);
     }
 
     public static class Breaking {
@@ -126,6 +134,15 @@ public class Configs implements IConfigHandler {
         public static final ConfigBoolean SKIP_CONTAINERS = new ConfigBoolean("skipContainers", true,
                 "Never break chests, barrels, hoppers, shulker boxes, furnaces etc., even if they are wrong.",
                 "Never break containers");
+        public static final ConfigBoolean PICK_UP_ITEMS = new ConfigBoolean("autoBreakPickUp", true,
+                "Auto break: what it breaks drops, and is picked up when it flies by. On: when the inventory is full,\n"
+                        + "the drops go into your vaults (/pv) or linked chests. Off: drops are ignored (breaking goes on\n"
+                        + "with a full inventory, the rest stays on the ground).",
+                "Auto break: put drops away");
+        public static final ConfigString AUTO_BREAK_SKIP = new ConfigString("autoBreakSkip", "",
+                "Auto break: block types it never breaks, by id (oak_log, chest...). Easiest set in the Auto break tab\n"
+                        + "(J+B): click a block of the selected area to skip it, again to break it.",
+                "Auto break: skip these blocks");
         public static final ConfigBoolean STAND_TO_BREAK = new ConfigBoolean("standToBreak", true,
                 "While breaking a block, stop flying for a moment and stand on the block under your feet when there is\n"
                         + "one (the game breaks blocks 5 times slower in the air: a cactus takes 3 s flying, 0.6 s standing).\n"
@@ -134,7 +151,8 @@ public class Configs implements IConfigHandler {
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
                 BREAK_WRONG_BLOCKS, BREAK_WRONG_STATE, BREAK_RANGE, MIN_TOOL_DURABILITY, BREAK_TIMEOUT_SECONDS,
-                WRONG_FOR_TICKS, MAX_BREAKS_PER_BLOCK, LOOK_AT_BLOCKS, ALWAYS_BREAK, SKIP_CONTAINERS, STAND_TO_BREAK);
+                WRONG_FOR_TICKS, MAX_BREAKS_PER_BLOCK, LOOK_AT_BLOCKS, ALWAYS_BREAK, SKIP_CONTAINERS, STAND_TO_BREAK, PICK_UP_ITEMS,
+                AUTO_BREAK_SKIP);
     }
 
     public static class Layers {

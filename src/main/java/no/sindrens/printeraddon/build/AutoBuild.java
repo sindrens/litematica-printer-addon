@@ -1778,6 +1778,10 @@ public class AutoBuild {
         if (running) {
             return;
         }
+        if (AreaBreaker.INSTANCE.isRunning()) {
+            Chat.warn("Auto break is running: stop it first (J+B, Auto break tab), then start auto build.");
+            return;
+        }
         if (puttingAway) {
             // Starting again while the items go into storage: they stay (the trip takes what it needs anyway)
             puttingAway = false;
@@ -1896,6 +1900,17 @@ public class AutoBuild {
             stop(mc, null);
             return;
         }
+        // What this run is, for a shared log's summary (see LogShare)
+        StringBuilder names = new StringBuilder();
+        for (fi.dy.masa.litematica.schematic.placement.SchematicPlacement placement
+                : fi.dy.masa.litematica.data.DataManager.getSchematicPlacementManager().getAllSchematicsPlacements()) {
+            if (placement.isEnabled()) {
+                names.append(names.isEmpty() ? "" : ", ").append(placement.getName());
+            }
+        }
+        int[] yRange = SchematicHelper.yRange(SchematicHelper.areas());
+        RunLog.what("Auto build: " + (names.isEmpty() ? "?" : names) + (yRange == null ? "" : ", Y " + yRange[0] + " to " + yRange[1])
+                + (layers.isActive() ? ", started at " + layers.describeLayers() : ""));
 
         Chat.info("Auto build §astarted§r.");
     }
@@ -2005,6 +2020,7 @@ public class AutoBuild {
     /** Stops everything at once (J+Q, the shop scan, the add-on switched off): nothing is put away. */
     public void stopEverything(Minecraft mc) {
         manualTask = ManualTask.NONE;
+        AreaBreaker.INSTANCE.stop(mc, null);
         stop(mc, null, false);
     }
 

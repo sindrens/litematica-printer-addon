@@ -29,7 +29,18 @@ public class BlockBreaker {
         /** Wrong block type / wrong direction. */
         WRONG,
         /** Blocks where the schematic has air. */
-        EXTRA
+        EXTRA,
+        /** Every block of Litematica's area selection (Auto break, see AreaBreaker): no schematic needed. */
+        AREA
+    }
+
+    /** The mode of the last tick: Auto break takes the fastest tool, the player's own too (see selectBestTool). */
+    private Mode currentMode = Mode.WRONG;
+
+    /** Couldn't break this a moment ago (left for a minute). */
+    public boolean failedRecently(BlockPos pos) {
+        Long at = failed.get(pos);
+        return at != null && (at == Long.MAX_VALUE || tickCounter - at <= FAILED_RETRY_TICKS);
     }
 
     /** Skip a block that failed to break for this many ticks. */
@@ -149,6 +160,9 @@ public class BlockBreaker {
 
     /** Why the last search found no spot to stand at (see standSpot), for the build log when it breaks from the air. */
     private String noSpotWhy = "";
+    /** When the last "from the air" line was written, and the breaks from the air since. */
+    private long airLoggedAt = Long.MIN_VALUE / 2;
+    private int airBreaks;
 
     /** Nothing that hurts near the body anywhere on the straight way from a to b. */
     private static boolean harmFreeWay(net.minecraft.world.level.Level level, Vec3 a, Vec3 b) {
@@ -207,6 +221,12 @@ public class BlockBreaker {
         if (abilities.mayfly && !abilities.flying) {
             abilities.flying = true;
             player.onUpdateAbilities();
+            // On the ground the game ends flying again after the tick's move (as when landing): up off it, as its own
+            // double jump does. Else Auto break stood on its next block, waiting, and once broke it and fell
+            if (player.onGround()) {
+                Vec3 motion = player.getDeltaMovement();
+                player.setDeltaMovement(motion.x, 0.42, motion.z);
+            }
         }
     }
 
@@ -253,7 +273,8 @@ public class BlockBreaker {
         LocalPlayer player = mc.player;
         WorldSchematic schematic = SchematicHelper.world();
 
-        if (player == null || mc.level == null || mc.gameMode == null || schematic == null) {
+        currentMode = mode;
+        if (player == null || mc.level == null || mc.gameMode == null || schematic == null && mode != Mode.AREA) {
             target = null;
             return false;
         }
@@ -289,8 +310,14 @@ public class BlockBreaker {
         Vec3 spot = null;
         if (slow && player.level().noCollision(player, player.getBoundingBox().move(0, -0.06, 0))) {
             spot = standSpot(player, pos);
-            if (spot == null) {
-                BuildLog.lineOrKeep("BREAK", "from the air: " + pos.toShortString().replace(" ", "") + ", no spot to stand at " + noSpotWhy);
+            // Once a minute at most: on a cactus farm there's no footing at all, and every break was a line
+            if (spot == null && AutoBuild.clientTicks - airLoggedAt >= 1200) {
+                BuildLog.lineOrKeep("BREAK", "from the air: " + pos.toShortString().replace(" ", "") + ", no spot to stand at " + noSpotWhy
+                        + (airBreaks > 0 ? " (" + airBreaks + " more from the air since the last line)" : ""));
+                airLoggedAt = AutoBuild.clientTicks;
+                airBreaks = 0;
+            } else if (spot == null) {
+                airBreaks++;
             }
         }
         target = pos.immutable();
@@ -309,7 +336,7 @@ public class BlockBreaker {
 
         ticksOnTarget = 0;
         face = faceTowardsPlayer(player, pos);
-        selectBestTool(player, state);
+        selectBestTool(player, state, currentMode == Mode.AREA);
         lookAt(player, pos);
         hopTo = spot;
         hopTicks = 0;
@@ -325,12 +352,14 @@ public class BlockBreaker {
         player.swing(InteractionHand.MAIN_HAND);
     }
 
-    private void continueBreaking(Minecraft mc, LocalPlayer player, WorldSchematic schematic, Mode mode) {
+    private void continueBreaking(Minecraft mc, LocalPlayer player, @Nullable WorldSchematic schematic, Mode mode) {
         BlockPos pos = target;
-        BlockCheck.Result result = BlockCheck.check(mc.level, schematic, pos);
+        BlockCheck.Result result = schematic == null ? null : BlockCheck.check(mc.level, schematic, pos);
         boolean isForced = forced.contains(pos);
 
-        if (isForced ? mc.level.getBlockState(pos).isAir() : !shouldBreak(result, mode, pos)) {
+        boolean gone = mode == Mode.AREA ? !AreaBreaker.stillThere(mc.level, pos)
+                : isForced ? mc.level.getBlockState(pos).isAir() : !shouldBreak(result, mode, pos);
+        if (gone) {
             if (isForced) {
                 forced.remove(pos);
             }
@@ -413,6 +442,8 @@ public class BlockBreaker {
                     net.minecraft.client.Minecraft.getInstance().level.getBlockState(pos)))
                     || (result == BlockCheck.Result.PROTECTED && AutoBuild.INSTANCE.placedDuringBuild(pos));
             case EXTRA -> result == BlockCheck.Result.EXTRA;
+            // Auto break decides for itself (see AreaBreaker): never asked here
+            case AREA -> false;
         };
     }
 
@@ -420,6 +451,9 @@ public class BlockBreaker {
     private BlockPos findNext(Minecraft mc, LocalPlayer player, WorldSchematic schematic, Mode mode) {
         failed.values().removeIf(t -> t != Long.MAX_VALUE && tickCounter - t > FAILED_RETRY_TICKS);
         suspects.values().removeIf(seen -> tickCounter - seen.since() > FAILED_RETRY_TICKS);
+        if (mode == Mode.AREA) {
+            return AreaBreaker.INSTANCE.nextInReach(mc, player, range(player));
+        }
         int wrongFor = Configs.Breaking.WRONG_FOR_TICKS.getIntegerValue();
 
         List<SchematicHelper.Area> areas = SchematicHelper.areas();
@@ -613,10 +647,11 @@ public class BlockBreaker {
     }
 
     /**
-     * Picks the tool for this block: a plain one that breaks it faster first (used until it breaks), then one of the
-     * player's own (enchanted, renamed, netherite: the player's rule, those last), never one of those about to break.
+     * The best tool for the block onto the hand: a plain one that helps first (never one of the player's own when a
+     * plain one does), or with {@code fastest} (Auto break) simply the fastest, Efficiency counted, the player's own
+     * too. Never one of the player's own that's about to break.
      */
-    private static void selectBestTool(LocalPlayer player, BlockState state) {
+    private static void selectBestTool(LocalPlayer player, BlockState state, boolean fastest) {
         if (player.getAbilities().instabuild) {
             return;
         }
@@ -634,8 +669,8 @@ public class BlockBreaker {
                 continue;
             }
 
-            int key = keyOf(stack, state);
-            float score = scoreOf(stack, state);
+            int key = fastest ? Math.min(1, keyOf(stack, state)) : keyOf(stack, state);
+            float score = fastest ? effectiveSpeed(player, stack, state) : scoreOf(stack, state);
             if (key > bestKey || key == bestKey && score > bestScore) {
                 bestKey = key;
                 bestScore = score;
@@ -646,10 +681,11 @@ public class BlockBreaker {
         // The selected tool might be one of the player's own that is about to break: move off it
         ItemStack selected = inventory.getItem(inventory.getSelectedSlot());
         boolean selectedProtected = worn(selected);
-        int selectedKey = keyOf(selected, state);
+        int selectedKey = fastest ? Math.min(1, keyOf(selected, state)) : keyOf(selected, state);
+        float selectedScore = fastest ? effectiveSpeed(player, selected, state) : scoreOf(selected, state);
 
         if (bestSlot != -1 && (selectedProtected || bestKey > selectedKey
-                || bestKey == selectedKey && bestScore > scoreOf(selected, state) + 0.001f)) {
+                || bestKey == selectedKey && bestScore > selectedScore + 0.001f)) {
             if (!Inventory.isHotbarSlot(bestSlot)) {
                 // Swap the tool onto the last hotbar slot (the one left free for tools)
                 int toolSlot = Inventory.getSelectionSize() - 1;
@@ -673,6 +709,24 @@ public class BlockBreaker {
     private static int keyOf(ItemStack stack, BlockState state) {
         boolean helps = stack.getDestroySpeed(state) > 1.0f || state.requiresCorrectToolForDrops() && stack.isCorrectToolForDrops(state);
         return !helps ? 0 : Tools.privateTool(stack) ? 1 : 2;
+    }
+
+    /** How fast the stack breaks the block, Efficiency included (for the fastest tool, see selectBestTool). */
+    private static float effectiveSpeed(LocalPlayer player, ItemStack stack, BlockState state) {
+        float speed = scoreOf(stack, state);
+        if (stack.getDestroySpeed(state) > 1.0f) {
+            try {
+                var efficiency = player.level().registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.ENCHANTMENT)
+                        .getOrThrow(net.minecraft.world.item.enchantment.Enchantments.EFFICIENCY);
+                int level = net.minecraft.world.item.enchantment.EnchantmentHelper.getItemEnchantmentLevel(efficiency, stack);
+                if (level > 0) {
+                    speed += level * level + 1;
+                }
+            } catch (RuntimeException ignored) {
+                // No enchantment registry (shouldn't happen in a world): the tool's own speed
+            }
+        }
+        return speed;
     }
 
     private static float scoreOf(ItemStack stack, BlockState state) {

@@ -60,3 +60,9 @@
 ## 26.2-0.14.11
 - Seeds wait one tick after switching to them.
 - No more "no hoe for tilling" with your own hoe on the hotbar.
+
+## 26.2-0.15.0
+- Auto break: breaks a Litematica area selection.
+- Skip any block type in the Auto break tab.
+- Best tool per block, drops put away or ignored.
+- Share last log (J+B) sends it to the developer's Discord.
