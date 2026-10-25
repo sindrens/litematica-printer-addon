@@ -22,6 +22,8 @@ public class AutoBuild {
     public final Mover mover = new Mover();
     public final AirPlace airPlace = new AirPlace();
     public final Fluids fluids = new Fluids();
+    /** Tills what the printer left as dirt where farmland goes (see Tiller). */
+    public final Tiller tiller = new Tiller();
     /** Temporary rails are removed through the same list as misplaced air-placed blocks. */
     public final RailHelper rails = new RailHelper(airPlace.misplaced());
     public final EntityPlacer entities = new EntityPlacer();
@@ -568,6 +570,9 @@ public class AutoBuild {
         if (fluids.isBusy()) {
             return "bucket";
         }
+        if (tiller.isBusy()) {
+            return "tilling";
+        }
         return pausedByOthers() ? "chest/shop/crafting/rails" : null;
     }
 
@@ -581,7 +586,7 @@ public class AutoBuild {
     }
 
     private boolean pausedByOthers() {
-        return breaker.isBusy() || eater.isBusy() || fluids.isBusy() || rails.isBusy() || entities.isBusy() || crafter.isBusy() || fetcher.isBusy()
+        return breaker.isBusy() || eater.isBusy() || fluids.isBusy() || tiller.isBusy() || rails.isBusy() || entities.isBusy() || crafter.isBusy() || fetcher.isBusy()
                 || no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.isRunning() || no.sindrens.printeraddon.shop.ShopScanner.INSTANCE.isRunning();
     }
 
@@ -721,6 +726,7 @@ public class AutoBuild {
                             : onUnconfirmed ? "below-unconfirmed(" + pos.below().toShortString().replace(" ", "") + ")"
                             : supportGoing ? "support-going(" + LayerManager.blockName(mc.level.getBlockState(support)) + ")"
                             : supportUnconfirmed ? "support-unconfirmed(" + support.toShortString().replace(" ", "") + ")"
+                            : cantStand && Tiller.untilled(mc.level, schematic, pos.below()) ? "needs-tilling"
                             : cantStand ? "cant-stand-there-yet"
                             : itemSettling(mc, schematic, pos) ? "item-settling" : "held-for-below");
                 }
@@ -846,6 +852,9 @@ public class AutoBuild {
         }
         if (fluids.isBusy()) {
             return "using a bucket";
+        }
+        if (tiller.isBusy()) {
+            return "tilling dirt the printer left";
         }
         if (rails.isBusy()) {
             return "placing a temporary rail";
@@ -1232,6 +1241,9 @@ public class AutoBuild {
         }
         if (rails.isBusy()) {
             return BuildStats.Activity.RAILS;
+        }
+        if (tiller.isBusy()) {
+            return BuildStats.Activity.PLACING;
         }
         return mover.activity();
     }
@@ -1868,6 +1880,7 @@ public class AutoBuild {
         airPlace.reset();
         stock.reset();
         fluids.reset();
+        tiller.reset();
         rails.reset();
         entities.reset();
         breaker.setForced(airPlace.misplaced());
@@ -1929,6 +1942,9 @@ public class AutoBuild {
                     : "disconnected: " + disconnectReason) + " (picks up again once back at the build)"
                     : "stopped by you";
             BuildLog.line("END", why + " | " + stats.total() + " | " + spendingLine());
+            if (tiller.tilledCount() > 0 || !schematicBlocks.isEmpty() && schematicBlocks.contains(net.minecraft.world.level.block.Blocks.FARMLAND)) {
+                BuildLog.line("TILL", tiller.summary());
+            }
             if (reason == null && !resumeLater) {
                 RunLog.user("stop", "");
             } else if (resumeLater) {
@@ -2482,14 +2498,18 @@ public class AutoBuild {
         if (!breaker.isBusy() && !airPlace.isActive() && !rails.isBusy() && (fluids.isBusy() || PrinterBridge.isIdle())) {
             fluids.tick(mc);
         }
-        if (addonPlaces && !breaker.isBusy() && !airPlace.isActive() && !fluids.isBusy() && (rails.isBusy() || PrinterBridge.isIdle())) {
+        // Dirt the printer left where farmland goes: tilled here (see Tiller), between the printer's clicks
+        if (!breaker.isBusy() && !airPlace.isActive() && !rails.isBusy() && !fluids.isBusy() && (tiller.isBusy() || PrinterBridge.isIdle())) {
+            tiller.tick(mc);
+        }
+        if (addonPlaces && !breaker.isBusy() && !airPlace.isActive() && !fluids.isBusy() && !tiller.isBusy() && (rails.isBusy() || PrinterBridge.isIdle())) {
             rails.tick(mc);
         }
-        if (addonPlaces && !breaker.isBusy() && !airPlace.isActive() && !fluids.isBusy() && !rails.isBusy()
+        if (addonPlaces && !breaker.isBusy() && !airPlace.isActive() && !fluids.isBusy() && !tiller.isBusy() && !rails.isBusy()
                 && (entities.isBusy() || PrinterBridge.isIdle())) {
             entities.tick(mc);
         }
-        if (!breaker.isBusy() && !airPlace.isActive() && !fluids.isBusy() && !rails.isBusy() && !entities.isBusy()
+        if (!breaker.isBusy() && !airPlace.isActive() && !fluids.isBusy() && !tiller.isBusy() && !rails.isBusy() && !entities.isBusy()
                 && PrinterBridge.isIdle()) {
             hotbar.tick(mc, layers.layerNeeds(), !mover.isTravelling(mc.player) && mc.player.getDeltaMovement().lengthSqr() < 0.0004);
         }

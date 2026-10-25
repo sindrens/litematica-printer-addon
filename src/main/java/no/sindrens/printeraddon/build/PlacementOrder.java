@@ -163,11 +163,18 @@ public final class PlacementOrder {
     /**
      * Farmland is tilled only once water that keeps it wet is in (a waterlogged block or water within 4 blocks, as the
      * game checks): tilled without water it dries back to dirt. One is enough (all of them in reach held up the rows
-     * whose second water was in the next lane). The dirt itself may go in before. Returns the water to wait for, or null.
+     * whose second water was in the next lane). The dirt itself may go in before. Not when the stem or crop on it is
+     * built in the same go (the layers built together): planted right after, it keeps the farmland as it is. Waiting
+     * there held up whole rows beside waterlogged leaves still to get their water (the bucket only comes while the
+     * printer has nothing else to do): the lane flew on, came back for them, and some stayed dirt for good.
+     * Returns the water to wait for, or null.
      */
     @Nullable
     public static BlockPos waterFirst(Level level, WorldSchematic schematic, BlockPos pos, BlockState target) {
         if (target.getBlock() != net.minecraft.world.level.block.Blocks.FARMLAND || level.getBlockState(pos).isAir()) {
+            return null;
+        }
+        if (cropGoesOnNow(schematic, pos)) {
             return null;
         }
         BlockPos missing = null;
@@ -183,6 +190,21 @@ public final class PlacementOrder {
             }
         }
         return missing;
+    }
+
+    /**
+     * A stem or crop goes on this farmland in the layers being built now (or it's all visible: the last blocks), so it's
+     * planted right after the tilling.
+     */
+    public static boolean cropGoesOnNow(WorldSchematic schematic, BlockPos farmland) {
+        if (!schematic.getBlockState(farmland.above()).is(net.minecraft.tags.BlockTags.MAINTAINS_FARMLAND)) {
+            return false;
+        }
+        LayerManager layers = AutoBuild.INSTANCE.layers;
+        if (!layers.isActive() || layers.isFinishingDeferred()) {
+            return true;
+        }
+        return farmland.getY() + 1 >= layers.getLayer() && farmland.getY() + 1 <= layers.getLayerTop();
     }
 
     /** A position is done when the schematic has nothing there or the world already matches it. */

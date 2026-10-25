@@ -50,3 +50,9 @@
 - Lanes 10% faster again (0.14.8 waited too much).
 - One log file (.jsonl), plain text optional.
 - Run report ends with the top 3 time costs.
+
+## 26.2-0.14.10
+- Farmland tilled right away, stems planted in the same pass.
+- Dirt the printer missed gets tilled by the add-on.
+- Lanes wait a moment instead of leaving holes.
+- Finished layers checked for untilled dirt at start.

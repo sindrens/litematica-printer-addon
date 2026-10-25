@@ -202,7 +202,12 @@ public class Mover {
 
     /** How often each block of this layer was left for later. */
     private final Map<BlockPos, Integer> skipCounts = new HashMap<>();
-    private static final int MAX_SKIPS = 4;
+    /**
+     * Left for later this often, a block is left out of its layer (done at the end of the build). It was 4: the player
+     * would rather have the layer wait a little longer than holes to come back for (each time is from another spot,
+     * and dirt for farmland gets the add-on's own hoe click meanwhile, see Tiller).
+     */
+    private static final int MAX_SKIPS = 8;
 
     /**
      * Nothing has been placed for a long while although there's work, and it's not buying or fetching (see
@@ -1695,6 +1700,11 @@ public class Mover {
         }
         direction = direction.normalize();
         WorldSchematic schematic = SchematicHelper.world();
+        // Nothing left behind that a moment more gets in: holes left on the way cost a trip back after the lanes
+        if (schematic != null && holdForBehind(mc, player, schematic, direction, reach)) {
+            RunLog.heldForBehind();
+            return 0;
+        }
         int ack = 2 * ServerLag.pingTicks(mc) + 2;
         double bucket = bucketRange(mc);
         List<double[]> leaving = new ArrayList<>(inReach.size());
@@ -1719,6 +1729,76 @@ public class Mover {
             speed = Math.min(speed, room / ((k + 1) / sweepRate + leaving.get(k)[1]));
         }
         return speed;
+    }
+
+    /** How long the lane already stood still for each block at the back of the reach (see holdForBehind). */
+    private final Map<BlockPos, Integer> behindWaited = new HashMap<>();
+    /** At most this long for one block at the back of the reach. */
+    private static final int HOLD_BEHIND_TICKS = 30;
+    /** Within this much of leaving the reach, a block is at the back of it. */
+    private static final double BEHIND_EDGE = 0.6;
+
+    /**
+     * A block about to leave the reach behind the lane that a moment more gets in: its click not answered yet (it may
+     * come back empty: most of what the lanes left was "clicked-no-result", the server's answer came after the block
+     * was out of reach), or one the printer (or the tiller) can do now, or one waiting for the block under it, itself
+     * clicked a moment ago. The lane stands still for it, at most HOLD_BEHIND_TICKS each: the player asked for that
+     * rather than the holes it came back for after the lanes.
+     */
+    private boolean holdForBehind(Minecraft mc, LocalPlayer player, WorldSchematic schematic, Vec3 direction, double reach) {
+        LayerManager layers = AutoBuild.INSTANCE.layers;
+        // Where the printer really clicks (the add-on holds back what's beyond the reach learned on this server)
+        double learned = ReachStats.reach(reach);
+        double r = learned < reach - 0.05 ? Math.min(reach, learned + 0.25) : reach;
+        Vec3 eye = player.getEyePosition();
+        BlockPos center = BlockPos.containing(eye);
+        int cube = (int) Math.ceil(r);
+        boolean hold = false;
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        for (int y = layers.getLayer(); y <= layers.getLayerTop(); y++) {
+            for (int x = center.getX() - cube; x <= center.getX() + cube; x++) {
+                for (int z = center.getZ() - cube; z <= center.getZ() + cube; z++) {
+                    pos.set(x, y, z);
+                    Vec3 d = Vec3.atCenterOf(pos).subtract(eye);
+                    double distance = d.lengthSqr();
+                    if (distance > r * r) {
+                        continue;
+                    }
+                    double along = d.dot(direction);
+                    double room = along + Math.sqrt(Math.max(0, r * r - (distance - along * along)));
+                    if (room > BEHIND_EDGE || schematic.getBlockState(pos).isAir() || !worthWaitingFor(mc, schematic, pos)) {
+                        continue;
+                    }
+                    BlockPos at = pos.immutable();
+                    int waited = behindWaited.getOrDefault(at, 0);
+                    if (waited < HOLD_BEHIND_TICKS) {
+                        behindWaited.put(at, waited + 1);
+                        hold = true;
+                    }
+                }
+            }
+        }
+        if (behindWaited.size() > 512) {
+            behindWaited.clear();
+        }
+        return hold;
+    }
+
+    /** See holdForBehind. */
+    private boolean worthWaitingFor(Minecraft mc, WorldSchematic schematic, BlockPos pos) {
+        Long leftOut = notTaken.get(pos);
+        if (leftOut != null && leftOut > tick || AutoBuild.INSTANCE.givenUp(pos)) {
+            return false;
+        }
+        // Clicked, the answer still to come (the client already shows the block)
+        if (ServerAcks.works() && ServerAcks.isWaiting(pos)) {
+            return true;
+        }
+        BlockCheck.Result result = BlockCheck.check(mc.level, schematic, pos);
+        if (result != BlockCheck.Result.MISSING && result != BlockCheck.Result.PRINTER_FIXES) {
+            return false;
+        }
+        return canDoNow(mc, schematic, pos) || ServerAcks.works() && ServerAcks.isWaiting(pos.below());
     }
 
     /** How many blocks the printer really places a tick while it has something in reach (for sweepSpeed). */
@@ -1807,9 +1887,10 @@ public class Mover {
                 return false;
             }
             // Held back by the add-on's own order (water first, what it stands on first...): the printer won't get
-            // it, so it doesn't count as something to place here
+            // it, so it doesn't count as something to place here. Except a stem on dirt that should be farmland: once
+            // in reach the dirt is tilled (see Tiller, also when it's on a layer already finished), then it goes in
             if (!PlacementOrder.isReady(mc.level, schematic, p, schematic.getBlockState(p))) {
-                return false;
+                return result == BlockCheck.Result.MISSING && Tiller.untilled(mc.level, schematic, p.below());
             }
             me.aleksilassila.litematica.printer.SchematicBlockState state =
                     new me.aleksilassila.litematica.printer.SchematicBlockState(mc.level, schematic, p);

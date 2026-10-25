@@ -273,6 +273,7 @@ public class LayerManager {
                 }
             }
         }
+        auditFarmland(mc, schematic, areas);
         BuildLog.line("LAYER", String.format(java.util.Locale.ROOT, "start: %d layers known as done from the saved progress, %d read and done, %d gone past"
                         + " (%d blocks left there wait until the end); going on at Y %d | %.1f ms | %d skipped last time, tried again",
                 fromSave, doneLayers.size() - fromSave - passed, passed, leftovers, layer, (System.nanoTime() - started) / 1e6,
@@ -491,6 +492,9 @@ public class LayerManager {
             // for something above (those wait until the layers above are built)
             findings.waiting.removeIf(p -> p.getY() > layer && BlockCheck.check(mc.level, schematic, p.below()) != BlockCheck.Result.OK);
         }
+        // A stem on dirt that should be farmland waits for the hoe, not for something above: the dirt is tilled from
+        // here (see Tiller, also when its own layer is finished), and the stem isn't left until the end
+        findings.waiting.removeIf(p -> Tiller.untilled(mc.level, schematic, p.below()));
         if (waterPending > 0 && findings.water == 0 && remaining > 0) {
             BuildLog.line("LAYER", "the water on " + describeLayers() + " is all in");
         }
@@ -517,7 +521,8 @@ public class LayerManager {
         // with "conflicts 2882"); the conflicts only when their number changed
         int conflictCount = AutoBuild.INSTANCE.conflicts.size();
         String layerText = describeLayers() + ": " + remaining + " unfinished (" + findings.waiting.size()
-                + " waiting for something above, " + findings.water + " water still to go in)"
+                + " waiting for something above, " + findings.water + " water still to go in"
+                + (findings.untilled > 0 ? ", " + findings.untilled + " dirt still to till" : "") + ")"
                 + (conflictCount != layerLineConflicts ? " | conflicts " + conflictCount : "") + " | still needs " + findings.needs
                 + (parts.unloaded.isEmpty() ? "" : " | not loaded: " + parts.unloaded.size() + " parts, "
                 + (parts.unloaded.size() - notSeen) + " of them seen finished, " + parts.unloadedBlocks + " blocks in the others")
@@ -590,6 +595,7 @@ public class LayerManager {
 
             Chat.info(describeLayers() + " done.");
             AutoBuild.INSTANCE.stats.layerDone(describeLayers());
+            leftAtDone(mc.level, schematic, areas);
             RunLog.layerEnd(describeLayers());
             AutoBuild.INSTANCE.speed.newLayer();
             for (int y = layer; y <= layerTop; y++) {
@@ -680,8 +686,15 @@ public class LayerManager {
                 collectUnfinished(mc.level, schematic, areas, y, all);
             }
             AutoBuild.INSTANCE.deferred.addAll(all);
+            int untilled = 0;
+            for (BlockPos pos : all) {
+                if (Tiller.untilled(mc.level, schematic, pos)) {
+                    untilled++;
+                }
+            }
             BuildLog.line("LAYER", describeLayers() + ": nothing could be done here for " + ticksWithoutProgress / 20
-                    + " s; the last " + remaining + " (" + all.size() + " of them loaded) wait until the end | " + leftText);
+                    + " s; the last " + remaining + " (" + all.size() + " of them loaded) wait until the end"
+                    + (untilled > 0 ? ", " + untilled + " of them dirt still to till" : "") + " | " + leftText);
             Chat.warn(describeLayers() + ": the last " + remaining + " block" + (remaining == 1 ? "" : "s")
                     + " can't be done now; tried again at the end, going on.");
             completeChecks = 2;
@@ -690,6 +703,113 @@ public class LayerManager {
             forceDone = true;
         }
         return true;
+    }
+
+    /**
+     * The finished layers checked for farmland that's still dirt and the stems or crops missing on it (the layers
+     * known as done from the saved progress were never read again: a stem the hoe's click missed stayed missing for
+     * good). Listed per layer in the build log and done when the player is near them and at the end. Only for a
+     * schematic with farmland.
+     */
+    private void auditFarmland(Minecraft mc, WorldSchematic schematic, List<SchematicHelper.Area> areas) {
+        java.util.Set<net.minecraft.world.level.block.Block> kinds = AutoBuild.INSTANCE.schematicBlocks;
+        if (!kinds.isEmpty() && !kinds.contains(Blocks.FARMLAND)) {
+            return;
+        }
+        long started = System.nanoTime();
+        int untilled = 0;
+        int crops = 0;
+        int lowest = Integer.MAX_VALUE;
+        int highest = Integer.MIN_VALUE;
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        for (int y : new java.util.TreeSet<>(doneLayers)) {
+            if (y >= layer) {
+                break;
+            }
+            int dirtHere = 0;
+            int cropsHere = 0;
+            for (SchematicHelper.Area area : areas) {
+                if (y < area.minY() || y > area.maxY()) {
+                    continue;
+                }
+                for (int x = area.minX(); x <= area.maxX(); x++) {
+                    for (int z = area.minZ(); z <= area.maxZ(); z++) {
+                        pos.set(x, y, z);
+                        BlockState target = schematic.getBlockState(pos);
+                        if (target.getBlock() == Blocks.FARMLAND) {
+                            if (Tiller.tillable(mc.level.getBlockState(pos).getBlock())) {
+                                dirtHere++;
+                                AutoBuild.INSTANCE.deferred.add(pos.immutable());
+                            }
+                        } else if (target.is(net.minecraft.tags.BlockTags.MAINTAINS_FARMLAND)
+                                && schematic.getBlockState(pos.below()).getBlock() == Blocks.FARMLAND
+                                && BlockCheck.check(mc.level, schematic, pos) == BlockCheck.Result.MISSING) {
+                            cropsHere++;
+                            AutoBuild.INSTANCE.deferred.add(pos.immutable());
+                        }
+                    }
+                }
+            }
+            if (dirtHere + cropsHere > 0) {
+                BuildLog.line("AUDIT", "Y " + y + ": " + dirtHere + " farmland still dirt, " + cropsHere + " stems or crops missing");
+                untilled += dirtHere;
+                crops += cropsHere;
+                lowest = Math.min(lowest, y);
+                highest = Math.max(highest, y);
+            }
+        }
+        BuildLog.line("AUDIT", String.format(java.util.Locale.ROOT, "finished layers checked for farmland: %d still dirt, %d stems or crops missing | %.1f ms",
+                untilled, crops, (System.nanoTime() - started) / 1e6));
+        if (untilled + crops > 0) {
+            Chat.warn("Finished layers (Y " + lowest + " to " + highest + "): " + untilled + " farmland still dirt and " + crops
+                    + " stems or crops missing. Done when you're near them and at the end (the build log lists them per layer).");
+        }
+    }
+
+    /**
+     * What the layers just done leave behind (waiting for the end of the build): how many, the dirt still to till, the
+     * stems or crops not planted, and the first few with what they are, for LAYER-DONE and a LAYER line. A layer was
+     * called done with blocks left, and nothing in the log said which.
+     */
+    private void leftAtDone(Level level, WorldSchematic schematic, List<SchematicHelper.Area> areas) {
+        int left = 0;
+        int untilled = 0;
+        int crops = 0;
+        List<String> listed = new ArrayList<>();
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        for (SchematicHelper.Area area : areas) {
+            for (int y = Math.max(layer, area.minY()); y <= Math.min(layerTop, area.maxY()); y++) {
+                for (int x = area.minX(); x <= area.maxX(); x++) {
+                    for (int z = area.minZ(); z <= area.maxZ(); z++) {
+                        pos.set(x, y, z);
+                        BlockState target = schematic.getBlockState(pos);
+                        if (target.isAir()) {
+                            continue;
+                        }
+                        BlockCheck.Result result = BlockCheck.check(level, schematic, pos);
+                        if (result == BlockCheck.Result.OK || result == BlockCheck.Result.UNLOADED || result == BlockCheck.Result.PROTECTED
+                                || result.needsBreaking() && AutoBuild.INSTANCE.isConflict(pos, result, level.getBlockState(pos))) {
+                            continue;
+                        }
+                        left++;
+                        if (Tiller.untilled(level, schematic, pos)) {
+                            untilled++;
+                        } else if (result == BlockCheck.Result.MISSING && target.is(net.minecraft.tags.BlockTags.MAINTAINS_FARMLAND)) {
+                            crops++;
+                        }
+                        if (listed.size() < 8) {
+                            listed.add(pos.toShortString().replace(" ", "") + ":" + result + ":" + blockName(level.getBlockState(pos))
+                                    + (AutoBuild.INSTANCE.couldNotPlace.contains(pos) ? "(given-up)" : ""));
+                        }
+                    }
+                }
+            }
+        }
+        if (left > 0) {
+            BuildLog.line("LAYER", describeLayers() + " done with " + left + " left for the end (" + untilled + " dirt still to till, "
+                    + crops + " stems or crops not planted): " + String.join(" ", listed) + (left > listed.size() ? " ..." : ""));
+        }
+        RunLog.layerLeft(left, untilled, crops, String.join(" ", listed));
     }
 
     /** The next check finishes the layer (its leftovers wait until the end, see above). */
@@ -1298,6 +1418,8 @@ public class LayerManager {
         final java.util.Map<net.minecraft.world.item.Item, Integer> needs = new java.util.LinkedHashMap<>();
         /** Farmland still to till (placed as dirt and tilled): that needs a hoe. */
         int tilling;
+        /** Of those, dirt that's there and only waits for the hoe (see Tiller). */
+        int untilled;
         /** Unfinished blocks that hold water (waterlogged or water), for the build log. */
         int water;
         /** Missing blocks with nothing beside or under them to place them against, now or later (see AirPlace). */
@@ -1385,6 +1507,9 @@ public class LayerManager {
                         if (findings != null && (result == BlockCheck.Result.MISSING || result == BlockCheck.Result.PRINTER_FIXES)
                                 && schematic.getBlockState(pos).getBlock() == Blocks.FARMLAND) {
                             findings.tilling++;
+                            if (Tiller.tillable(level.getBlockState(pos).getBlock())) {
+                                findings.untilled++;
+                            }
                         }
                     }
                 }

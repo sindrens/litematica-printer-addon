@@ -543,8 +543,11 @@ public final class RunLog {
         }
         LocalPlayer player = mc.player;
         BlockPos target = clicked.relative(face);
-        // The block placed is next to the one clicked, unless that one is replaced (air place: the spot itself)
-        BlockPos at = mc.level != null && mc.level.getBlockState(clicked).canBeReplaced() ? clicked : target;
+        // The block placed is next to the one clicked, unless that one is replaced (air place: the spot itself). A
+        // tool works on the block clicked itself (a hoe tilling dirt): that's the spot (its misses had no face, hit or
+        // distance in the log, the click was kept for the spot above)
+        boolean tool = Tools.kindOf(player.getMainHandItem()) != null;
+        BlockPos at = mc.level != null && (tool || mc.level.getBlockState(clicked).canBeReplaced()) ? clicked : target;
         Vec3 motion = player.getDeltaMovement();
         Vec3 eye = player.getEyePosition();
         // Where the server has the player: about half a round trip and a tick behind
@@ -552,8 +555,8 @@ public final class RunLog {
         Vec3 serverEye = eye.subtract(motion.scale(lag));
         net.minecraft.world.phys.AABB box = new net.minecraft.world.phys.AABB(clicked);
         // What was clicked against (the block itself for an air place)
-        String against = at.equals(clicked) ? "air-place" : mc.level == null ? "?"
-                : LayerManager.blockName(mc.level.getBlockState(clicked)) + "(" + side(at, clicked) + ")";
+        String against = mc.level == null ? "?" : tool ? "itself(" + LayerManager.blockName(mc.level.getBlockState(clicked)) + ")"
+                : at.equals(clicked) ? "air-place" : LayerManager.blockName(mc.level.getBlockState(clicked)) + "(" + side(at, clicked) + ")";
         // Clicked against a block (or onto one, for sand) the server may not have had yet: for the miss's cause
         boolean supportFresh = !at.equals(clicked) && ServerAcks.unconfirmed(clicked, 10);
         boolean belowFresh = ServerAcks.unconfirmed(at.below(), 10);
@@ -744,6 +747,30 @@ public final class RunLog {
         speedTicks = 0;
         lane.reset(AutoBuild.clientTicks);
         laneClicks = laneMisses = laneSwitches = 0;
+        laneHeldBehind = 0;
+    }
+
+    /** Ticks the lane stood still for a block at the back of the reach (see Mover#holdForBehind). */
+    private static int laneHeldBehind;
+
+    public static void heldForBehind() {
+        if (active && laneOn) {
+            laneHeldBehind++;
+        }
+    }
+
+    /** What the layers that just finished leave for the end (see LayerManager#leftAtDone): written in LAYER-DONE. */
+    private static int doneLeft;
+    private static int doneUntilled;
+    private static int doneCrops;
+    private static String doneLeftList = "";
+    private static int layerTilledStart;
+
+    public static void layerLeft(int left, int untilled, int crops, String list) {
+        doneLeft = left;
+        doneUntilled = untilled;
+        doneCrops = crops;
+        doneLeftList = list;
     }
 
     /** Misses during the layer (see LAYER-DONE). */
@@ -789,7 +816,7 @@ public final class RunLog {
                 "pausedBy", pausedOnly.breakdown(), "feetOverTopMin", feetMin == Double.MAX_VALUE ? "-" : signed(feetMin),
                 "feetOverTopMax", feetMax == -Double.MAX_VALUE ? "-" : signed(feetMax),
                 "avgSpeedBlocksPerTick", round(speedTicks == 0 ? 0 : speedSum / speedTicks), "clicks", laneClicks, "missed", laneMisses,
-                "switches", laneSwitches, "leftWhy", reasons.toString()));
+                "switches", laneSwitches, "heldForBehind", seconds(laneHeldBehind), "leftWhy", reasons.toString()));
         if (!listed.isEmpty()) {
             BuildLog.line("LANE-LEFT", "lane=" + laneName + " " + String.join(" ", listed) + (left > listed.size() ? " (+" + (left - listed.size()) + " more)" : ""));
         }
@@ -813,9 +840,14 @@ public final class RunLog {
                 return "no-item(" + itemName(needed.getItem()) + ")";
             }
         }
+        if (Tiller.untilled(mc.level, schematic, pos)) {
+            // Dirt where farmland goes, the hoe's click missed or never came
+            return "untilled";
+        }
         String notReady = PlacementOrder.whyNotReady(mc.level, schematic, pos, schematic.getBlockState(pos));
         if (notReady != null) {
-            return "not-ready";
+            // A stem on dirt that should have been tilled: its own cause (it was "not-ready" with the rest)
+            return Tiller.untilled(mc.level, schematic, pos.below()) ? "needs-tilling" : "not-ready";
         }
         String held = holdReason(pos);
         if (held != null) {
@@ -856,12 +888,17 @@ public final class RunLog {
         emit("LAYER-DONE", kv("layer", name.replace("Layers ", "").replace("Layer ", "").replace(" ", ""), "time", seconds(ticks),
                 "placed", layer.placed, "rate", Math.round(layer.placed * 60.0 / (ticks / 20.0)) + "/m", "lanePlaced", layerLanePlaced,
                 "leftovers", layerLeftovers < 0 ? "-" : layerLeftovers, "leftoverTime", seconds(layerLeftoverTicks),
-                "buy", seconds(layer.ticks[Cat.BUYING.ordinal()] + layer.ticks[Cat.VAULT.ordinal()]), "missed", layerMisses));
+                "buy", seconds(layer.ticks[Cat.BUYING.ordinal()] + layer.ticks[Cat.VAULT.ordinal()]), "missed", layerMisses,
+                "left", doneLeft, "untilled", doneUntilled, "stemsSkipped", doneCrops, "leftList", doneLeftList.isEmpty() ? "-" : doneLeftList,
+                "tilledByAddon", AutoBuild.INSTANCE.tiller.tilledCount() - layerTilledStart));
+        doneLeft = doneUntilled = doneCrops = 0;
+        doneLeftList = "";
         resetLayer(AutoBuild.clientTicks, name);
     }
 
     private static void resetLayer(long now, String name) {
         runLeftoverTicks += layerLeftoverTicks;
+        layerTilledStart = AutoBuild.INSTANCE.tiller.tilledCount();
         layer.reset(now);
         layerName = name;
         layerItems.clear();

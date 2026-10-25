@@ -104,7 +104,9 @@ public class Fluids {
                 continue;
             }
             BlockCheck.Result result = BlockCheck.check(level, schematic, next);
-            if (result != BlockCheck.Result.OK && result != BlockCheck.Result.BUCKET) {
+            // Dirt still to be tilled is as good as built (no water gets onto it): farmland without a crop on it waits
+            // for its water, and the water waited for that farmland
+            if (result != BlockCheck.Result.OK && result != BlockCheck.Result.BUCKET && !Tiller.untilled(level, schematic, next)) {
                 return false;
             }
         }
