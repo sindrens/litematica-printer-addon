@@ -242,9 +242,14 @@ public class AutoBuild {
         if (mc.player == null) {
             return;
         }
+        // Only a real shortage stops before the lane: with a quarter of what the lane takes or more, the lane starts and
+        // the item is topped up where it runs out (a trip is /pv and /shop, right where the player is). The logs had a
+        // trip before nearly every other lane with the inventory still half full (9 trips for 7193 blocks, 14% of the
+        // time): each trip now comes with the inventory nearly empty, so there are fewer of them
         java.util.Set<net.minecraft.world.item.Item> shortNow = new java.util.HashSet<>();
         for (var entry : needs.entrySet()) {
-            if (mc.player.getInventory().countItem(entry.getKey()) < entry.getValue() && gettable(mc, entry.getKey())) {
+            int have = mc.player.getInventory().countItem(entry.getKey());
+            if (have < entry.getValue() && have * 4 < entry.getValue() && gettable(mc, entry.getKey())) {
                 shortNow.add(entry.getKey());
             }
         }

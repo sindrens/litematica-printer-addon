@@ -117,3 +117,7 @@
 - Schematic library: browse and download builds from Discord, straight into Litematica.
 - Alerts sent while offline arrive once the connection is back.
 - Less traffic when nothing is building.
+
+## 26.2-0.17.1
+- Fewer trips to the vaults and the shop: a lane starts unless an item is nearly gone, and it's topped up where it runs out.
+- One more inventory slot for building blocks.

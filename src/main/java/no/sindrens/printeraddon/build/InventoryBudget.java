@@ -20,8 +20,8 @@ import java.util.Set;
  * chest). Tools, food and everything else keep their slots.
  */
 public final class InventoryBudget {
-    /** Slots that are never filled by buying or fetching. */
-    public static final int KEEP_FREE = 3;
+    /** Slots that are never filled by buying or fetching (room for a drop and for moving stacks around). */
+    public static final int KEEP_FREE = 2;
     /** An item that needs this many slots or fewer for the rest of the layer gets them all. */
     private static final int SMALL = 2;
 
