@@ -53,6 +53,8 @@ public class ConfigGui extends GuiConfigsBase {
             addBuildTab(10, 52);
         } else if (tab == Tab.BREAK_AREA) {
             addBreakTab(10, 52);
+        } else if (tab == Tab.DISCORD) {
+            addDiscordTab(10, 52);
         } else if (tab != Tab.HOTKEYS) {
             // Where the search is (MaLiLib's: the magnifier at the top left of the list)
             this.addLabel(this.width - 230, 30, 220, 10, 0xFFAAAAAA, tab == Tab.ALL
@@ -152,6 +154,51 @@ public class ConfigGui extends GuiConfigsBase {
         });
     }
 
+    /** Discord: link status, link / unlink, sync on/off, the schematic library and messages from the developer. */
+    private void addDiscordTab(int x, int y) {
+        boolean linked = no.sindrens.printeraddon.discord.DiscordLink.isLinked();
+        boolean sync = Configs.Generic.DISCORD_SYNC.getBooleanValue();
+        this.addLabel(x, y, 500, 10, 0xFFFFFFFF, linked
+                ? "Linked with Discord as \u00a7b" + no.sindrens.printeraddon.discord.DiscordLink.linkedTo()
+                + "\u00a7r: your control room shows progress and lets you pause or stop from your phone."
+                : "Not linked. On the Printer Addon Discord type /link, then click Link here and type the code.");
+        y += 16;
+        this.addButton(new ButtonGeneric(x, y, 200, 20, linked ? "Link again (new code)" : "\u00a7aLink with Discord"), (button, mouse) -> {
+            GuiBase.openGui(null);
+            GuiBase.openGui(new net.minecraft.client.gui.screens.ChatScreen("/printeraddon link PRINT-", false));
+        });
+        if (linked) {
+            this.addButton(new ButtonGeneric(x + 204, y, 96, 20, "Unlink"), (button, mouse) -> {
+                no.sindrens.printeraddon.discord.DiscordLink.unlink();
+                this.initGui();
+            });
+        }
+        y += 24;
+        this.addButton(new ButtonGeneric(x, y, 200, 20, "Discord sync: " + (sync ? "\u00a7aON" : "\u00a7cOFF")), (button, mouse) -> {
+            Configs.Generic.DISCORD_SYNC.setBooleanValue(!Configs.Generic.DISCORD_SYNC.getBooleanValue());
+            this.initGui();
+        });
+        this.addLabel(x + 210, y + 5, 320, 10, 0xFFAAAAAA, "Never sends chat, coordinates, chests or vaults");
+        y += 24;
+        this.addButton(new ButtonGeneric(x, y, 200, 20, "Schematic library"), (button, mouse) -> {
+            GuiBase.openGui(null);
+            no.sindrens.printeraddon.discord.DiscordLink.schematics("");
+        });
+        this.addButton(new ButtonGeneric(x + 204, y, 96, 20, "Suggestions"), (button, mouse) -> {
+            GuiBase.openGui(null);
+            no.sindrens.printeraddon.discord.DiscordLink.suggestions();
+        });
+        y += 30;
+        List<String> inbox = no.sindrens.printeraddon.discord.DiscordLink.inbox();
+        this.addLabel(x, y, 500, 10, 0xFFFFFFFF, inbox.isEmpty() ? "No messages from Discord yet." : "Messages from Discord:");
+        y += 14;
+        for (int i = 0; i < Math.min(6, inbox.size()); i++) {
+            String line = inbox.get(i);
+            this.addLabel(x, y, 600, 10, 0xFFDDDDDD, line.length() > 110 ? line.substring(0, 110) + "..." : line);
+            y += 12;
+        }
+    }
+
     /** The page of the Auto break tab's list of blocks. */
     private static int blockPage;
 
@@ -248,7 +295,7 @@ public class ConfigGui extends GuiConfigsBase {
     @Override
     public List<ConfigOptionWrapper> getConfigs() {
         List<? extends IConfigBase> configs = switch (tab) {
-            case BUILD, BREAK_AREA -> List.<IConfigBase>of();
+            case BUILD, BREAK_AREA, DISCORD -> List.<IConfigBase>of();
             case IMPORTANT -> Configs.important();
             case ALL -> Configs.all();
             case GENERIC -> Configs.Generic.OPTIONS;
@@ -266,6 +313,7 @@ public class ConfigGui extends GuiConfigsBase {
     private enum Tab {
         BUILD("Build"),
         BREAK_AREA("Auto break"),
+        DISCORD("Discord"),
         IMPORTANT("Important"),
         ALL("All settings"),
         GENERIC("Generic"),

@@ -42,6 +42,20 @@ public final class LinkCommands {
                     }
                     return 1;
                 }))
+                .then(ClientCommands.literal("schematics")
+                        .then(ClientCommands.argument("search", StringArgumentType.greedyString()).executes(c -> {
+                            DiscordLink.schematics(StringArgumentType.getString(c, "search"));
+                            return 1;
+                        }))
+                        .executes(c -> {
+                            DiscordLink.schematics("");
+                            return 1;
+                        }))
+                .then(ClientCommands.literal("schematic").then(ClientCommands.literal("get")
+                        .then(ClientCommands.argument("id", StringArgumentType.word()).executes(c -> {
+                            DiscordLink.downloadSchematic(StringArgumentType.getString(c, "id"));
+                            return 1;
+                        }))))
                 .then(ClientCommands.literal("suggestions").executes(c -> {
                     DiscordLink.suggestions();
                     return 1;
@@ -57,7 +71,7 @@ public final class LinkCommands {
                                     return 1;
                                 }))))
                 .executes(c -> {
-                    Chat.info("§lPrinter Addon + Discord§r: /printeraddon link <code> · unlink · discord · messages · suggestions · vote <n> up|down");
+                    Chat.info("§lPrinter Addon + Discord§r: /printeraddon link <code> · unlink · discord · messages · schematics [search] · schematic get <id> · suggestions · vote <n> up|down");
                     return 1;
                 }));
     }

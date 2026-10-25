@@ -36,7 +36,8 @@ public final class DiscordLink {
     private DiscordLink() {
     }
 
-    private static final int STATUS_EVERY_TICKS = 100;   // 5 s
+    private static final int STATUS_EVERY_TICKS = 100;   // 5 s while building
+    private static final int IDLE_STATUS_EVERY_TICKS = 600; // 30 s when nothing runs
     private static final int POLL_EVERY_TICKS = 60;      // 3 s
     private static final int SHOPPING_LIST_AFTER_TICKS = 600; // 30 s into a run, once the needs are known
 
@@ -55,6 +56,10 @@ public final class DiscordLink {
     private static boolean toldUpdate;
     private static boolean toldOffline;
     private static final ArrayDeque<String> INBOX = new ArrayDeque<>();
+    /** Alerts that couldn't be sent (no internet, bot offline): sent once it answers again. */
+    private static final ArrayDeque<JsonObject> UNSENT = new ArrayDeque<>();
+    /** The player wants a time-lapse: the schematic is sent when a build starts. */
+    private static boolean wantSchematic;
 
     // ------------------------------------------------------------------ settings and token
 
@@ -239,13 +244,16 @@ public final class DiscordLink {
             activeSince = ticks;
             shoppingSent = false;
             event("run_start", AreaBreaker.INSTANCE.isRunning() ? "Auto break" : AutoBuild.placementNames());
+            if (wantSchematic && AutoBuild.INSTANCE.isRunning()) {
+                uploadSchematic();
+            }
         }
         wasActive = active;
         if (active && !shoppingSent && activeSince >= 0 && ticks - activeSince > SHOPPING_LIST_AFTER_TICKS) {
             shoppingSent = true;
             sendShoppingList();
         }
-        if (ticks % STATUS_EVERY_TICKS == 0 && !busyStatus) {
+        if (ticks % (active ? STATUS_EVERY_TICKS : IDLE_STATUS_EVERY_TICKS) == 0 && !busyStatus) {
             sendStatus(mc);
         }
         if (ticks % POLL_EVERY_TICKS == 0 && !busyPoll) {
@@ -297,6 +305,7 @@ public final class DiscordLink {
         call("POST", "/status", s, true, r -> {
             busyStatus = false;
             toldOffline = false;
+            flushUnsent();
         }, e -> {
             busyStatus = false;
             if (!toldOffline) {
@@ -324,6 +333,7 @@ public final class DiscordLink {
                     showMessage(m.getAsJsonObject());
                 }
             }
+            wantSchematic = o.has("upload_schematic") && o.get("upload_schematic").getAsBoolean();
             if (o.has("latest") && !o.get("latest").isJsonNull()) {
                 checkUpdate(o.get("latest").getAsString());
             }
@@ -415,7 +425,23 @@ public final class DiscordLink {
         JsonObject o = new JsonObject();
         o.addProperty("type", type);
         o.addProperty("message", message == null ? "" : clean(message));
-        call("POST", "/event", o, true, null, null);
+        sendEvent(o);
+    }
+
+    private static void sendEvent(JsonObject o) {
+        call("POST", "/event", o, true, null, e -> {
+            UNSENT.addLast(o);
+            while (UNSENT.size() > 20) {
+                UNSENT.removeFirst();
+            }
+        });
+    }
+
+    private static void flushUnsent() {
+        int n = UNSENT.size();
+        for (int i = 0; i < n; i++) {
+            sendEvent(UNSENT.removeFirst());
+        }
     }
 
     /** End of a run (from RunLog#end): totals for stats and achievements, and the alert. */
@@ -452,7 +478,7 @@ public final class DiscordLink {
         o.addProperty("type", "run_end");
         o.addProperty("message", result.equals("problem") || lower.contains("discord") ? clean(why) : "");
         o.add("run", run);
-        call("POST", "/event", o, true, null, null);
+        sendEvent(o);
         ticks = STATUS_EVERY_TICKS - 10;
     }
 
@@ -477,6 +503,87 @@ public final class DiscordLink {
     /** No colour codes, and nothing that looks like coordinates. */
     private static String clean(String s) {
         return s.replaceAll("§.", "").replaceAll("-?\\d+[, ]+-?\\d+[, ]+-?\\d+", "(position)");
+    }
+
+    // ------------------------------------------------------------------ time-lapse and schematic library
+
+    /** The schematic being built goes to the bot, which draws the time-lapse GIF when it's finished. */
+    private static void uploadSchematic() {
+        for (var placement : fi.dy.masa.litematica.data.DataManager.getSchematicPlacementManager().getAllSchematicsPlacements()) {
+            Path file = placement.isEnabled() ? placement.getSchematicFile() : null;
+            if (file == null || !file.toString().endsWith(".litematic") || !Files.isRegularFile(file)) {
+                continue;
+            }
+            try {
+                if (Files.size(file) > 16L * 1024 * 1024) {
+                    return;
+                }
+                byte[] bytes = Files.readAllBytes(file);
+                HttpRequest req = HttpRequest.newBuilder(URI.create(api() + "/build-schematic")).timeout(Duration.ofSeconds(60))
+                        .header("Authorization", "Bearer " + token).header("Content-Type", "application/octet-stream")
+                        .POST(HttpRequest.BodyPublishers.ofByteArray(bytes)).build();
+                HTTP.sendAsync(req, HttpResponse.BodyHandlers.discarding());
+            } catch (Exception e) {
+                PrinterAddon.LOGGER.info("Couldn't send the schematic for the time-lapse: {}", e.toString());
+            }
+            return;
+        }
+    }
+
+    public static void schematics(String search) {
+        if (!enabled()) {
+            Chat.warn("Discord sync is off.");
+            return;
+        }
+        String q = java.net.URLEncoder.encode(search == null ? "" : search, StandardCharsets.UTF_8);
+        call("GET", "/schematics?q=" + q, null, false, r -> {
+            JsonObject o = json(r);
+            JsonArray list = o.has("schematics") ? o.getAsJsonArray("schematics") : new JsonArray();
+            if (list.isEmpty()) {
+                Chat.info("No schematics found. Share one on Discord: /schematic share in #schematics.");
+                return;
+            }
+            Chat.info("§lSchematic library§r" + (search == null || search.isBlank() ? "" : " · " + search)
+                    + " (download: /printeraddon schematic get <id>)");
+            int n = 0;
+            for (JsonElement el : list) {
+                if (n++ >= 10) {
+                    break;
+                }
+                JsonObject s = el.getAsJsonObject();
+                JsonArray size = s.getAsJsonArray("size");
+                Chat.info("§b" + s.get("id").getAsString() + "§r " + s.get("name").getAsString() + " §7" + size.get(0).getAsInt() + "×"
+                        + size.get(1).getAsInt() + "×" + size.get(2).getAsInt() + ", " + s.get("blocks").getAsInt() + " blocks, by "
+                        + s.get("by").getAsString());
+            }
+        }, e -> Chat.warn("Couldn't reach the Discord bot: " + shortError(e)));
+    }
+
+    public static void downloadSchematic(String id) {
+        if (!enabled()) {
+            Chat.warn("Discord sync is off.");
+            return;
+        }
+        String clean = id.replaceAll("[^0-9a-fA-F]", "").toLowerCase(Locale.ROOT);
+        HttpRequest req = HttpRequest.newBuilder(URI.create(api() + "/schematics/" + clean + "/file")).timeout(Duration.ofSeconds(60))
+                .header("User-Agent", "PrinterAddon/" + version()).GET().build();
+        Chat.info("Downloading schematic " + clean + "...");
+        HTTP.sendAsync(req, HttpResponse.BodyHandlers.ofByteArray()).whenComplete((r, e) -> Minecraft.getInstance().execute(() -> {
+            if (e != null || r.statusCode() != 200) {
+                Chat.warn(e != null ? "Couldn't reach the Discord bot: " + shortError(e) : "No schematic with that id.");
+                return;
+            }
+            String name = r.headers().firstValue("Content-Disposition").map(h -> h.replaceAll(".*filename=\"?([^\"]+)\"?.*", "$1"))
+                    .orElse(clean + ".litematic").replaceAll("[^A-Za-z0-9 _.-]", "_");
+            Path dir = Minecraft.getInstance().gameDirectory.toPath().resolve("schematics").resolve("PrinterAddon");
+            try {
+                Files.createDirectories(dir);
+                Files.write(dir.resolve(name), r.body());
+                Chat.info("§aSaved§r schematics/PrinterAddon/" + name + ". Load it in Litematica (M, Load schematics).");
+            } catch (Exception ex) {
+                Chat.warn("Couldn't save it: " + ex.getMessage());
+            }
+        }));
     }
 
     // ------------------------------------------------------------------ suggestions in game

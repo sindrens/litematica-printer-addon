@@ -110,3 +110,10 @@
 
 ## 26.2-0.16.2
 - Sending a log or report works again (J+B → Report / share log).
+
+## 26.2-0.17.0
+- Discord tab in the J+B menu: link, unlink, sync on or off, messages.
+- Time-lapse: a GIF of your build going up, in your control room when it's done.
+- Schematic library: browse and download builds from Discord, straight into Litematica.
+- Alerts sent while offline arrive once the connection is back.
+- Less traffic when nothing is building.
