@@ -85,7 +85,7 @@ public class AutoBuild {
             Tries tries = triesAt.get(pos);
             if (tries == null || tries.state() != now || clientTicks - tries.since() > 20 * 30) {
                 triesAt.put(pos.immutable(), new Tries(now, 1, clientTicks));
-            } else if (tries.count() + 1 >= MAX_TRIES) {
+            } else if (tries.count() + 1 >= MAX_TRIES && clientTicks - tries.since() >= GIVE_UP_AFTER) {
                 triesAt.remove(pos);
                 givenUp.put(pos.immutable(), clientTicks + GIVE_UP_TICKS);
                 PrinterAddon.debug("The printer tried {} {} times and nothing changed (is {}): leaving it for 30 s",
@@ -106,6 +106,12 @@ public class AutoBuild {
 
     private record Tries(net.minecraft.world.level.block.state.BlockState state, int count, long since) {
     }
+
+    /**
+     * Given up on only after this long since the first of its tries: all 41 give-ups of a log were placed after all,
+     * 35 of them within 20 ticks (4 clicks in 19 ticks on a slow server, all answered at once 5 ticks later).
+     */
+    private static final int GIVE_UP_AFTER = 40;
 
     /**
      * Whole stacks take a slot each (the rest of a part-used stack only fills that one up): rounded up, the orders may
@@ -587,7 +593,7 @@ public class AutoBuild {
         // Long enough for the server's answer to arrive, also with a high ping
         // (the client shows a placed block at once, so this only matters for clicks that didn't work out; on farmland
         // the same spot is clicked twice: dirt, then tilling)
-        long holdBack = Math.max(8, 2L * ServerLag.pingTicks(mc) + 6);
+        long holdBack = Math.max(Math.max(8, 2L * ServerLag.pingTicks(mc) + 6), ServerWatch.answerP95() + 2L);
         recentlyTried.values().removeIf(at -> now - at > holdBack);
         // Nor next to a block clicked a moment ago: the printer may click against that neighbour, and if the server
         // doesn't have it yet, the server puts the new block INTO the neighbour's spot (dirt where mud should go)
@@ -615,7 +621,9 @@ public class AutoBuild {
                 RunLog.hold(pos, "beyond-learned-reach");
                 continue;
             }
-            boolean waiting = acks ? ServerAcks.isWaiting(pos) : recentlyTried.containsKey(pos);
+            // Also the fixed wait (at least as long as the server's slow answers) with the answers: 18 % of the clicks
+            // of a log were on a block clicked 5 to 10 ticks before, the answer to that still to come
+            boolean waiting = acks && ServerAcks.isWaiting(pos) || recentlyTried.containsKey(pos);
             boolean nextToWaiting = result == BlockCheck.Result.MISSING
                     && (acks ? ServerAcks.nextToWaiting(pos) : nextToUnconfirmed(pos, now, confirm));
             // Sand, gravel, concrete powder: only once the server surely has the block under it (string placed a

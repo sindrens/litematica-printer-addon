@@ -91,6 +91,10 @@ public class Mover {
     private int stuckTicks;
     private double lastDistance = Double.MAX_VALUE;
     private int replans;
+    /** Where and when the player was last stuck flying (see fly). */
+    @Nullable
+    private BlockPos lastStuckAt;
+    private long lastStuckTick = -100000;
 
     private boolean flyCommandSent;
     private int flyCommandWait;
@@ -319,6 +323,8 @@ public class Mover {
     private static final double HARM_SIDE = 0.15;
     private static final double HARM_BELOW = 0.2;
     private long lastHarmNote = -1000;
+    /** Rising away from a cactus now (for the run log's count). */
+    private boolean rising;
 
     /**
      * The body about to touch a cactus (or a berry bush, fire...) next tick: up and over it instead. The game hurts
@@ -330,7 +336,12 @@ public class Mover {
         Vec3 next = player.position().add(motion);
         BlockPos harm = harmNear(level, next);
         if (harm == null) {
+            rising = false;
             return;
+        }
+        if (!rising) {
+            rising = true;
+            RunLog.harmLift();
         }
         player.setDeltaMovement(motion.x * 0.6, Math.max(motion.y, 0.2), motion.z * 0.6);
         velocity = new Vec3(velocity.x * 0.6, Math.max(velocity.y, 0.2), velocity.z * 0.6);
@@ -348,7 +359,8 @@ public class Mover {
         double half = 0.3 + HARM_SIDE;
         int minX = (int) Math.floor(feet.x - half);
         int maxX = (int) Math.floor(feet.x + half);
-        int minY = (int) Math.floor(feet.y - HARM_BELOW);
+        // (The hover height over a cactus layer is exactly this much over it: not under it by a rounding error)
+        int minY = (int) Math.floor(feet.y - HARM_BELOW + 1.0e-6);
         int maxY = (int) Math.floor(feet.y + 1.8);
         int minZ = (int) Math.floor(feet.z - half);
         int maxZ = (int) Math.floor(feet.z + half);
@@ -847,6 +859,12 @@ public class Mover {
     /** The lowest lane's cross coordinate and the lanes' width (they're evenly spaced from there). */
     private int laneFirst;
     private int laneWidth = 1;
+    /** The layer's length along the lanes, and the eye's height over its lowest blocks when hovering (see lineOf). */
+    private int laneAlongFrom;
+    private int laneAlongTo;
+    private double laneEyeAbove;
+    /** The row each lane is flown along, by its cross coordinate: its middle, or the row beside it (see lineOf). */
+    private final Map<Integer, Integer> laneLines = new HashMap<>();
     /** Each lane's stretches (along it) already flown, by its cross coordinate: what's left there goes spot by spot. */
     private final Map<Integer, List<int[]>> flownParts = new HashMap<>();
     /** A stretch this long with nothing to do splits a lane in two (each part flown on its own). */
@@ -1083,6 +1101,10 @@ public class Mover {
         }
         laneFirst = first;
         laneWidth = width;
+        laneAlongFrom = alongFrom;
+        laneAlongTo = alongTo;
+        laneEyeAbove = eyeAbove;
+        laneLines.clear();
         flownParts.clear();
         List<Integer> centers = new ArrayList<>();
         for (int i = 0; i < count; i++) {
@@ -1199,8 +1221,9 @@ public class Mover {
         boolean forward = Math.abs(along - best.lo()) <= Math.abs(along - best.hi());
         int startAlong = forward ? best.lo() - 1 : best.hi() + 1;
         int endAlong = forward ? best.hi() + 1 : best.lo() - 1;
-        BlockPos start = lanePos(c, startAlong, best.y());
-        BlockPos end = lanePos(c, endAlong, best.y());
+        int line = lineOf(c);
+        BlockPos start = lanePos(line, startAlong, best.y());
+        BlockPos end = lanePos(line, endAlong, best.y());
         // An end the player doesn't fit at (a column of the farm already standing up there) is pulled in
         // along the lane: the printer still reaches the last blocks from a little before it
         laneStart = freeLaneEnd(player, start, end);
@@ -1230,15 +1253,17 @@ public class Mover {
 
     /** From the player to the nearer end of a lane part, at the hover height. */
     private double partDistance(Vec3 at, LanePart part) {
-        return Math.sqrt(Math.min(at.distanceToSqr(laneHover(lanePos(part.c(), part.lo() - 1, part.y()))),
-                at.distanceToSqr(laneHover(lanePos(part.c(), part.hi() + 1, part.y())))));
+        int line = lineOf(part.c());
+        return Math.sqrt(Math.min(at.distanceToSqr(laneHover(lanePos(line, part.lo() - 1, part.y()))),
+                at.distanceToSqr(laneHover(lanePos(line, part.hi() + 1, part.y())))));
     }
 
     /** Something tall stands between the player and the nearer end of this part (a wall to go up over and down). */
     private boolean overWall(LocalPlayer player, LanePart part) {
         Vec3 at = player.position();
-        Vec3 a = laneHover(lanePos(part.c(), part.lo() - 1, part.y()));
-        Vec3 b = laneHover(lanePos(part.c(), part.hi() + 1, part.y()));
+        int line = lineOf(part.c());
+        Vec3 a = laneHover(lanePos(line, part.lo() - 1, part.y()));
+        Vec3 b = laneHover(lanePos(line, part.hi() + 1, part.y()));
         Vec3 end = at.distanceToSqr(a) <= at.distanceToSqr(b) ? a : b;
         Vec3 from = new Vec3(at.x, end.y, at.z);
         if (FlyPath.clearAsFarAsKnown(player.level(), from, end)) {
@@ -1255,6 +1280,8 @@ public class Mover {
      * in a stretch flown already, split where something tall stands on its line or nothing is to be done for long.
      */
     private List<LanePart> laneParts(LocalPlayer player) {
+        // Each lane's line from what's in the way on it now (a grown cactus falls once the sand beside it is in)
+        placeLines(player);
         // Per lane: {from, to, lowest y, blocks, parts not loaded} for each block and each part not loaded
         Map<Integer, List<int[]>> spans = new HashMap<>();
         for (BlockPos pos : work) {
@@ -1266,7 +1293,7 @@ public class Mover {
             // Not where a wall stands on the lane's line (blocks beside it in the lane): no part may reach over the
             // wall, the printer gets those from the part's end next to it (a test lane ran along a row the walls
             // cross, with blocks beside them, and went 10 up over each wall)
-            if (c != Integer.MIN_VALUE && !flown(c, along, along) && !tallOnLine(player, c, along, along)) {
+            if (c != Integer.MIN_VALUE && !flown(c, along, along) && !tallOnLine(player, lineOf(c), along, along)) {
                 spans.computeIfAbsent(c, k -> new ArrayList<>()).add(new int[]{along, along, pos.getY(), 1, 0});
             }
         }
@@ -1293,7 +1320,7 @@ public class Mover {
             int[] run = lane.getFirst().clone();
             for (int k = 1; k < lane.size(); k++) {
                 int[] span = lane.get(k);
-                if (span[0] > run[1] + 1 && (span[0] - run[1] - 1 >= LANE_GAP || tallOnLine(player, c, run[1] + 1, span[0] - 1))) {
+                if (span[0] > run[1] + 1 && (span[0] - run[1] - 1 >= LANE_GAP || tallOnLine(player, lineOf(c), run[1] + 1, span[0] - 1))) {
                     runs.add(run);
                     run = span.clone();
                     continue;
@@ -1368,6 +1395,72 @@ public class Mover {
 
     /** What tallOnLine found, per place on a lane's line at the hover height (walls don't move during a layer). */
     private final Map<BlockPos, Boolean> tallCache = new HashMap<>();
+
+    /** The row this lane (by its cross coordinate) is flown along (see placeLines). */
+    private int lineOf(int c) {
+        return laneLines.getOrDefault(c, c);
+    }
+
+    /**
+     * The row each lane is flown along: its middle, or the row beside it when the middle has something in the way at
+     * the hover height (or a cactus right under the feet) and the row beside it has less: a cactus grown up out of the
+     * layer. Over the cactus rows of the player's tower the lanes went up over every grown column, out of the
+     * printer's reach (lane 11 left 116 of its 299 blocks), and two lanes whose ends the columns took up were left for
+     * last. The lane's blocks stay the same: its row on the far side is one further away then, still in the printer's
+     * range (or the lane stays on its middle). Of the two rows beside it, the one with less left on the far side.
+     */
+    private void placeLines(LocalPlayer player) {
+        double range = me.aleksilassila.litematica.printer.config.Configs.PRINTING_RANGE.getDoubleValue();
+        double far = laneHalf + 1;
+        boolean room = Math.sqrt(far * far + laneEyeAbove * laneEyeAbove) <= range - 0.1;
+        // What's left per row across the lanes (for the far side)
+        Map<Integer, Integer> perRow = new HashMap<>();
+        for (BlockPos pos : work) {
+            if (inLayers(pos)) {
+                perRow.merge(lanesAlongX ? pos.getZ() : pos.getX(), 1, Integer::sum);
+            }
+        }
+        for (int c : lanes) {
+            int line = c;
+            int middle = inTheWay(player, c);
+            if (middle > 0 && room) {
+                int fewest = middle;
+                int farLeft = Integer.MAX_VALUE;
+                for (int side : new int[]{1, -1}) {
+                    int n = inTheWay(player, c + side);
+                    int left = perRow.getOrDefault(c - side * laneHalf, 0);
+                    if (n < fewest || n == fewest && line != c && left < farLeft) {
+                        fewest = n;
+                        farLeft = left;
+                        line = c + side;
+                    }
+                }
+            }
+            Integer before = laneLines.put(c, line);
+            if (line != c && (before == null || before != line)) {
+                BuildLog.line("SWEEP", String.format("lane %d is flown along %s %d, the row beside its middle: %d places on its "
+                                + "middle (%s %d) have a cactus or something else in the way at the hover height, %d on that row",
+                        lanes.indexOf(c) + 1, lanesAlongX ? "z" : "x", line, middle, lanesAlongX ? "z" : "x", c, inTheWay(player, line)));
+            }
+        }
+    }
+
+    /**
+     * How many places along this row (the whole layer's length, at the hover height) the player doesn't fit, or would
+     * touch a cactus (or anything else that hurts) under or beside the body.
+     */
+    private int inTheWay(LocalPlayer player, int line) {
+        net.minecraft.world.level.Level level = player.level();
+        int n = 0;
+        for (int along = laneAlongFrom - 1; along <= laneAlongTo + 1; along++) {
+            Vec3 hover = laneHover(lanePos(line, along, 0));
+            BlockPos feet = BlockPos.containing(hover.x, hover.y + 0.01, hover.z);
+            if (level.isLoaded(feet) && (!FlyPath.fits(level, feet) || harmNear(level, hover) != null)) {
+                n++;
+            }
+        }
+        return n;
+    }
 
     /**
      * The parts of the current layers that aren't loaded yet (and weren't seen finished): x and z from-to of each,
@@ -1500,7 +1593,7 @@ public class Mover {
         if (!laneFlight() || laneApproach || laneIndex < 0 || laneIndex >= lanes.size()) {
             return p -> true;
         }
-        int c = lanes.get(laneIndex);
+        int c = lineOf(lanes.get(laneIndex));
         double off = Math.abs((lanesAlongX ? player.getZ() : player.getX()) - (c + 0.5));
         int half = Math.max(1, (int) Math.ceil(off));
         return p -> Math.abs((lanesAlongX ? p.getZ() : p.getX()) - c) <= half;
@@ -2336,7 +2429,7 @@ public class Mover {
         // A little higher over a cactus (the feet a hair in its block hurt)
         double lift = layers.isActive() ? layers.hoverLift() : 0;
         BlockPos pos = new BlockPos(goalBlock.getX() + offsets[column][0], hoverY, goalBlock.getZ() + offsets[column][1]);
-        if (canHover(mc, pos)) {
+        if (canHover(mc, pos, lift)) {
             return new Vec3(pos.getX() + 0.5, pos.getY() + lift, pos.getZ() + 0.5);
         }
         // Something is in the way there (a building, a wall): the nearest free spot around it, low first, from
@@ -2351,7 +2444,7 @@ public class Mover {
                 for (int dz = -3; dz <= 3; dz++) {
                     BlockPos spot = new BlockPos(goalBlock.getX() + dx, hoverY + dy, goalBlock.getZ() + dz);
                     Vec3 eye = new Vec3(spot.getX() + 0.5, spot.getY() + eyeHeight, spot.getZ() + 0.5);
-                    if (eye.distanceToSqr(goal) > r * r || !canHover(mc, spot)) {
+                    if (eye.distanceToSqr(goal) > r * r || !canHover(mc, spot, lift)) {
                         continue;
                     }
                     double score = dy * 2 + Math.abs(dx) + Math.abs(dz);
@@ -2386,9 +2479,14 @@ public class Mover {
         return lifted;
     }
 
-    /** The player fits there (2 blocks of free space) and isn't in the way of blocks still to be placed. */
-    private boolean canHover(Minecraft mc, BlockPos feet) {
-        return FlyPath.fits(mc.level, feet) && !reserved.contains(feet) && !reserved.contains(feet.above());
+    /**
+     * The player fits there (2 blocks of free space), isn't in the way of blocks still to be placed, and keeps the
+     * safety room from a cactus (or anything else that hurts) at the feet this much over the block: a spot right
+     * beside a grown cactus column had the player rising and sinking there for 25 s, "stuck" 8 times.
+     */
+    private boolean canHover(Minecraft mc, BlockPos feet, double lift) {
+        return FlyPath.fits(mc.level, feet) && !reserved.contains(feet) && !reserved.contains(feet.above())
+                && harmNear(mc.level, new Vec3(feet.getX() + 0.5, feet.getY() + lift, feet.getZ() + 0.5)) == null;
     }
 
     private void move(Minecraft mc, LocalPlayer player, MoveMode mode) {
@@ -2555,9 +2653,15 @@ public class Mover {
             lastDistance = distance;
             stuckTicks = 0;
         } else if (++stuckTicks > STUCK_TICKS) {
-            // Something in the way after all (a block changed): find the way again first, then go higher
-            PrinterAddon.debug("Stuck flying at {}, finding the way again", player.blockPosition().toShortString());
-            if (replans < 2) {
+            // Something in the way after all (a block changed): find the way again first, then go higher. Stuck right
+            // where it was stuck a moment ago: no new way from there, the block is left for later at once (the same spot
+            // was "stuck" 8 times, 2.3 s each, with the way worked out again each time)
+            BlockPos stuckAt = player.blockPosition();
+            boolean again = stuckAt.equals(lastStuckAt) && tick - lastStuckTick < 20 * 30;
+            lastStuckAt = stuckAt;
+            lastStuckTick = tick;
+            PrinterAddon.debug("Stuck flying at {}, finding the way again", stuckAt.toShortString());
+            if (replans < 2 && !again) {
                 flyPath = null;
                 replans++;
                 stuckTicks = 0;
@@ -2570,7 +2674,7 @@ public class Mover {
                 return;
             }
             BlockPos block = spotFor != null ? spotFor : target;
-            BuildLog.line("MOVE", "stuck at " + player.blockPosition().toShortString() + " on the way to "
+            BuildLog.line("MOVE", "stuck at " + player.blockPosition().toShortString() + (again ? " again" : "") + " on the way to "
                     + BlockPos.containing(flyTarget).toShortString() + ": leaving " + (block != null ? block.toShortString() : "it") + " for later");
             stuckTicks = 0;
             lastDistance = Double.MAX_VALUE;
@@ -2595,16 +2699,25 @@ public class Mover {
         }
         // Along a lane: on its line sideways too, at once (a lane laid right beside a wall drifted 0.2 off its line,
         // grazed the wall and went 6 up it)
-        if (laneFlight() && !laneApproach) {
+        boolean onLine = laneFlight() && !laneApproach;
+        if (onLine) {
             double off = lanesAlongX ? laneEnd.getZ() + 0.5 - player.getZ() : laneEnd.getX() + 0.5 - player.getX();
             double side = Math.max(-0.1, Math.min(0.1, off * 0.4));
             motion = lanesAlongX ? new Vec3(motion.x, motion.y, motion.z + side) : new Vec3(motion.x + side, motion.y, motion.z);
         }
+        // (A way found around something on the lane may step aside on purpose: only the lane's own straight way is held)
+        onLine &= flyExact;
         // Up over what's in the way; not up along the world border (the island's edge), which is no wall to get over
         if (player.horizontalCollision && !atBorder(player)) {
             motion = new Vec3(motion.x, Math.max(motion.y, 0.3), motion.z);
         }
         steer(player, motion);
+        if (onLine) {
+            // The sideways part as wanted straight away, not eased in with the speed: coming onto lane 8 from the side,
+            // the speed it had sideways took the player 0.4 off the lane's line, into the cactus of the row beside it
+            velocity = lanesAlongX ? new Vec3(velocity.x, velocity.y, motion.z) : new Vec3(motion.x, velocity.y, velocity.z);
+            player.setDeltaMovement(velocity);
+        }
     }
 
     /** The point moved in where the player's box (0.6 wide) would reach past the world border. */

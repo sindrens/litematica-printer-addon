@@ -313,6 +313,13 @@ public final class ServerWatch {
         return sorted[count / 2];
     }
 
+    /** The server's slow answers in the last 10 s (95 % come sooner), in ticks; 0 before there are any. */
+    private static int lastAnswerP95;
+
+    public static int answerP95() {
+        return lastAnswerP95;
+    }
+
     /** The value below which this share of the sorted values lie (nearest rank). */
     private static int percentile(int[] sorted, int count, double p) {
         if (count == 0) {
@@ -339,6 +346,9 @@ public final class ServerWatch {
                             .append(String.format(Locale.ROOT, "%.1f", e.getValue() / secs)));
             int[] sorted = Arrays.copyOf(windowAnswers, windowAnswerCount);
             Arrays.sort(sorted);
+            if (windowAnswerCount >= 10) {
+                lastAnswerP95 = percentile(sorted, windowAnswerCount, 0.95);
+            }
             String answers = windowAnswerCount == 0 ? "answers=0"
                     : String.format(Locale.ROOT, "answers=%d answerP50=%dt answerP95=%dt answerMax=%dt", windowAnswerCount,
                     percentile(sorted, windowAnswerCount, 0.5), percentile(sorted, windowAnswerCount, 0.95), sorted[windowAnswerCount - 1]);

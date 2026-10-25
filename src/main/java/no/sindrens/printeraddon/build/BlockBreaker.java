@@ -275,17 +275,21 @@ public class BlockBreaker {
                 continue;
             }
             if (failed.containsKey(pos)) {
+                skipNote(pos, "failed (no luck breaking it a moment ago: again in a minute)");
                 continue;
             }
 
             BlockCheck.Result result = BlockCheck.check(mc.level, schematic, pos);
+            // (The player's own blocks, left alone, are in the CONFLICT lines: thousands of them on the player's island)
             if (!shouldBreak(result, mode, pos)) {
                 continue;
             }
             // A cactus that grew up (or the flower on it), with the layer's sand still to go in beside it somewhere
             // down its column: the whole column drops by itself once that's placed (breaking each takes 3 s while
             // flying, 5 times slower than standing: 74 blocks a minute on the player's server)
-            if (fallsByItself(mc.level, schematic, pos)) {
+            BlockPos dropsFor = dropsBecauseOf(mc.level, schematic, pos);
+            if (dropsFor != null) {
+                skipNote(pos, "growth (drops by itself once " + dropsFor.toShortString() + " is placed)");
                 continue;
             }
 
@@ -328,23 +332,49 @@ public class BlockBreaker {
      * drops as soon as that's placed, and everything on top of it with it.
      */
     public static boolean fallsByItself(net.minecraft.world.level.Level level, WorldSchematic schematic, BlockPos pos) {
+        return dropsBecauseOf(level, schematic, pos) != null;
+    }
+
+    /** The block still to go in whose placing knocks this one down (see fallsByItself), or null. */
+    @Nullable
+    private static BlockPos dropsBecauseOf(net.minecraft.world.level.Level level, WorldSchematic schematic, BlockPos pos) {
         BlockPos at = pos;
         if (level.getBlockState(at).is(net.minecraft.world.level.block.Blocks.CACTUS_FLOWER)) {
             at = at.below();
         }
         for (int steps = 0; steps < 4 && level.getBlockState(at).is(net.minecraft.world.level.block.Blocks.CACTUS); steps++) {
-            if (popsByItself(level, schematic, at)) {
-                return true;
+            BlockPos side = popsFor(level, schematic, at);
+            if (side != null) {
+                return side;
             }
             at = at.below();
         }
-        return false;
+        return null;
     }
 
-    private static boolean popsByItself(net.minecraft.world.level.Level level, WorldSchematic schematic, BlockPos pos) {
+    /** Why each wrong block was last left alone (once a minute each in the build log). */
+    private final Map<BlockPos, Long> skipNoted = new HashMap<>();
+
+    private void skipNote(BlockPos pos, String reason) {
+        Long at = skipNoted.get(pos);
+        if (at != null && tickCounter - at < 20 * 60) {
+            return;
+        }
+        if (skipNoted.size() > 512) {
+            skipNoted.values().removeIf(t -> tickCounter - t >= 20 * 60);
+        }
+        skipNoted.put(pos.immutable(), tickCounter);
+        Minecraft mc = Minecraft.getInstance();
+        BuildLog.line("BREAK-SKIP", pos.toShortString().replace(" ", "") + " " + (mc.level == null ? "?"
+                : LayerManager.blockName(mc.level.getBlockState(pos))) + " reason=" + reason);
+    }
+
+    /** The missing block beside this cactus whose placing makes it drop, or null. */
+    @Nullable
+    private static BlockPos popsFor(net.minecraft.world.level.Level level, WorldSchematic schematic, BlockPos pos) {
         LayerManager layers = AutoBuild.INSTANCE.layers;
         if (!layers.isActive() || pos.getY() < layers.getLayer() || pos.getY() > layers.getLayerTop()) {
-            return false;
+            return null;
         }
         for (Direction direction : Direction.Plane.HORIZONTAL) {
             BlockPos side = pos.relative(direction);
@@ -353,14 +383,20 @@ public class BlockBreaker {
                     || BlockCheck.check(level, schematic, side) != BlockCheck.Result.MISSING) {
                 continue;
             }
+            // Only a block that can go in beside the cactus as it stands: a cactus of the layer can't (a cactus never
+            // stands next to one), so a grown one was left for that cactus to knock down, which never came; 68 cactus
+            // were left at the end of a layer, the player flying around them for 3 minutes
+            if (!wanted.canSurvive(level, side)) {
+                continue;
+            }
             // Sand only goes in on what holds it (its string)
             if (wanted.getBlock() instanceof net.minecraft.world.level.block.FallingBlock
                     && net.minecraft.world.level.block.FallingBlock.isFree(level.getBlockState(side.below()))) {
                 continue;
             }
-            return true;
+            return side;
         }
-        return false;
+        return null;
     }
 
     private static double range(LocalPlayer player) {

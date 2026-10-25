@@ -31,3 +31,9 @@
 ## 26.2-0.14.6
 - Grown cactus drop by themselves.
 - Cactus are built with the sand above them.
+
+## 26.2-0.14.7
+- Grown cactus in the way get broken.
+- Lanes fly beside grown cactus.
+- No more hanging next to a cactus.
+- Fewer double clicks on slow servers.

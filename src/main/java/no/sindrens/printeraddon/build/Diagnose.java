@@ -114,6 +114,17 @@ public final class Diagnose {
         if (result.needsBreaking()) {
             return "a wrong block to break first";
         }
+        // Can't stand there as things are: a wrong block beside it (a grown cactus next to a cactus to go in) is to be
+        // broken first, not a spot to stand at to be found (the player flew around such cactus for 3 minutes)
+        if (result == BlockCheck.Result.MISSING && !target.canSurvive(mc.level, pos)) {
+            for (net.minecraft.core.Direction side : net.minecraft.core.Direction.values()) {
+                BlockPos next = pos.relative(side);
+                if (BlockCheck.check(mc.level, schematic, next).needsBreaking()) {
+                    return "a wrong block next to them to break first";
+                }
+            }
+            return "they can't stand there yet (what's next to them)";
+        }
         return "the printer can't place them from where it can stand";
     }
 

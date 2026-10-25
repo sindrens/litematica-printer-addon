@@ -57,6 +57,7 @@ public class Safety {
             BuildLog.line("SAFETY", String.format(java.util.Locale.ROOT, "damage source=%s%s player=%.2f,%.2f,%.2f lost=%.1f health=%.1f food=%d: building on",
                     source.is(net.minecraft.world.damagesource.DamageTypes.CACTUS) ? "cactus" : "berry-bush", what,
                     player.getX(), player.getY(), player.getZ(), lost, health, player.getFoodData().getFoodLevel()));
+            RunLog.harmTouch();
             RunLog.event("damage", "source=" + (source.is(net.minecraft.world.damagesource.DamageTypes.CACTUS) ? "cactus" : "berry-bush")
                     + (harm != null ? " block=" + harm.toShortString().replace(" ", "") : "") + String.format(java.util.Locale.ROOT, " lost=%.1f health=%.1f", lost, health));
         }

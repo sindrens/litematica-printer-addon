@@ -183,6 +183,9 @@ public final class RunLog {
     private static int runTrips;
     private static double runTravel;
     private static int runPurchases;
+    /** Times the player rose up away from a cactus (see Mover#keepClearOfHarm), and times one really hurt. */
+    private static int runHarmLifts;
+    private static int runHarmTouches;
 
     // Clicks waiting for their result: what the click was like
     private record ClickInfo(long tick, String face, Vec3 hit, float yaw, float pitch, double speed, double eye, double serverEye,
@@ -233,7 +236,7 @@ public final class RunLog {
         minuteSwitches = minuteClicks = minuteClicksAfterSwitch = minuteMissAfterSwitch = 0;
         minuteSettleTicks = 0;
         minuteStart = now;
-        runClicks = runMissed = runWrong = runTrips = runPurchases = 0;
+        runClicks = runMissed = runWrong = runTrips = runPurchases = runHarmLifts = runHarmTouches = 0;
         runTravel = 0;
         missCauses.clear();
         giveUps.clear();
@@ -265,6 +268,7 @@ public final class RunLog {
                 "wrongBlocks", runWrong, "givenUp", giveUps.values().stream().mapToInt(Integer::intValue).sum(),
                 "givenUpBy", giveUps.toString(), "trips", runTrips, "travel", round(runTravel), "purchases", runPurchases,
                 "spent", Math.round(spent), "spentPerBlock", run.placed == 0 ? 0 : round(spent / run.placed),
+                "cactusTouches", runHarmTouches, "cactusLifts", runHarmLifts,
                 "guard", ServerWatch.summary(), "times", run.breakdown());
         emit("RUN-END", report);
         compareWithLast();
@@ -494,8 +498,6 @@ public final class RunLog {
             cause = "no-answer(dropped-by-server)";
         } else if (info != null && info.serverEye() > mc.player.blockInteractionRange() + 0.9) {
             cause = "reach(server-side " + String.format(Locale.ROOT, "%.2f", info.serverEye()) + ")";
-        } else if (info != null && info.sinceSwitch() <= 2) {
-            cause = "slot-desync(" + info.sinceSwitch() + "t after a switch)";
         } else if (mc.level != null && SchematicHelper.world() != null
                 && SchematicHelper.world().getBlockState(pos).getBlock() instanceof net.minecraft.world.level.block.FallingBlock
                 && net.minecraft.world.level.block.FallingBlock.isFree(mc.level.getBlockState(pos.below()))) {
@@ -765,7 +767,7 @@ public final class RunLog {
         supplyStart = AutoBuild.clientTicks;
         supplyTrigger = trigger;
         supplyWhere = AutoBuild.INSTANCE.mover.laneName() + (laneOn && lanePlanned > 0
-                ? " laneDone=" + Math.round(lane.placed * 100.0 / lanePlanned) + "%" : "");
+                ? " laneDone=" + Math.round(laneDoneNow(mc) * 100.0 / lanePlanned) + "%" : "");
         supplyInvFree = InventoryCleaner.freeSlots(mc.player.getInventory());
         supplyVaultFree = AutoBuild.INSTANCE.fetcher.knownFreeSlots();
         supplySpent = AutoBuild.INSTANCE.spentTotal();
@@ -773,6 +775,24 @@ public final class RunLog {
         supplyPurchases = 0;
         supplyBought.clear();
         emit("SUPPLY-START", kv("trigger", trigger, "lane", supplyWhere, "invFree", supplyInvFree, "vaultFree", supplyVaultFree));
+    }
+
+    /**
+     * How many of the lane's own blocks are done by now (not all blocks placed since it began: those of the rows beside
+     * it as well had "laneDone=197%").
+     */
+    private static int laneDoneNow(Minecraft mc) {
+        fi.dy.masa.litematica.world.WorldSchematic schematic = SchematicHelper.world();
+        if (mc.level == null || schematic == null) {
+            return 0;
+        }
+        int done = 0;
+        for (BlockPos pos : laneBlocks) {
+            if (BlockCheck.check(mc.level, schematic, pos) == BlockCheck.Result.OK) {
+                done++;
+            }
+        }
+        return done;
     }
 
     private static void supplyEnd(Minecraft mc) {
@@ -798,6 +818,16 @@ public final class RunLog {
     }
 
     // ---- events
+
+    /** The player rose up away from a cactus (or anything else that hurts) before touching it. */
+    public static void harmLift() {
+        runHarmLifts++;
+    }
+
+    /** A cactus (or berry bush) of the build really hurt the player. */
+    public static void harmTouch() {
+        runHarmTouches++;
+    }
 
     /** Something happened: damage, a disconnect, a reconnect... */
     public static void event(String type, String fields) {

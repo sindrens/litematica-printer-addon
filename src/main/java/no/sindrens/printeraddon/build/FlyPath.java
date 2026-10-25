@@ -42,6 +42,12 @@ public final class FlyPath {
     private static final double LINE_LOW_COST = 3;
     /** A straight shortcut between two points of a way: only level, or this short (no ramps). */
     private static final double SHORTCUT_RAMP = 2.5;
+    /**
+     * A step to a spot right beside (or right over) a cactus or anything else that hurts costs this much more: past it
+     * with room where there is room. Between two lanes the way went right between two grown cactus columns of the
+     * player's tower, and the player touched one.
+     */
+    private static final double HARM_COST = 3;
 
     private FlyPath() {
     }
@@ -165,6 +171,7 @@ public final class FlyPath {
 
         Map<BlockPos, BlockPos> cameFrom = new HashMap<>();
         Map<BlockPos, Double> cost = new HashMap<>();
+        Map<Long, Boolean> harm = new HashMap<>();
         PriorityQueue<Object[]> open = new PriorityQueue<>((a, b) -> Double.compare((double) a[1], (double) b[1]));
         cost.put(start, 0.0);
         open.add(new Object[]{start, GREED * estimate.applyAsDouble(start)});
@@ -193,6 +200,9 @@ public final class FlyPath {
                         double step = Math.sqrt(dx * dx + dy * dy + dz * dz) * (dy > 0 ? CLIMB_COST : 1);
                         if (dy == 0 && next.getY() > baseY) {
                             step += HIGH_COST * (next.getY() - baseY);
+                        }
+                        if (harm.computeIfAbsent(next.asLong(), k -> besideHarm(level, BlockPos.of(k)))) {
+                            step += HARM_COST;
                         }
                         double total = here + step;
                         BlockPos immutable = next.immutable();
@@ -224,6 +234,43 @@ public final class FlyPath {
     /** The player (2 blocks high) fits at these feet. */
     public static boolean fits(Level level, BlockPos feet) {
         return PathFinder.isPassable(level, feet) && PathFinder.isPassable(level, feet.above());
+    }
+
+    /**
+     * Something that hurts (a cactus...) beside the body at these feet. Not under them: over a layer of cactus the
+     * player hovers a little higher anyway (see LayerManager#hoverLift), and those spots aren't to be avoided.
+     */
+    private static boolean besideHarm(Level level, BlockPos feet) {
+        for (net.minecraft.core.Direction side : net.minecraft.core.Direction.Plane.HORIZONTAL) {
+            if (hurtsAt(level, feet.relative(side)) || hurtsAt(level, feet.above().relative(side))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hurtsAt(Level level, BlockPos pos) {
+        return level.isLoaded(pos) && PathFinder.hurts(level.getBlockState(pos));
+    }
+
+    /**
+     * Flying straight from a to b doesn't bring the body nearer a cactus (or anything else that hurts) than the safety
+     * room (see Mover#harmNear) anywhere between them: a shortcut mustn't cut past one the way itself keeps away from
+     * (where it can't, the way's own points are kept).
+     */
+    private static boolean harmFree(Level level, Vec3 a, Vec3 b, Vec3 to) {
+        // The way at the goal's height is flown that little higher (see Mover#withLift)
+        int goalY = (int) Math.floor(to.y + 0.01);
+        double lift = to.y - goalY;
+        Vec3 d = b.subtract(a);
+        int steps = Math.max(1, (int) Math.ceil(d.length() / 0.3));
+        for (int s = 1; s < steps; s++) {
+            Vec3 p = a.add(d.scale((double) s / steps));
+            if (Mover.harmNear(level, Math.abs(p.y - goalY) < 0.01 ? p.add(0, lift, 0) : p) != null) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** A diagonal step is only allowed when the straight steps it's made of are free too (no corner cutting). */
@@ -266,7 +313,7 @@ public final class FlyPath {
         while (i < points.size()) {
             int furthest = i;
             for (int j = points.size() - 1; j > i; j--) {
-                if (shortcutOk(at, points.get(j)) && clear(level, at, points.get(j))) {
+                if (shortcutOk(at, points.get(j)) && clear(level, at, points.get(j)) && harmFree(level, at, points.get(j), to)) {
                     furthest = j;
                     break;
                 }
@@ -305,6 +352,8 @@ public final class FlyPath {
         int samples = Math.max(1, (int) Math.ceil(length / 0.5)) + 1;
         int y0 = (int) Math.floor(from.y + 0.01);
         int goalY = (int) Math.floor(to.y + 0.01);
+        // The way at the goal's height is flown that little higher (see Mover#withLift)
+        double lift = to.y - goalY;
         int minY = Math.min(Math.min(y0, goalY), baseY);
         int maxY = Math.max(Math.max(y0, goalY), baseY) + MAX_CLIMB;
         int height = maxY - minY + 1;
@@ -329,6 +378,11 @@ public final class FlyPath {
                             ok = PathFinder.insideBorder(level, pos) && (level.isLoaded(pos) ? PathFinder.isPassable(level, pos) : unloadedIsFree);
                         }
                     }
+                }
+                // On the way (not where it starts or ends) also the safety room from a cactus: down right after a grown
+                // cactus column, the player was pushed up by the cactus and pulled down by the way, and hung there 25 s
+                if (ok && s > 0 && s < samples - 1) {
+                    ok = Mover.harmNear(level, new Vec3(sx[s], y + (y == goalY ? lift : 0), sz[s])) == null;
                 }
                 fit[i] = (byte) (ok ? 1 : 2);
             }

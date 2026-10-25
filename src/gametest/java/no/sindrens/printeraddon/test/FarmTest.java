@@ -139,6 +139,43 @@ public class FarmTest implements FabricClientGameTest {
                 context.waitTicks(40);
             }
 
+            // PRINTER_ADDON_GROWN=30: the cactus of the first layer still to build are in place already (the rest of that
+            // layer not), and 30 % of them have grown 2 blocks up with a flower on top, like on the player's tower after
+            // a stop between a cactus layer and its sand. Ticks run (no freeze), so a grown cactus falls once the sand
+            // beside it goes in
+            String grownEnv = System.getenv("PRINTER_ADDON_GROWN");
+            if (grownEnv != null && !grownEnv.isBlank()) {
+                int percent = Integer.parseInt(grownEnv.trim());
+                server.runCommand("tick unfreeze");
+                String area = context.computeOnClient(mc -> {
+                    SchematicHelper.Area a = SchematicHelper.areas().getFirst();
+                    return a.minX() + " " + a.minZ() + " " + a.maxX() + " " + a.maxZ();
+                });
+                server.runCommand("forceload add " + area);
+                List<String> commands = context.computeOnClient(mc -> grownCommands(prebuilt, percent));
+                for (String command : commands) {
+                    server.runCommand(command);
+                }
+                System.out.println("FARM TEST: cactus of the first layer to build in place, " + percent + " % grown up ("
+                        + commands.size() + " commands)");
+                context.waitTicks(40);
+            }
+
+            // PRINTER_ADDON_WRONG=30: on 30 % of the string spots of the first layer to build, a cactus grown up from the
+            // cactus layer below through its growth spot, into the string spot and the sand spot above it (wrong blocks,
+            // and the layer's cactus beside them can't go in until they're broken), like on the player's tower
+            String wrongEnv = System.getenv("PRINTER_ADDON_WRONG");
+            if (wrongEnv != null && !wrongEnv.isBlank()) {
+                int percent = Integer.parseInt(wrongEnv.trim());
+                server.runCommand("tick unfreeze");
+                List<String> commands = context.computeOnClient(mc -> wrongCommands(prebuilt, percent));
+                for (String command : commands) {
+                    server.runCommand(command);
+                }
+                System.out.println("FARM TEST: " + commands.size() / 3 + " wrong cactus columns (" + percent + " %)");
+                context.waitTicks(40);
+            }
+
             // A building standing in the middle of the farm (like on the player's server): it has to fly around it
             if (System.getenv("PRINTER_ADDON_OBSTACLE") != null) {
                 server.runCommand("fill 60 -58 8 63 -41 11 stone_bricks");
@@ -526,6 +563,57 @@ public class FarmTest implements FabricClientGameTest {
      * part > 1) of everything south of the northern 1/part of it. Read from the schematic itself: Litematica's
      * schematic world only has the chunks near the player.
      */
+    /**
+     * The cactus of the first layer still to build (the one above the prebuilt ones), and on this share of them two more
+     * cactus and a flower on top: grown up out of the layer.
+     */
+    private static List<String> grownCommands(int prebuilt, int percent) {
+        WorldSchematic schematic = SchematicWorldHandler.getSchematicWorld();
+        SchematicHelper.Area whole = SchematicHelper.areas().getFirst();
+        int y = whole.minY() + prebuilt;
+        List<String> commands = new ArrayList<>();
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        for (int x = whole.minX(); x <= whole.maxX(); x++) {
+            for (int z = whole.minZ(); z <= whole.maxZ(); z++) {
+                if (!schematic.getBlockState(pos.set(x, y, z)).is(net.minecraft.world.level.block.Blocks.CACTUS)) {
+                    continue;
+                }
+                commands.add("setblock " + x + " " + y + " " + z + " cactus");
+                if (Math.floorMod(x * 73856093 ^ z * 19349663, 100) < percent) {
+                    commands.add("setblock " + x + " " + (y + 1) + " " + z + " cactus");
+                    commands.add("setblock " + x + " " + (y + 2) + " " + z + " cactus");
+                    commands.add("setblock " + x + " " + (y + 3) + " " + z + " cactus_flower");
+                }
+            }
+        }
+        return commands;
+    }
+
+    /** Cactus standing in the string spots of the first layer to build and the sand spots above them (wrong blocks). */
+    private static List<String> wrongCommands(int prebuilt, int percent) {
+        WorldSchematic schematic = SchematicWorldHandler.getSchematicWorld();
+        SchematicHelper.Area whole = SchematicHelper.areas().getFirst();
+        int y = whole.minY() + prebuilt;
+        List<String> commands = new ArrayList<>();
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        for (int x = whole.minX(); x <= whole.maxX(); x++) {
+            for (int z = whole.minZ(); z <= whole.maxZ(); z++) {
+                if (!schematic.getBlockState(pos.set(x, y, z)).is(net.minecraft.world.level.block.Blocks.TRIPWIRE)
+                        || !schematic.getBlockState(pos.set(x, y - 1, z)).isAir()
+                        || !schematic.getBlockState(pos.set(x, y - 2, z)).is(net.minecraft.world.level.block.Blocks.CACTUS)
+                        || Math.floorMod(x * 73856093 ^ z * 19349663, 100) >= percent) {
+                    continue;
+                }
+                // On sand that went into the growth spot by a wrong click: next to the sand of its layer, a cactus
+                // there would drop at once
+                commands.add("setblock " + x + " " + (y - 1) + " " + z + " sand");
+                commands.add("setblock " + x + " " + y + " " + z + " cactus");
+                commands.add("setblock " + x + " " + (y + 1) + " " + z + " cactus");
+            }
+        }
+        return commands;
+    }
+
     private static List<String> prebuildCommands(int layers, int part) {
         SchematicPlacement placement = DataManager.getSchematicPlacementManager().getAllSchematicsPlacements().getFirst();
         LitematicaSchematic schematic = placement.getSchematic();
