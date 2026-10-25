@@ -700,12 +700,12 @@ public final class RunLog {
         return cause;
     }
 
-    /** Seed clicks held for a tick because the switch to the seeds was in the same tick (see InteractActionMixin). */
-    private static int minuteSeedWaits;
+    /** Clicks held for a tick because the switch to their item was in the same tick (see InteractActionMixin). */
+    private static int minuteSwitchWaits;
 
-    public static void seedWait() {
+    public static void switchWait() {
         if (active) {
-            minuteSeedWaits++;
+            minuteSwitchWaits++;
         }
     }
 
@@ -726,12 +726,12 @@ public final class RunLog {
                     minuteClicks == 0 ? 0 : round(minuteSwitches / (double) minuteClicks), "pairs", switchPairs.toString(),
                     "clicksRightAfterSwitch", minuteClicksAfterSwitch, "missedRightAfterSwitch", minuteMissAfterSwitch,
                     "missShareAfterSwitch", minuteClicksAfterSwitch == 0 ? "0%" : Math.round(minuteMissAfterSwitch * 100.0 / minuteClicksAfterSwitch) + "%",
-                    "itemSettleWait", seconds(minuteSettleTicks), "seedWaits", minuteSeedWaits));
+                    "itemSettleWait", seconds(minuteSettleTicks), "switchWaits", minuteSwitchWaits));
         }
         switchPairs.clear();
         minuteSwitches = minuteClicks = minuteClicksAfterSwitch = minuteMissAfterSwitch = 0;
         minuteSettleTicks = 0;
-        minuteSeedWaits = 0;
+        minuteSwitchWaits = 0;
         minuteStart = AutoBuild.clientTicks;
     }
 
@@ -760,7 +760,10 @@ public final class RunLog {
             holds.put(pos.immutable(), new Hold(reason, now, now, false));
             return;
         }
-        boolean log = !hold.logged() && now - hold.since() >= HOLD_LOG_TICKS;
+        // Not the ordinary ones (blocks at the edge of the reach, what waits for the block under it): those were 417 of
+        // a log's 634 lines
+        boolean log = !hold.logged() && now - hold.since() >= HOLD_LOG_TICKS && !reason.equals("beyond-learned-reach")
+                && !reason.equals("cant-stand-there-yet");
         holds.put(pos, new Hold(reason, hold.since(), now, hold.logged() || log));
         if (log) {
             BuildLog.line("HOLD", pos.toShortString().replace(" ", "") + " reason=" + reason + " since=" + (now - hold.since()) + "t");
@@ -1226,7 +1229,8 @@ public final class RunLog {
             return;
         }
         try {
-            currentFile = file.resolveSibling(file.getFileName().toString().replace(".log", ".jsonl"));
+            String name = file.getFileName().toString();
+            currentFile = file.resolveSibling((name.endsWith(".log") ? name.substring(0, name.length() - 4) : name) + ".jsonl");
             json = Files.newBufferedWriter(currentFile, StandardCharsets.UTF_8);
             // What happened since the last build (joining again, getting back to the build) comes first
             for (String[] line : BuildLog.takePending()) {

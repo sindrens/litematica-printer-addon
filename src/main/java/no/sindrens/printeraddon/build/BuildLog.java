@@ -18,18 +18,19 @@ import java.util.stream.Stream;
 /**
  * The full log of one auto build, for finding out what went wrong: every step and message, every flight (from,
  * to, how long), and every 10 seconds where the player is and how fast blocks go in. One file per build in
- * .minecraft/logs/printer_addon/ (build-<date>.jsonl, see RunLog; the same as plain text too with "Text build log"),
- * the last 20 are kept. Both were written before: 19.5 and 24 MB an hour of the same lines.
+ * .minecraft/logs/printer_addon/, named so the newest sorts last and says what it was ("2026-10-25 16.45 auto build
+ * Pumpkin_farm v0.15.1.jsonl", see RunLog; the same as plain text too with "Text build log"), the last 20 are kept.
+ * Both were written before: 19.5 and 24 MB an hour of the same lines.
  */
 public final class BuildLog {
-    private static final DateTimeFormatter FILE_NAME = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss");
+    private static final DateTimeFormatter FILE_NAME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH.mm.ss");
     private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("HH:mm:ss.SSS");
     private static final int KEEP_FILES = 20;
 
     /** The plain text log, with "Text build log" only. */
     @Nullable
     private static BufferedWriter out;
-    /** The build's log name (build-<date>.log; the .jsonl next to it is what's written, see RunLog). */
+    /** The build's log name (<date> <what> v<version>.log; the .jsonl next to it is what's written, see RunLog). */
     @Nullable
     private static Path file;
     private static boolean opened;
@@ -52,12 +53,25 @@ public final class BuildLog {
     }
 
     public static void open() {
+        open("auto build");
+    }
+
+    /**
+     * Opens the log of a run; {@code what} goes into the file's name after the date and time ("auto build
+     * Pumpkin_farm", "auto break"), then the add-on's version. The names were "build-2026-10-25_12-35-50.jsonl": which
+     * was what, and from which version, couldn't be told.
+     */
+    public static void open(String what) {
         close();
         try {
             Path dir = folder();
             Files.createDirectories(dir);
             removeOld(dir);
-            file = dir.resolve("build-" + LocalDateTime.now().format(FILE_NAME) + ".log");
+            String version = net.fabricmc.loader.api.FabricLoader.getInstance().getModContainer(PrinterAddon.MOD_ID)
+                    .map(m -> m.getMetadata().getVersion().getFriendlyString()).orElse("?");
+            String name = (LocalDateTime.now().format(FILE_NAME) + " " + what + " v" + version)
+                    .replaceAll("[\\\\/:*?\"<>|\\p{Cntrl}]", "_").replaceAll("\\s+", " ").trim();
+            file = dir.resolve(name + ".log");
             opened = true;
             if (no.sindrens.printeraddon.config.Configs.Generic.TEXT_LOG.getBooleanValue()) {
                 out = Files.newBufferedWriter(file, StandardCharsets.UTF_8);
@@ -238,8 +252,9 @@ public final class BuildLog {
 
     private static void removeOld(Path dir) throws IOException {
         try (Stream<Path> files = Files.list(dir)) {
-            List<Path> logs = files.filter(p -> p.getFileName().toString().startsWith("build-"))
-                    .sorted(Comparator.comparing(p -> p.getFileName().toString())).toList();
+            // The old names (build-<date>) and the new ones (<date> <what> v<version>), oldest first
+            List<Path> logs = files.filter(p -> p.getFileName().toString().endsWith(".jsonl") || p.getFileName().toString().endsWith(".log"))
+                    .sorted(Comparator.comparingLong(p -> p.toFile().lastModified())).toList();
             for (int i = 0; i < logs.size() - (KEEP_FILES - 1); i++) {
                 Files.deleteIfExists(logs.get(i));
             }

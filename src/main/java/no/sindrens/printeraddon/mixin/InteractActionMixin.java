@@ -43,13 +43,9 @@ public class InteractActionMixin {
     private static boolean printer_addon$sneaked;
     @Unique
     private static net.minecraft.world.entity.player.Input printer_addon$keys;
-
-    /** An item that plants a crop or stem (seeds, carrots, potatoes...): see the seed wait in beforeClick. */
+    /** The click last put back for a tick after its item switch (see beforeClick). */
     @Unique
-    private static boolean printer_addon$seeds(net.minecraft.world.item.ItemStack stack) {
-        return stack.getItem() instanceof net.minecraft.world.item.BlockItem block
-                && block.getBlock().defaultBlockState().is(net.minecraft.tags.BlockTags.MAINTAINS_FARMLAND);
-    }
+    private static Object printer_addon$deferred;
 
     @Inject(method = "interact", at = @At("HEAD"), cancellable = true)
     private void printer_addon$beforeClick(Minecraft client, LocalPlayer player, InteractionHand hand, BlockHitResult hit, CallbackInfo ci) {
@@ -66,10 +62,12 @@ public class InteractActionMixin {
                 ci.cancel();
                 return;
             }
-            // Seeds clicked in the same tick as the switch to them: the player's server refused 11 of 21 such clicks.
+            // A click in the same tick as the switch to its item: the player's server refused 36 of a log's 40 refused
+            // clicks so (seeds, pistons, observers alike; 7 % of the clicks right after a switch, 0.5 % of the others).
             // The click goes back into the printer's queue (nothing else is queued meanwhile) and out a tick later
             if (Configs.enabled() && client.gameMode != null && no.sindrens.printeraddon.build.AutoBuild.INSTANCE.isRunning()
-                    && printer_addon$seeds(player.getItemInHand(hand)) && LitematicaMixinMod.printer != null) {
+                    && no.sindrens.printeraddon.config.Configs.Speed.WAIT_AFTER_SWITCH.getBooleanValue()
+                    && !player.getItemInHand(hand).isEmpty() && LitematicaMixinMod.printer != null) {
                 MultiPlayerGameModeAccessor gameMode = (MultiPlayerGameModeAccessor) client.gameMode;
                 int selected = player.getInventory().getSelectedSlot();
                 boolean unsent = selected != gameMode.printer_addon$carriedIndex();
@@ -82,7 +80,11 @@ public class InteractActionMixin {
                     }
                     ((ActionHandlerAccessor) LitematicaMixinMod.printer.actionHandler).printer_addon$queue()
                             .add((me.aleksilassila.litematica.printer.actions.Action) (Object) this);
-                    no.sindrens.printeraddon.build.RunLog.seedWait();
+                    // Counted once a click (the printer comes back to it several times within the tick)
+                    if (printer_addon$deferred != (Object) this) {
+                        printer_addon$deferred = this;
+                        no.sindrens.printeraddon.build.RunLog.switchWait();
+                    }
                     ci.cancel();
                     return;
                 }

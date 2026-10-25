@@ -30,10 +30,12 @@ import java.util.zip.GZIPOutputStream;
  */
 public final class LogShare {
     /**
-     * The developer's log channel: a Discord webhook URL ("Log channel" in the settings goes first). Empty: nowhere
-     * to send logs, the button says so.
+     * The developer's log channel, a Discord webhook URL ("Log channel" in the settings goes first). It's packed into
+     * the jar from src/main/resources/printer_addon/log-channel.txt (reversed, Base64), which never goes into the
+     * repository: a webhook URL in a public repository gets found and spammed. Without the file: nowhere to send logs.
      */
-    private static final String DEVELOPER_CHANNEL = "";
+    @Nullable
+    private static String developerChannel;
     /** Discord takes files up to 10 MB: a bigger log goes gzipped, and only its last part if that's still too big. */
     private static final int MAX_BYTES = 9 * 1024 * 1024;
     private static volatile boolean sending;
@@ -45,7 +47,25 @@ public final class LogShare {
     /** Where logs go, or "" when nowhere. */
     static String channel() {
         String own = Configs.Generic.LOG_CHANNEL.getStringValue().trim();
-        return own.isEmpty() ? DEVELOPER_CHANNEL : own;
+        return own.isEmpty() ? developerChannel() : own;
+    }
+
+    private static String developerChannel() {
+        if (developerChannel == null) {
+            developerChannel = "";
+            try (java.io.InputStream in = LogShare.class.getResourceAsStream("/printer_addon/log-channel.txt")) {
+                if (in != null) {
+                    String text = new String(in.readAllBytes(), StandardCharsets.UTF_8).trim();
+                    if (!text.isEmpty()) {
+                        developerChannel = new StringBuilder(new String(java.util.Base64.getDecoder().decode(text), StandardCharsets.UTF_8))
+                                .reverse().toString();
+                    }
+                }
+            } catch (IOException | IllegalArgumentException e) {
+                PrinterAddon.LOGGER.warn("[Printer Addon] Couldn't read the log channel", e);
+            }
+        }
+        return developerChannel;
     }
 
     public static boolean isSending() {

@@ -400,7 +400,7 @@ public final class AreaBreaker {
         }
         safety.reset();
         AutoBuild.INSTANCE.breaker.reset();
-        BuildLog.open();
+        BuildLog.open("auto break");
         RunLog.start(mc);
         RunLog.what("Auto break: " + describe(boxes) + ", Y " + bottom + " to " + top + ", about " + total + " blocks");
         BuildLog.line("AREA", "start: " + describe(boxes) + ", Y " + bottom + " to " + top + ", about " + total

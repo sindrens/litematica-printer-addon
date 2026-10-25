@@ -51,7 +51,7 @@ Breaks everything in an area, for example a farm you want gone:
 
 1. Select the area with Litematica's area selection (its selection tool: corner 1 and corner 2).
 2. Press `J`+`B` and open the **Auto break** tab. It shows the area and every kind of block in it with how many there are. Click a kind to leave it standing (`skip`, in red), click it again to break it.
-3. Click **Break the selected area**. Stop it with the same button or `J`+`Q`.
+3. Click the green **START Auto break**. Stop it with the red **STOP Auto break** (the same button) or `J`+`Q`.
 
 It breaks the top level first and works down, the nearest blocks first, each with your fastest tool for it (Efficiency counts, your own enchanted tools too, never one about to break). It flies to a free spot within reach of each block (never into a cactus) and stands where it can, since breaking in the air is 5 times slower. A cactus, sugar cane, bamboo, flower or carpet that stands on a block it breaks isn't broken itself: it drops with that block, so a cactus column on its sand is one break. It never breaks containers ("Never break containers"), liquids, what can't be broken, or a block that holds back lava.
 
@@ -59,7 +59,11 @@ Drops: with "Auto break: put drops away" on (the default), once the inventory is
 
 ## Sharing a log
 
-Every auto build and Auto break writes a log (`logs/printer_addon/build-<date>.jsonl`). **Share last log** in the J+B menu sends the last one to the add-on's developer (a Discord channel), with the add-on, Minecraft, Litematica and printer versions, the server, your name, what ran, how far it got and where the time went. Nothing is sent unless you click it, or turn on **Share logs automatically** (then every run's log goes when the run ends). The log has the build's coordinates, your inventory and your balance. **Log channel** in the settings sends them to your own Discord webhook instead.
+Every auto build and Auto break writes a log in `logs/printer_addon/`, named by when, what and which version, so the newest sorts last: `2026-10-25 16.45.12 auto build Pumpkin_farm v0.15.1.jsonl`. **Share last log** in the J+B menu sends the last one to the add-on's developer (a Discord channel), with the add-on, Minecraft, Litematica and printer versions, the server, your name, what ran, how far it got and where the time went. Nothing is sent unless you click it, or turn on **Share logs automatically** (then every run's log goes when the run ends). The log has the build's coordinates, your inventory and your balance. **Log channel** in the settings sends them to your own Discord webhook instead.
+
+## Building the jar
+
+The developer's log channel (a Discord webhook) goes into the jar from `src/main/resources/printer_addon/log-channel.txt` (the URL reversed, Base64), which is never committed: a webhook URL in a public repository gets found and spammed. Without the file the jar builds the same, and "Share last log" asks for a Log channel.
 
 ## Good to know
 
@@ -88,7 +92,7 @@ Every auto build and Auto break writes a log (`logs/printer_addon/build-<date>.j
 
 ## The build log
 
-Each run gets a build log, `.minecraft/logs/printer_addon/build-<date>.jsonl`: one JSON object a line, easy to read by a program. With "Text build log" on, the same lines are also written as plain text (`build-<date>.log`). The run's own lines use fixed `key=value` fields, times in seconds (`s`) or ticks (`t`, 20 a second), and every tick of the run counts in exactly one category: placing, lane-flying, transit, buying, vault, crafting, guard-throttle, server-wait, item-settle, breaking, stuck or idle-no-work.
+Each run gets a build log in `.minecraft/logs/printer_addon/` (`<date> <time> auto build <schematic> v<version>.jsonl`, or `auto break`): one JSON object a line, easy to read by a program. With "Text build log" on, the same lines are also written as plain text (the same name, `.log`). The last 20 are kept. The run's own lines use fixed `key=value` fields, times in seconds (`s`) or ticks (`t`, 20 a second), and every tick of the run counts in exactly one category: placing, lane-flying, transit, buying, vault, crafting, guard-throttle, server-wait, item-settle, breaking, stuck or idle-no-work.
 
 - `RUN-START`: the run's id, the version, the server and the settings.
 - `BEAT`: every 10 seconds, what happened: blocks placed, clicks and misses in those 10 s, blocks a second, what the time went to, the lane, the position, the speed, the height over the layer, the blocks in reach, held back, not ready yet and offered to the printer, the pause reason, ticks per second, ping, fps, free slots and how many of the layer's items you have.

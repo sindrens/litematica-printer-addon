@@ -90,7 +90,7 @@ public class Configs implements IConfigHandler {
                 "Where shared logs go: a Discord webhook URL. Empty: the add-on developer's channel.",
                 "Log channel (Discord webhook)");
         public static final ConfigBoolean TEXT_LOG = new ConfigBoolean("textBuildLog", false,
-                "Also write each build log as plain text (build-<date>.log) next to the .jsonl file.\n"
+                "Also write each build log as plain text (the same name, .log) next to the .jsonl file.\n"
                         + "The .jsonl has the same lines; send that one when something went wrong.",
                 "Text build log");
 
@@ -393,6 +393,11 @@ public class Configs implements IConfigHandler {
                 "For servers with a strict anticheat: the printer places at most this many blocks per second. 0 = no limit\n"
                         + "(the printer's interval decides).",
                 "Max placements per second");
+        public static final ConfigBoolean WAIT_AFTER_SWITCH = new ConfigBoolean("waitAfterSwitch", true,
+                "A click never in the same tick as the switch to its item: it goes a tick later. Some servers refuse such\n"
+                        + "clicks (on play.mythian.net 7 % of the clicks right after a switch, against 0.5 % of the others).\n"
+                        + "Off: a little faster on servers that don't.",
+                "Wait a tick after switching items");
         public static final ConfigInteger LAG_PAUSE_TPS = new ConfigInteger("lagPauseTps", 12, 0, 19,
                 "On a server: stop placing while the server runs below this many ticks per second (20 is normal),\n"
                         + "because clicks then get answered late and blocks come out wrong. 0 = never wait.",
@@ -417,7 +422,7 @@ public class Configs implements IConfigHandler {
                 "Custom: fly speed");
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                AUTO_SPEED, AUTO_SPEED_MIN_INTERVAL, SPEED_GUARD, AUTO_SPEED_STEP_BLOCKS, MAX_PLACEMENTS_PER_SECOND, LAG_PAUSE_TPS, PRINTER_INTERVAL, BREAK_COOLDOWN, SHOP_CLICK_DELAY, WALK_SPEED, FLY_SPEED);
+                AUTO_SPEED, AUTO_SPEED_MIN_INTERVAL, SPEED_GUARD, AUTO_SPEED_STEP_BLOCKS, MAX_PLACEMENTS_PER_SECOND, WAIT_AFTER_SWITCH, LAG_PAUSE_TPS, PRINTER_INTERVAL, BREAK_COOLDOWN, SHOP_CLICK_DELAY, WALK_SPEED, FLY_SPEED);
 
         public static double walkSpeed() {
             SpeedPreset preset = preset();

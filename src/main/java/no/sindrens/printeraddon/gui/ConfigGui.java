@@ -76,7 +76,8 @@ public class ConfigGui extends GuiConfigsBase {
         if (!on) {
             return;
         }
-        this.addButton(new ButtonGeneric(x, y, 200, 20, running ? "Stop auto build" : "Start auto build"),
+        // Start in green, stop in red: the main buttons, seen at once
+        this.addButton(new ButtonGeneric(x, y, 200, 20, running ? "\u00a7c\u25a0 STOP auto build" : "\u00a7a\u25b6 START auto build"),
                 (button, mouse) -> {
                     GuiBase.openGui(null);
                     AutoBuild.INSTANCE.toggle(mc);
@@ -172,7 +173,7 @@ public class ConfigGui extends GuiConfigsBase {
             return;
         }
         boolean running = breaker.isRunning();
-        this.addButton(new ButtonGeneric(x, y, 200, 20, running ? "Stop breaking" : "Break the selected area"), (button, mouse) -> {
+        this.addButton(new ButtonGeneric(x, y, 200, 20, running ? "\u00a7c\u25a0 STOP Auto break" : "\u00a7a\u25b6 START Auto break"), (button, mouse) -> {
             GuiBase.openGui(null);
             if (running) {
                 breaker.stop(mc, null);

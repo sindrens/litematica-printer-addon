@@ -1804,7 +1804,7 @@ public class AutoBuild {
 
         running = true;
         Configs.Generic.AUTO_BUILD.setBooleanValue(true);
-        BuildLog.open();
+        BuildLog.open("auto build " + placementNames());
         Perf.report();
         logTicks = 0;
         placedAtSnapshot = 0;
@@ -1901,6 +1901,15 @@ public class AutoBuild {
             return;
         }
         // What this run is, for a shared log's summary (see LogShare)
+        int[] yRange = SchematicHelper.yRange(SchematicHelper.areas());
+        RunLog.what("Auto build: " + placementNames() + (yRange == null ? "" : ", Y " + yRange[0] + " to " + yRange[1])
+                + (layers.isActive() ? ", started at " + layers.describeLayers() : ""));
+
+        Chat.info("Auto build §astarted§r.");
+    }
+
+    /** The names of the schematic placements switched on ("Pumpkin_farm"), for the log's name and summary. */
+    private static String placementNames() {
         StringBuilder names = new StringBuilder();
         for (fi.dy.masa.litematica.schematic.placement.SchematicPlacement placement
                 : fi.dy.masa.litematica.data.DataManager.getSchematicPlacementManager().getAllSchematicsPlacements()) {
@@ -1908,11 +1917,7 @@ public class AutoBuild {
                 names.append(names.isEmpty() ? "" : ", ").append(placement.getName());
             }
         }
-        int[] yRange = SchematicHelper.yRange(SchematicHelper.areas());
-        RunLog.what("Auto build: " + (names.isEmpty() ? "?" : names) + (yRange == null ? "" : ", Y " + yRange[0] + " to " + yRange[1])
-                + (layers.isActive() ? ", started at " + layers.describeLayers() : ""));
-
-        Chat.info("Auto build §astarted§r.");
+        return names.isEmpty() ? "?" : names.length() > 40 ? names.substring(0, 40) : names.toString();
     }
 
     /** Stops auto build. {@code reason} is shown as a warning when it isn't the player's own choice. */

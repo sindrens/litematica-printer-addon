@@ -255,10 +255,13 @@ public final class PlacementOrder {
         }
 
         // Blocks that hold water first (waterlogged leaves): the bucket can follow at once, and the tilling around it
-        // is done in the same visit instead of on a second round
+        // is done in the same visit instead of on a second round. Then the item in hand, before full blocks first:
+        // every switch is a click the player's server refuses now and then (7 % right after one, 0.5 % else), and
+        // pistons, observers and their redstone went piston, redstone, observer, redstone (241 switches a minute)
         Comparator<BlockPos> usual = Comparator
-                .comparingInt((BlockPos pos) -> holdsWater(schematic.getBlockState(pos)) ? -1 : tier(schematic, pos, schematic.getBlockState(pos)))
+                .comparingInt((BlockPos pos) -> holdsWater(schematic.getBlockState(pos)) ? 0 : 1)
                 .thenComparingInt(pos -> inHand != null && StateRules.itemFor(schematic.getBlockState(pos)).is(inHand) ? 0 : 1)
+                .thenComparingInt(pos -> tier(schematic, pos, schematic.getBlockState(pos)))
                 .thenComparingDouble(pos -> from.distanceToSqr(Vec3.atCenterOf(pos)));
         if (ticksLeft == null) {
             ready.sort(usual);

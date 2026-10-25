@@ -66,3 +66,11 @@
 - Skip any block type in the Auto break tab.
 - Best tool per block, drops put away or ignored.
 - Share last log (J+B) sends it to the developer's Discord.
+
+## 26.2-0.15.1
+- Every item waits a tick after switching to it (pistons too).
+- Fewer item switches: the item in hand goes first.
+- Green START and red STOP buttons (J+B).
+- Clearer build report: holes, wrong blocks, your own blocks.
+- Log files named by date, what ran and version.
+- Share last log goes to the developer's Discord.
