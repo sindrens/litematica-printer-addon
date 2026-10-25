@@ -40,11 +40,8 @@
 
 ## 26.2-0.14.8
 - Lands to break cactus: 3 times faster.
-- Cleanup layers are done spot by spot.
-- Fewer refused clicks.
-- Cactus flowers are thrown out, more room to buy.
+- Cactus flowers thrown out, more room to buy.
 - Bulk buying works again after a full vault.
-- Waits out server lag, retries failed purchases.
+- Waits out server lag, retries purchases.
 - Leftovers on one short route.
-- No "stuck" warning during lag.
-- Logs 90 % smaller, with decimal points.
+- Logs 90% smaller, with decimal points.
