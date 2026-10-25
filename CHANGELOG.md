@@ -80,3 +80,7 @@
 - Your F2 screenshot can go with it.
 - Full debug with it: mods, settings, PC, game log (no chat), crash report.
 - The log of the run going on is sent, not the last one.
+
+## 26.2-0.15.3
+- Reports reach the developer again (new #player-reports channel).
+- New logo, also shown in Mod Menu.

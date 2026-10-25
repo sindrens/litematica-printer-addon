@@ -1,3 +1,5 @@
+<p align="center"><img src="src/main/resources/assets/printer_addon/icon.png" width="128" alt="Printer Addon logo"></p>
+
 # Printer Addon
 
 Builds whole Litematica schematics in survival for you, on top of Litematica Printer (Minecraft 26.2).
