@@ -44,6 +44,13 @@ public class InteractActionMixin {
     @Unique
     private static net.minecraft.world.entity.player.Input printer_addon$keys;
 
+    /** An item that plants a crop or stem (seeds, carrots, potatoes...): see the seed wait in beforeClick. */
+    @Unique
+    private static boolean printer_addon$seeds(net.minecraft.world.item.ItemStack stack) {
+        return stack.getItem() instanceof net.minecraft.world.item.BlockItem block
+                && block.getBlock().defaultBlockState().is(net.minecraft.tags.BlockTags.MAINTAINS_FARMLAND);
+    }
+
     @Inject(method = "interact", at = @At("HEAD"), cancellable = true)
     private void printer_addon$beforeClick(Minecraft client, LocalPlayer player, InteractionHand hand, BlockHitResult hit, CallbackInfo ci) {
         // An error in the add-on's part stops auto build and goes into the build log; the click and the game go on
@@ -58,6 +65,27 @@ public class InteractActionMixin {
                 no.sindrens.printeraddon.build.AutoBuild.INSTANCE.clickSkipped(client, hit.getBlockPos().relative(hit.getDirection()), hit.getBlockPos());
                 ci.cancel();
                 return;
+            }
+            // Seeds clicked in the same tick as the switch to them: the player's server refused 11 of 21 such clicks.
+            // The click goes back into the printer's queue (nothing else is queued meanwhile) and out a tick later
+            if (Configs.enabled() && client.gameMode != null && no.sindrens.printeraddon.build.AutoBuild.INSTANCE.isRunning()
+                    && printer_addon$seeds(player.getItemInHand(hand)) && LitematicaMixinMod.printer != null) {
+                MultiPlayerGameModeAccessor gameMode = (MultiPlayerGameModeAccessor) client.gameMode;
+                int selected = player.getInventory().getSelectedSlot();
+                boolean unsent = selected != gameMode.printer_addon$carriedIndex();
+                if (unsent || no.sindrens.printeraddon.build.AutoBuild.carriedSentTick == no.sindrens.printeraddon.build.AutoBuild.clientTicks) {
+                    if (unsent) {
+                        // The switch goes out now, the click a tick later
+                        gameMode.printer_addon$setCarriedIndex(selected);
+                        player.connection.send(new net.minecraft.network.protocol.game.ServerboundSetCarriedItemPacket(selected));
+                        no.sindrens.printeraddon.build.AutoBuild.carriedSentTick = no.sindrens.printeraddon.build.AutoBuild.clientTicks;
+                    }
+                    ((ActionHandlerAccessor) LitematicaMixinMod.printer.actionHandler).printer_addon$queue()
+                            .add((me.aleksilassila.litematica.printer.actions.Action) (Object) this);
+                    no.sindrens.printeraddon.build.RunLog.seedWait();
+                    ci.cancel();
+                    return;
+                }
             }
             printer_addon$faceForClick(client, player, hand, hit, ci);
             if (!ci.isCancelled() && Configs.enabled()) {

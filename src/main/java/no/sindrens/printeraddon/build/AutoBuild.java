@@ -48,6 +48,8 @@ public class AutoBuild {
     final InventoryCleaner cleaner = new InventoryCleaner();
     public final BuildStats stats = new BuildStats();
     public final SpeedTuner speed = new SpeedTuner();
+    /** The client tick the server was last told of another hotbar slot (see MultiPlayerGameModeMixin). */
+    public static long carriedSentTick = Long.MIN_VALUE / 2;
     /** Client ticks since the game started (game time can stand still, e.g. with /tick freeze). */
     public static long clientTicks;
     /** Spots the printer just placed (game tick of the attempt): not given to it again until the server has answered. */

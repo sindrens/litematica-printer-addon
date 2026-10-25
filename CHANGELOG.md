@@ -56,3 +56,7 @@
 - Dirt the printer missed gets tilled by the add-on.
 - Lanes wait a moment instead of leaving holes.
 - Finished layers checked for untilled dirt at start.
+
+## 26.2-0.14.11
+- Seeds wait one tick after switching to them.
+- No more "no hoe for tilling" with your own hoe on the hotbar.

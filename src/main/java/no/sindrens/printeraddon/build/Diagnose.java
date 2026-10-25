@@ -103,8 +103,10 @@ public final class Diagnose {
         if (result == BlockCheck.Result.MISSING && !item.isEmpty() && mc.player.getInventory().countItem(item.getItem()) == 0) {
             return "no " + item.getHoverName().getString() + " in the inventory";
         }
+        // Any hoe that can be used: a plain one, or one of the player's own (a netherite hoe on the hotbar was said to
+        // be "no hoe", though the printer tilled with it)
         if (result == BlockCheck.Result.PRINTER_FIXES && target.getBlock() == net.minecraft.world.level.block.Blocks.FARMLAND
-                && Tools.hoeUses(mc.player.getInventory()) == 0) {
+                && !anyHoe(mc.player.getInventory())) {
             return "no hoe for tilling";
         }
         String waiting = PlacementOrder.whyNotReady(mc.level, schematic, pos, target);
@@ -136,5 +138,15 @@ public final class Diagnose {
         static String of(BlockState state) {
             return state.toString().replace("Block{minecraft:", "").replace("}", "");
         }
+    }
+
+    private static boolean anyHoe(net.minecraft.world.entity.player.Inventory inventory) {
+        for (int slot = 0; slot < net.minecraft.world.entity.player.Inventory.INVENTORY_SIZE; slot++) {
+            net.minecraft.world.item.ItemStack stack = inventory.getItem(slot);
+            if (Tools.usable(Tools.HOE, stack) || Tools.usablePrivate(Tools.HOE, stack)) {
+                return true;
+            }
+        }
+        return false;
     }
 }

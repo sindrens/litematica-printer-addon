@@ -4,6 +4,7 @@
   "package": "no.sindrens.printeraddon.mixin",
   "compatibilityLevel": "JAVA_25",
   "client": [
+    "ActionHandlerAccessor",
     "AirPlaceGuideMixin",
     "ClientPacketListenerMixin",
     "ClientCommonPacketListenerMixin",
@@ -14,6 +15,7 @@
     "GuideToolMixin",
     "MinecraftMixin",
     "MultiPlayerGameModeAccessor",
+    "MultiPlayerGameModeMixin",
     "InteractActionMixin",
     "PrepareActionMixin",
     "PropertySpecificGuesserGuideMixin",

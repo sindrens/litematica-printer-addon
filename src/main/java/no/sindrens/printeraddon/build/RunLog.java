@@ -664,6 +664,15 @@ public final class RunLog {
         return cause;
     }
 
+    /** Seed clicks held for a tick because the switch to the seeds was in the same tick (see InteractActionMixin). */
+    private static int minuteSeedWaits;
+
+    public static void seedWait() {
+        if (active) {
+            minuteSeedWaits++;
+        }
+    }
+
     /** The held item was switched for the next block. */
     public static void hotbarSwitch(@Nullable Item from, @Nullable Item to) {
         if (!active) {
@@ -681,11 +690,12 @@ public final class RunLog {
                     minuteClicks == 0 ? 0 : round(minuteSwitches / (double) minuteClicks), "pairs", switchPairs.toString(),
                     "clicksRightAfterSwitch", minuteClicksAfterSwitch, "missedRightAfterSwitch", minuteMissAfterSwitch,
                     "missShareAfterSwitch", minuteClicksAfterSwitch == 0 ? "0%" : Math.round(minuteMissAfterSwitch * 100.0 / minuteClicksAfterSwitch) + "%",
-                    "itemSettleWait", seconds(minuteSettleTicks)));
+                    "itemSettleWait", seconds(minuteSettleTicks), "seedWaits", minuteSeedWaits));
         }
         switchPairs.clear();
         minuteSwitches = minuteClicks = minuteClicksAfterSwitch = minuteMissAfterSwitch = 0;
         minuteSettleTicks = 0;
+        minuteSeedWaits = 0;
         minuteStart = AutoBuild.clientTicks;
     }
 
