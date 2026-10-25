@@ -395,13 +395,9 @@ public class Mover {
         if (!ServerAcks.works()) {
             return false;
         }
-        if (ServerAcks.isWaiting(pos) || ServerAcks.nextToWaiting(pos)) {
-            return true;
-        }
-        // Or what it's clicked against was placed a moment ago (see AutoBuild#filterPositions)
-        net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
-        BlockPos support = mc.level == null ? null : Clicks.clickedFor(mc.level, pos);
-        return support != null && ServerAcks.unconfirmed(support, 4);
+        // (Not "what it's clicked against was placed a moment ago": waiting for that made every lane of a test farm
+        // slower, 699 blocks a minute instead of 769, for the few clicks the server refuses)
+        return ServerAcks.isWaiting(pos) || ServerAcks.nextToWaiting(pos);
     }
 
     private double glideSpeedFor(LocalPlayer player, List<BlockPos> inReach, double reach) {

@@ -85,7 +85,10 @@ public class BlockBreaker {
     private Vec3 hopTo;
     private int hopTicks;
     private static final int HOP_TICKS = 20;
-    /** The spot to stand at is at most this many blocks to the side (a hop of 0.6 s at most). */
+    /**
+     * The spot to stand at is at most this many blocks to the side (a hop of 0.6 s at most). Waiting for the sand
+     * around to come in first was tried: the lane flew on meanwhile and came back for each, the layer took twice as long.
+     */
     private static final int HOP_REACH = 2;
 
     public boolean isStanding() {
@@ -139,13 +142,13 @@ public class BlockBreaker {
                 }
             }
         }
-        if (best == null) {
-            BuildLog.lineOrKeep("BREAK", "no spot to stand at for " + target.toShortString().replace(" ", "") + " from "
-                    + String.format(java.util.Locale.ROOT, "%.1f,%.1f,%.1f", at.x, at.y, at.z) + ": noFooting=" + noFooting
-                    + " cactusNear=" + harm + " outOfReach=" + far + " blocked=" + blocked);
-        }
+        noSpotWhy = String.format(java.util.Locale.ROOT, "from %.1f,%.1f,%.1f: noFooting=%d cactusNear=%d outOfReach=%d blocked=%d",
+                at.x, at.y, at.z, noFooting, harm, far, blocked);
         return best;
     }
+
+    /** Why the last search found no spot to stand at (see standSpot), for the build log when it breaks from the air. */
+    private String noSpotWhy = "";
 
     /** Nothing that hurts near the body anywhere on the straight way from a to b. */
     private static boolean harmFreeWay(net.minecraft.world.level.Level level, Vec3 a, Vec3 b) {
@@ -280,6 +283,16 @@ public class BlockBreaker {
 
     private void startBreaking(Minecraft mc, LocalPlayer player, BlockPos pos) {
         BlockState state = mc.level.getBlockState(pos);
+        // A block that takes long: standing for it (here, or a hop beside); one that breaks at once (a flower) from the air
+        boolean slow = state.getDestroySpeed(mc.level, pos) > 0.05f && Configs.Breaking.STAND_TO_BREAK.getBooleanValue()
+                && player.getAbilities().flying && player.getAbilities().mayfly;
+        Vec3 spot = null;
+        if (slow && player.level().noCollision(player, player.getBoundingBox().move(0, -0.06, 0))) {
+            spot = standSpot(player, pos);
+            if (spot == null) {
+                BuildLog.lineOrKeep("BREAK", "from the air: " + pos.toShortString().replace(" ", "") + ", no spot to stand at " + noSpotWhy);
+            }
+        }
         target = pos.immutable();
         suspects.remove(target);
 
@@ -298,13 +311,8 @@ public class BlockBreaker {
         face = faceTowardsPlayer(player, pos);
         selectBestTool(player, state);
         lookAt(player, pos);
-        // A block that takes long: standing for it (here, or a hop beside); one that breaks at once (a flower) from the air
-        boolean slow = state.getDestroySpeed(mc.level, pos) > 0.05f && Configs.Breaking.STAND_TO_BREAK.getBooleanValue()
-                && player.getAbilities().flying && player.getAbilities().mayfly;
-        if (slow && player.level().noCollision(player, player.getBoundingBox().move(0, -0.06, 0))) {
-            hopTo = standSpot(player, target);
-            hopTicks = 0;
-        }
+        hopTo = spot;
+        hopTicks = 0;
         PrinterAddon.debug("Breaking {} at {} with {}{}", state, target.toShortString(),
                 player.getInventory().getItem(player.getInventory().getSelectedSlot()), hopTo != null ? ", from " + hopTo : "");
         if (hopTo != null) {

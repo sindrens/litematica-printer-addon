@@ -81,9 +81,13 @@ public class Configs implements IConfigHandler {
                 "Write every step (which block is broken, why it stopped...) to the game log (logs/latest.log).\n"
                         + "Useful when something doesn't work.",
                 "Debug log");
+        public static final ConfigBoolean TEXT_LOG = new ConfigBoolean("textBuildLog", false,
+                "Also write each build log as plain text (build-<date>.log) next to the .jsonl file.\n"
+                        + "The .jsonl has the same lines; send that one when something went wrong.",
+                "Text build log");
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                ADDON_ENABLED, AUTO_BUILD, SHOW_HUD, RESUME_AFTER_REJOIN, RECONNECT, BACK_COMMANDS, BUILD_RENDER_DISTANCE, SPEED_PRESET, APPLY_SPEED_TO_PRINTER, TURN_VIEW_FOR_PRINTER, CHAT_MESSAGES, DETAILED_CHAT, STATUS_FILE, DEBUG_LOG);
+                ADDON_ENABLED, AUTO_BUILD, SHOW_HUD, RESUME_AFTER_REJOIN, RECONNECT, BACK_COMMANDS, BUILD_RENDER_DISTANCE, SPEED_PRESET, APPLY_SPEED_TO_PRINTER, TURN_VIEW_FOR_PRINTER, CHAT_MESSAGES, DETAILED_CHAT, STATUS_FILE, DEBUG_LOG, TEXT_LOG);
     }
 
     public static class Breaking {

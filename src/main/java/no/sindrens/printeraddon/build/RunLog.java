@@ -241,6 +241,8 @@ public final class RunLog {
         minuteStart = now;
         runClicks = runMissed = runWrong = runTrips = runPurchases = runHarmLifts = runHarmTouches = 0;
         runJunkThrown = runStraysStored = 0;
+        runLeftoverTicks = 0;
+        lastSupplySlots = "";
         runTravel = 0;
         missCauses.clear();
         giveUps.clear();
@@ -276,11 +278,58 @@ public final class RunLog {
                 "breaking", AutoBuild.INSTANCE.breaker.summary(), "junkThrown", runJunkThrown, "straysStored", runStraysStored,
                 "guard", ServerWatch.summary(), "times", run.breakdown());
         emit("RUN-END", report);
+        emit("RUN-ADVICE", kv("top3", advice(ticks)));
         compareWithLast();
         saveRun(spent);
         active = false;
         closeJson();
     }
+
+    /**
+     * The three biggest costs of the run, each with what's behind it as far as the numbers tell (buying 18% - 38 trips,
+     * the last with 6 slots of junk): where to look first.
+     */
+    private static String advice(long ticks) {
+        List<Object[]> costs = new ArrayList<>();
+        double total = Math.max(1, ticks);
+        double buying = (run.ticks[Cat.BUYING.ordinal()] + run.ticks[Cat.VAULT.ordinal()]) / total;
+        costs.add(new Object[]{buying, "buying " + percent(buying) + " - " + runTrips + " trips for items, " + runPurchases
+                + " purchases; the inventory at the last one: " + (lastSupplySlots.isEmpty() ? "-" : lastSupplySlots)});
+        long leftoverTicks = runLeftoverTicks + layerLeftoverTicks;
+        double leftovers = leftoverTicks / total;
+        costs.add(new Object[]{leftovers, "leftovers after the lanes " + percent(leftovers) + " - see LEFTOVER-PLAN and the TRIP lines"});
+        double breaking = run.ticks[Cat.BREAKING.ordinal()] / total;
+        costs.add(new Object[]{breaking, "breaking " + percent(breaking) + " - " + AutoBuild.INSTANCE.breaker.summary()
+                + " (standing breaks are about 3 times faster)"});
+        double server = (run.ticks[Cat.SERVER_WAIT.ordinal()] + run.ticks[Cat.GUARD_THROTTLE.ordinal()]) / total;
+        costs.add(new Object[]{server, "waiting for the server " + percent(server) + " - lag or slow answers (see SERVER and GUARD-END)"});
+        double transit = run.ticks[Cat.TRANSIT.ordinal()] / total;
+        costs.add(new Object[]{transit, "flying between lanes and spots " + percent(transit)});
+        double stuck = (run.ticks[Cat.STUCK.ordinal()] + run.ticks[Cat.IDLE_NO_WORK.ordinal()]) / total;
+        costs.add(new Object[]{stuck, "nothing to place " + percent(stuck) + " - see the HOLD and STUCK lines"});
+        double missed = runClicks == 0 ? 0 : (double) (runMissed + runWrong) / runClicks;
+        String topCause = missCauses.entrySet().stream().max(Map.Entry.comparingByValue()).map(Map.Entry::getKey).orElse("-");
+        // A missed click costs about a click's time again, so it's weighed by the placing time
+        costs.add(new Object[]{missed * run.ticks[Cat.PLACING.ordinal()] / total, "missed clicks " + percent(missed)
+                + " of all - mostly " + topCause});
+        costs.sort((a, b) -> Double.compare((double) b[0], (double) a[0]));
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < Math.min(3, costs.size()); i++) {
+            if ((double) costs.get(i)[0] < 0.02) {
+                break;
+            }
+            sb.append(sb.length() == 0 ? "" : " | ").append(i + 1).append(". ").append(costs.get(i)[1]);
+        }
+        return sb.length() == 0 ? "nothing stands out" : sb.toString();
+    }
+
+    private static String percent(double share) {
+        return Math.round(share * 100) + "%";
+    }
+
+    /** The leftovers' time of the layers done (see LAYER-END), and the inventory at the last trip for items. */
+    private static long runLeftoverTicks;
+    private static String lastSupplySlots = "";
 
     // ---- every tick
 
@@ -812,6 +861,7 @@ public final class RunLog {
     }
 
     private static void resetLayer(long now, String name) {
+        runLeftoverTicks += layerLeftoverTicks;
         layer.reset(now);
         layerName = name;
         layerItems.clear();
@@ -879,8 +929,9 @@ public final class RunLog {
         supplyQuiet = 0;
         supplyPurchases = 0;
         supplyBought.clear();
+        lastSupplySlots = slotUse(mc.player);
         emit("SUPPLY-START", kv("trigger", trigger, "lane", supplyWhere, "invFree", supplyInvFree, "vaultFree", supplyVaultFree,
-                "slots", slotUse(mc.player)));
+                "slots", lastSupplySlots));
     }
 
     /**
@@ -1089,6 +1140,12 @@ public final class RunLog {
         }
         try {
             json = Files.newBufferedWriter(file.resolveSibling(file.getFileName().toString().replace(".log", ".jsonl")), StandardCharsets.UTF_8);
+            // What happened since the last build (joining again, getting back to the build) comes first
+            for (String[] line : BuildLog.takePending()) {
+                json.write("{\"run\":\"" + runId + "\",\"time\":\"" + line[0] + "\",\"t\":" + line[1] + ",\"type\":" + quote(line[2])
+                        + ",\"text\":" + quote(line[3]) + "}");
+                json.newLine();
+            }
         } catch (IOException e) {
             json = null;
         }
@@ -1116,6 +1173,10 @@ public final class RunLog {
         } catch (IOException e) {
             closeJson();
         }
+    }
+
+    static boolean jsonOpen() {
+        return json != null;
     }
 
     static void flushJson() {

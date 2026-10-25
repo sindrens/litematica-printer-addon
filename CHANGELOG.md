@@ -45,3 +45,8 @@
 - Waits out server lag, retries purchases.
 - Leftovers on one short route.
 - Logs 90% smaller, with decimal points.
+
+## 26.2-0.14.9
+- Lanes 10% faster again (0.14.8 waited too much).
+- One log file (.jsonl), plain text optional.
+- Run report ends with the top 3 time costs.

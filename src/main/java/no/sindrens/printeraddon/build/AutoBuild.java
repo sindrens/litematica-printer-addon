@@ -128,9 +128,6 @@ public class AutoBuild {
     private record Tries(net.minecraft.world.level.block.state.BlockState state, int count, long since) {
     }
 
-    /** A block is clicked against only this long after the server's answer to its own click (see filterPositions). */
-    private static final int SUPPORT_CONFIRMED_AFTER = 4;
-
     /**
      * Given up on only after this long since the first of its tries: all 41 give-ups of a log were placed after all,
      * 35 of them within 20 ticks (4 clicks in 19 ticks on a slow server, all answered at once 5 ticks later).
@@ -709,9 +706,10 @@ public class AutoBuild {
             net.minecraft.core.BlockPos support = result == BlockCheck.Result.MISSING
                     && !me.aleksilassila.litematica.printer.config.Configs.PRINT_IN_AIR.getBooleanValue() ? Clicks.clickedFor(mc.level, pos) : null;
             boolean supportGoing = support != null && Clicks.goingAway(mc.level, support);
-            // Nor against a block the server may not have yet (its click unanswered, or answered a moment ago): 85 % of
-            // a log's refused clicks were against a block placed at most 10 ticks before
-            boolean supportUnconfirmed = acks && support != null && ServerAcks.unconfirmed(support, SUPPORT_CONFIRMED_AFTER);
+            // Not held back until what it's clicked against is confirmed (85 % of a log's refused clicks were against a
+            // block placed at most 10 ticks before): on a test farm nearly every block waited so, 10 % slower in all,
+            // for the 3 % of clicks the server refuses. Sand still waits for its string (it falls otherwise, above)
+            boolean supportUnconfirmed = false;
             // Nor a block that can't stand there as things are (a cactus with its sand still to come, or next to a
             // block): the click is refused, and costs a turn
             boolean cantStand = result == BlockCheck.Result.MISSING && !schematic.getBlockState(pos).canSurvive(mc.level, pos);

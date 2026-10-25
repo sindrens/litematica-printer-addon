@@ -17,18 +17,22 @@ import java.util.stream.Stream;
 
 /**
  * The full log of one auto build, for finding out what went wrong: every step and message, every flight (from,
- * to, how long), and every 5 seconds where the player is and how fast blocks go in. One file per build in
- * .minecraft/logs/printer_addon/, the last 20 are kept.
+ * to, how long), and every 10 seconds where the player is and how fast blocks go in. One file per build in
+ * .minecraft/logs/printer_addon/ (build-<date>.jsonl, see RunLog; the same as plain text too with "Text build log"),
+ * the last 20 are kept. Both were written before: 19.5 and 24 MB an hour of the same lines.
  */
 public final class BuildLog {
     private static final DateTimeFormatter FILE_NAME = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss");
     private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("HH:mm:ss.SSS");
     private static final int KEEP_FILES = 20;
 
+    /** The plain text log, with "Text build log" only. */
     @Nullable
     private static BufferedWriter out;
+    /** The build's log name (build-<date>.log; the .jsonl next to it is what's written, see RunLog). */
     @Nullable
     private static Path file;
+    private static boolean opened;
     private static long lastFlush;
 
     private BuildLog() {
@@ -44,7 +48,7 @@ public final class BuildLog {
     }
 
     public static boolean isOpen() {
-        return out != null;
+        return opened;
     }
 
     public static void open() {
@@ -54,28 +58,48 @@ public final class BuildLog {
             Files.createDirectories(dir);
             removeOld(dir);
             file = dir.resolve("build-" + LocalDateTime.now().format(FILE_NAME) + ".log");
-            out = Files.newBufferedWriter(file, StandardCharsets.UTF_8);
-            // What happened since the last build (joining again, getting back to the build) comes first
-            for (String line : pending) {
-                out.write(line);
-                out.newLine();
+            opened = true;
+            if (no.sindrens.printeraddon.config.Configs.Generic.TEXT_LOG.getBooleanValue()) {
+                out = Files.newBufferedWriter(file, StandardCharsets.UTF_8);
+                // What happened since the last build (joining again, getting back to the build) comes first
+                for (String line : pending) {
+                    out.write(line);
+                    out.newLine();
+                }
             }
-            pending.clear();
         } catch (IOException e) {
             PrinterAddon.LOGGER.warn("Couldn't open the build log", e);
             out = null;
-            file = null;
         }
     }
 
+    /**
+     * The lines from between builds, for the top of the .jsonl once it's open (see RunLog): time, tick, kind, text.
+     * Taken once.
+     */
+    static List<String[]> takePending() {
+        List<String[]> lines = new java.util.ArrayList<>();
+        for (String line : pending) {
+            String[] parts = line.split(" ", 4);
+            if (parts.length == 4 && parts[1].startsWith("t=")) {
+                lines.add(new String[]{parts[0], parts[1].substring(2), parts[2], parts[3]});
+            }
+        }
+        pending.clear();
+        return lines;
+    }
+
     public static void close() {
-        if (out == null) {
+        if (!opened) {
             return;
         }
+        opened = false;
         try {
             flushRepeats(out);
             repeatKey = null;
-            out.close();
+            if (out != null) {
+                out.close();
+            }
         } catch (IOException ignored) {
         }
         out = null;
@@ -89,7 +113,7 @@ public final class BuildLog {
      * else kept for the next one (the last 100) and written to the game log at once.
      */
     public static void lineOrKeep(String kind, String text) {
-        if (out != null) {
+        if (opened) {
             line(kind, text);
             return;
         }
@@ -112,10 +136,10 @@ public final class BuildLog {
      * once, followed by one line "×N until <time>" when something else comes (120 lines the same in a row before).
      */
     public static void line(String kind, String text) {
-        BufferedWriter writer = out;
-        if (writer == null || debugOnly(kind, text)) {
+        if (!opened || debugOnly(kind, text)) {
             return;
         }
+        BufferedWriter writer = out;
         try {
             String time = LocalDateTime.now().format(TIME);
             String key = kind + ' ' + text;
@@ -127,23 +151,33 @@ public final class BuildLog {
             }
             flushRepeats(writer);
             repeatKey = key;
-            writer.write(time);
-            writer.write(" t=");
-            writer.write(Long.toString(AutoBuild.clientTicks));
-            writer.write(' ');
-            writer.write(kind);
-            writer.write(' ');
-            writer.write(text);
-            writer.newLine();
-            RunLog.mirror(time, AutoBuild.clientTicks, kind, text);
+            if (writer != null) {
+                writer.write(time);
+                writer.write(" t=");
+                writer.write(Long.toString(AutoBuild.clientTicks));
+                writer.write(' ');
+                writer.write(kind);
+                writer.write(' ');
+                writer.write(text);
+                writer.newLine();
+            }
+            if (RunLog.jsonOpen()) {
+                RunLog.mirror(time, AutoBuild.clientTicks, kind, text);
+            } else if (pending.size() < 500) {
+                // Before the .jsonl is open (the build's first lines: START, the settings): kept for its top
+                pending.addLast(time + " t=" + AutoBuild.clientTicks + " " + kind + " " + text);
+            }
             long now = System.currentTimeMillis();
             if (now - lastFlush > 1000) {
                 lastFlush = now;
-                writer.flush();
+                if (writer != null) {
+                    writer.flush();
+                }
                 RunLog.flushJson();
             }
         } catch (IOException e) {
-            close();
+            // The text log failed: the .jsonl goes on
+            out = null;
         }
     }
 
@@ -159,10 +193,14 @@ public final class BuildLog {
                 && !no.sindrens.printeraddon.config.Configs.Generic.DEBUG_LOG.getBooleanValue();
     }
 
-    private static void flushRepeats(BufferedWriter writer) throws IOException {
+    private static void flushRepeats(@Nullable BufferedWriter writer) throws IOException {
         if (repeats > 0 && repeatKey != null) {
-            writer.write(repeatLastTime + " t=" + repeatLastTick + " REPEAT ×" + repeats + " more of the line above (until " + repeatLastTime + ")");
-            writer.newLine();
+            String text = "×" + repeats + " more of the line above (until " + repeatLastTime + ")";
+            if (writer != null) {
+                writer.write(repeatLastTime + " t=" + repeatLastTick + " REPEAT " + text);
+                writer.newLine();
+            }
+            RunLog.mirror(repeatLastTime, repeatLastTick, "REPEAT", text);
         }
         repeats = 0;
     }
