@@ -34,6 +34,13 @@ public final class PathFinder {
     private PathFinder() {
     }
 
+    /** A block that hurts the player inside its block space: cactus, berry bushes, fire, campfires, wither roses. */
+    public static boolean hurts(BlockState state) {
+        Block block = state.getBlock();
+        return block == Blocks.CACTUS || block == Blocks.SWEET_BERRY_BUSH || block == Blocks.FIRE || block == Blocks.SOUL_FIRE
+                || block == Blocks.CAMPFIRE || block == Blocks.SOUL_CAMPFIRE || block == Blocks.WITHER_ROSE;
+    }
+
     public interface Goal {
         boolean reached(BlockPos feet);
 

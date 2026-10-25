@@ -212,6 +212,7 @@ public class SpeedTuner {
             if (hotbar < 0 && main >= 0) {
                 change.minuteSwaps++;
             }
+            RunLog.hotbarSwitch(before, item);
             BuildLog.line("HOTBAR", "switch " + name(before) + " -> " + name(item) + " for " + pos.toShortString()
                     + " | from slot " + (inventory.getSelectedSlot() + 1) + " to "
                     + (hotbar >= 0 ? "hotbar slot " + (hotbar + 1) : main >= 0 ? "slot " + (main + 1) + " (not on the hotbar: swapped in)" : "nothing (not in the inventory)")
@@ -328,7 +329,7 @@ public class SpeedTuner {
                 s.right++;
                 s.inARow++;
                 BuildLog.line("PLACED", pick.pos().toShortString() + " " + AutoBuild.shortState(mc.level.getBlockState(pick.pos()))
-                        + " | " + how);
+                        + " | " + how + RunLog.clickInfo(pick.pos()));
                 // A wrong block now and then isn't always the speed (a block placed against one the server didn't
                 // have yet): after enough right blocks, the limit it set is lifted step by step
                 if (++s.sinceMistake >= FORGIVE_AFTER) {
@@ -349,7 +350,7 @@ public class SpeedTuner {
                 String where = outcome == Outcome.LANDED_NEXT ? "landed in a neighbouring spot instead" : "is "
                         + AutoBuild.shortState(mc.level.getBlockState(pick.pos())) + ", should be " + AutoBuild.shortState(schematic.getBlockState(pick.pos()));
                 BuildLog.line("WRONG", pick.pos().toShortString() + " " + where + " | " + how + " | "
-                        + AutoBuild.INSTANCE.inventory.describe(mc));
+                        + AutoBuild.INSTANCE.inventory.describe(mc) + RunLog.clickInfo(pick.pos()) + " cause=" + RunLog.cause(mc, pick.pos(), true));
                 // A block of another item than the one clicked with: the server had another item in the hand (the
                 // switch didn't get there), not a click too fast. The held slot is sent again, the speed stays (10
                 // observers for pistons slowed pistons down to interval 5, and it took 2.6 minutes to get back to 2)
@@ -384,7 +385,8 @@ public class SpeedTuner {
             case NOTHING -> {
                 s.nothing++;
                 BuildLog.line("NOCHANGE", pick.pos().toShortString() + " is still " + AutoBuild.shortState(mc.level.getBlockState(pick.pos()))
-                        + " (wants " + AutoBuild.shortState(schematic.getBlockState(pick.pos())) + ") | " + how);
+                        + " (wants " + AutoBuild.shortState(schematic.getBlockState(pick.pos())) + ") | " + how + RunLog.clickInfo(pick.pos())
+                        + " cause=" + RunLog.cause(mc, pick.pos(), false));
                 // Too fast can also mean the clicks don't get through at all: most of the last ones placed nothing
                 int missed = 0;
                 int known = Math.min(RECENT, s.recentCount);
@@ -536,6 +538,11 @@ public class SpeedTuner {
                         s.right = Integer.parseInt(parts[5]);
                         s.wrong = Integer.parseInt(parts[6]);
                         s.nothing = Integer.parseInt(parts[7]);
+                        // A floor of 3 with nothing ever wrong is the old lowest interval (0.14.3), not something learned:
+                        // the saved items started at 3 and waited 200 placements to go down to 2
+                        if (s.floor == 3 && s.wrong == 0 && MIN_INTERVAL < 3) {
+                            s.floor = MIN_INTERVAL;
+                        }
                     }
                 } else if (parts[1].equals("switch") && parts.length >= 7) {
                     Item from = item(parts[2]);

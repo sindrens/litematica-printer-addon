@@ -95,6 +95,7 @@ public class AutoBuild {
                     BuildLog.line("GIVEUP", pos.toShortString() + " for 30 s, clicked " + MAX_TRIES + " times without a change | "
                             + Diagnose.explain(mc, schematic, pos));
                 }
+                RunLog.gaveUp("clicked-" + MAX_TRIES + "-times-without-change");
                 // Built over already: the block above comes off for it (and goes back after)
                 unsealIfCovered(mc, pos, "clicked " + MAX_TRIES + " times without a change");
             } else {
@@ -422,8 +423,33 @@ public class AutoBuild {
         String why = pauseReasonNow();
         if (why != null) {
             pauseReason = why;
+            pausedAt = clientTicks;
         }
         return why != null;
+    }
+
+    /** When the printer was last paused (see pausedThisTick). */
+    private long pausedAt = -100;
+
+    /** Why the printer was paused this tick (or the last one), or null if it wasn't. */
+    @javax.annotation.Nullable
+    public String pausedThisTick() {
+        return clientTicks - pausedAt <= 1 ? pauseReason : null;
+    }
+
+    /** A trip for items goes on after its current part (see buyMissing). */
+    public boolean tripGoingOn() {
+        return tripGoesOn;
+    }
+
+    /** Money spent since the build started. */
+    public double spentTotal() {
+        return spentTotal;
+    }
+
+    /** Given up on for now (clicked again and again without a change). */
+    public boolean givenUpNow(net.minecraft.core.BlockPos pos) {
+        return givenUp(pos);
     }
 
     @javax.annotation.Nullable
@@ -468,6 +494,15 @@ public class AutoBuild {
         return pausedByOthers() ? "chest/shop/crafting/rails" : null;
     }
 
+    /**
+     * Something other than the printer's own pace holds it back now (the speed guard, a placement cap, an item swap,
+     * the server lagging, a chest or the shop, breaking): the mover doesn't learn the printer's speed from this time.
+     */
+    public boolean heldBackNow() {
+        String why = pauseReasonNow();
+        return why != null && !why.equals("flying") || ServerWatch.cap() > 0;
+    }
+
     private boolean pausedByOthers() {
         return breaker.isBusy() || eater.isBusy() || fluids.isBusy() || rails.isBusy() || entities.isBusy() || crafter.isBusy() || fetcher.isBusy()
                 || no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.isRunning() || no.sindrens.printeraddon.shop.ShopScanner.INSTANCE.isRunning();
@@ -493,6 +528,8 @@ public class AutoBuild {
 
     /** Of the printer's last offer: unfinished blocks in its range, and of those held back as just tried. */
     public int lastUnfinishedCount;
+    /** Of the printer's last offer: blocks left out as not ready yet (what they stand on isn't there, see PlacementOrder). */
+    public int lastNotReadyCount;
     public int lastHeldCount;
 
     /** What the printer reached on its last turn (its own list, its own measure of range), and when. */
@@ -555,6 +592,12 @@ public class AutoBuild {
         // Nor next to a block clicked a moment ago: the printer may click against that neighbour, and if the server
         // doesn't have it yet, the server puts the new block INTO the neighbour's spot (dirt where mud should go)
         long confirm = Math.max(3, 2L * ServerLag.pingTicks(mc) + 2);
+        // Not farther than clicks have been seen to work on this server (see ReachStats): clicks over 4 blocks from
+        // the eye placed nothing 3 to 4 times as often on the player's server, and each one is a turn lost
+        double printerRange = me.aleksilassila.litematica.printer.config.Configs.PRINTING_RANGE.getDoubleValue();
+        double learned = ReachStats.reach(printerRange);
+        double maxReachSq = learned < printerRange - 0.05 ? (learned + 0.25) * (learned + 0.25) : Double.MAX_VALUE;
+        net.minecraft.world.phys.Vec3 eyeNow = mc.player.getEyePosition();
         int unfinished = 0;
         int held = 0;
         // When the server answers each click (it does from 1.19 on): exactly until it has, else the fixed waits
@@ -568,6 +611,10 @@ public class AutoBuild {
                 continue;
             }
             unfinished++;
+            if (eyeNow.distanceToSqr(net.minecraft.world.phys.Vec3.atCenterOf(pos)) > maxReachSq) {
+                RunLog.hold(pos, "beyond-learned-reach");
+                continue;
+            }
             boolean waiting = acks ? ServerAcks.isWaiting(pos) : recentlyTried.containsKey(pos);
             boolean nextToWaiting = result == BlockCheck.Result.MISSING
                     && (acks ? ServerAcks.nextToWaiting(pos) : nextToUnconfirmed(pos, now, confirm));
@@ -578,6 +625,11 @@ public class AutoBuild {
                     && ServerAcks.unconfirmed(pos.below(), 3);
             if (waiting || givenUp(pos) || nextToWaiting || onUnconfirmed || heldForBelow(mc, schematic, pos) || itemSettling(mc, schematic, pos)) {
                 held++;
+                if (RunLog.isActive()) {
+                    RunLog.hold(pos, waiting ? "awaiting-answer" : givenUp(pos) ? "given-up" : nextToWaiting ? "next-to-unanswered"
+                            : onUnconfirmed ? "below-unconfirmed(" + pos.below().toShortString().replace(" ", "") + ")"
+                            : itemSettling(mc, schematic, pos) ? "item-settling" : "held-for-below");
+                }
                 continue;
             }
             forPrinter.add(pos);
@@ -588,6 +640,7 @@ public class AutoBuild {
         lastRawCount = all.size();
         java.util.List<net.minecraft.core.BlockPos> ordered = PlacementOrder.order(mc.level, schematic, forPrinter, mover.orderFrom(mc.player),
                 mc.player.getMainHandItem().isEmpty() ? null : mc.player.getMainHandItem().getItem(), mover.ticksLeftInReach(mc.player));
+        lastNotReadyCount = forPrinter.size() - ordered.size();
         if (!ordered.isEmpty()) {
             nextBlock = ordered.getFirst();
         }
@@ -947,6 +1000,12 @@ public class AutoBuild {
             // A pumpkin or melon a stem grew onto a spot of the farm: not the player's building
             return false;
         }
+        if (BlockBreaker.alwaysBreak(current)) {
+            // One of the "always break" blocks (a cactus flower grown where sand goes): not the player's building
+            // either; 12 of them were left alone as the player's, the sand never went in and the cactus under each
+            // stopped growing for good (a cactus grows only with nothing on top)
+            return false;
+        }
         if (conflicts.add(pos.immutable())) {
             fi.dy.masa.litematica.world.WorldSchematic schematic = SchematicHelper.world();
             String wanted = schematic != null ? LayerManager.blockName(schematic.getBlockState(pos)) : "?";
@@ -1178,6 +1237,19 @@ public class AutoBuild {
         if (!goesOn) {
             fetchedThisTrip = false;
             stockedThisTrip = false;
+            RunLog.supplyStart(mc, supplyTrigger(inventory, layerNeeds, buyWhenLeft, forLane, noBucket));
+        }
+
+        // Filling the vaults (see StockUp): one step a round (buy, put away...) until it's done, nothing else of the
+        // trip in between (it took what it had just put away straight back out); then the trip takes from the vaults
+        if (stock.isActive()) {
+            if (!stock.step(mc, this)) {
+                fetchedThisTrip = false;
+            }
+            tripGoesOn = true;
+            buyCooldown = 0;
+            mover.stop(mc);
+            return true;
         }
 
         InventoryBudget.Plan plan = InventoryBudget.plan(inventory, layerNeeds, neededWhole, cleaner.storable(inventory));
@@ -1275,21 +1347,19 @@ public class AutoBuild {
             return false;
         }
 
-        // The shop has to be used and the build needs much more than fits: whole inventories into the vaults first,
-        // one step a round (buy, put away, buy...); then the trip takes the inventory's share from the vaults
-        if (stock.isActive() || !stockedThisTrip && stock.start(mc, list, neededWhole, fetcher)) {
+        // The shop has to be used and the build needs much more than fits: one whole inventory of each into the vaults
+        // first, one step a round (make room, buy, put away, buy...); then the trip takes its share from the vaults
+        if (!stockedThisTrip && stock.start(mc, list, neededWhole, fetcher, layerNeeds.keySet())) {
             stockedThisTrip = true;
-            if (stock.step(mc, this)) {
-                tripGoesOn = true;
-                buyCooldown = 0;
-                mover.stop(mc);
-                return true;
+            if (!stock.step(mc, this)) {
+                fetchedThisTrip = false;
             }
-            fetchedThisTrip = false;
             tripGoesOn = true;
             buyCooldown = 0;
+            mover.stop(mc);
             return true;
         }
+        stockedThisTrip = true;
 
         // In the shop only what's worth a purchase: what's (nearly) used up, a stack or more, or the rest of the
         // layer; by whole stacks where that's about the same (a purchase by the stack is one click)
@@ -1390,6 +1460,26 @@ public class AutoBuild {
         }
         craftAfterBuying = java.util.List.of();
         return false;
+    }
+
+    /** What started a trip for items, for the log: "string 8 left", "the lane takes more sand", "no water bucket". */
+    private static String supplyTrigger(net.minecraft.world.entity.player.Inventory inventory, java.util.Map<net.minecraft.world.item.Item, Integer> needs,
+                                        int buyWhenLeft, java.util.Set<net.minecraft.world.item.Item> forLane, boolean noBucket) {
+        StringBuilder sb = new StringBuilder();
+        for (net.minecraft.world.item.Item item : needs.keySet()) {
+            int have = Tools.isMarker(item) ? Tools.count(item, inventory) : inventory.countItem(item);
+            if (have <= buyWhenLeft && have < needs.get(item) && !InventoryCleaner.isBucket(item)) {
+                sb.append(sb.length() == 0 ? "" : ", ").append(net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(item).getPath())
+                        .append(' ').append(have).append(" left");
+            }
+        }
+        if (sb.length() == 0 && !forLane.isEmpty()) {
+            sb.append("the lane takes more ").append(forLane.stream().map(i -> net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(i).getPath()).toList());
+        }
+        if (noBucket) {
+            sb.append(sb.length() == 0 ? "" : ", ").append("no water bucket");
+        }
+        return sb.length() == 0 ? "topping up" : sb.toString();
     }
 
     /** A purchase for StockUp, within the spending limit. False when nothing could be started. */
@@ -1584,6 +1674,7 @@ public class AutoBuild {
                 + " | player reach " + mc.player.blockInteractionRange() + " | ping " + ServerLag.pingTicks(mc) + " ticks"
                 + " | linked chests " + ChestLinks.list(mc).size() + " | vaults " + ChestFetcher.vaults());
         BuildLog.line("INVENTORY", BuildLog.inventory(mc.player));
+        RunLog.start(mc);
         int renderDistance = Configs.Generic.BUILD_RENDER_DISTANCE.getIntegerValue();
         if (renderDistance > 0 && mc.options.renderDistance().get() != renderDistance) {
             savedRenderDistance = mc.options.renderDistance().get();
@@ -1667,6 +1758,13 @@ public class AutoBuild {
     /** {@code mayPutAway}: stopped by the player or done, the building items go into storage (see putAway). */
     private void stop(Minecraft mc, String reason, boolean mayPutAway) {
         boolean wasRunning = running;
+        // Never left standing in a cactus: up and out of it first, whatever the reason for stopping (a stop for the
+        // damage it did left the player in it, taking more)
+        if (wasRunning && mc.player != null && mc.level != null && Mover.harmNear(mc.level, mc.player.position()) != null) {
+            escapeTicks = ESCAPE_TICKS;
+            BuildLog.line("SAFETY", "stopping next to " + LayerManager.blockName(mc.level.getBlockState(Mover.harmNear(mc.level, mc.player.position())))
+                    + ": flying up and out of it first");
+        }
         if (wasRunning) {
             speed.remember();
         }
@@ -1696,6 +1794,12 @@ public class AutoBuild {
                     : "disconnected: " + disconnectReason) + " (picks up again once back at the build)"
                     : "stopped by you";
             BuildLog.line("END", why + " | " + stats.total() + " | " + spendingLine());
+            if (reason == null && !resumeLater) {
+                RunLog.user("stop", "");
+            } else if (resumeLater) {
+                RunLog.event("disconnect", "reason=\"" + (disconnectReason.isEmpty() ? "left the build's world" : disconnectReason) + "\"");
+            }
+            RunLog.end(mc, reason != null ? reason : resumeLater ? "disconnected" : "stopped-by-you");
             disconnectReason = "";
             logIgnored(mc);
             BuildLog.line("PERF", Perf.report());
@@ -1989,7 +2093,37 @@ public class AutoBuild {
     @javax.annotation.Nullable
     private net.minecraft.client.multiplayer.ClientLevel builtIn;
 
+    /** Ticks left to get the player away from a cactus (or other block that hurts), see escapeFromHarm. */
+    private int escapeTicks;
+    private static final int ESCAPE_TICKS = 80;
+
+    /**
+     * Straight up while the body touches a block that hurts, until it's clear (at most 4 s); flying is switched on
+     * for it when allowed. Runs whether auto build runs or not.
+     */
+    private void escapeFromHarm(Minecraft mc) {
+        if (escapeTicks <= 0 || mc.player == null || mc.level == null) {
+            escapeTicks = 0;
+            return;
+        }
+        escapeTicks--;
+        net.minecraft.client.player.LocalPlayer player = mc.player;
+        if (Mover.harmNear(mc.level, player.position()) == null) {
+            escapeTicks = 0;
+            BuildLog.lineOrKeep("SAFETY", String.format(java.util.Locale.ROOT, "clear of it now at %.1f %.1f %.1f (health %.1f)",
+                    player.getX(), player.getY(), player.getZ(), player.getHealth()));
+            player.setDeltaMovement(0, 0, 0);
+            return;
+        }
+        if (!player.getAbilities().flying && player.getAbilities().mayfly) {
+            player.getAbilities().flying = true;
+            player.onUpdateAbilities();
+        }
+        player.setDeltaMovement(0, 0.42, 0);
+    }
+
     public void tick(Minecraft mc) {
+        escapeFromHarm(mc);
         if (running && mc.level != builtIn) {
             if (builtIn != null) {
                 // Moved to another world (another server of the network): stop, then go back (see Resume)
@@ -2062,6 +2196,10 @@ public class AutoBuild {
                 stop(mc, reason);
                 return;
             }
+            if (safety.hurtByPlant()) {
+                // Hurt by a cactus while building: up and out of it right away (building goes on from there)
+                escapeTicks = Math.max(escapeTicks, 20);
+            }
         }
 
         if (manualTask != ManualTask.NONE) {
@@ -2080,6 +2218,7 @@ public class AutoBuild {
 
         PrinterBridge.applySettings(mc.player);
         stats.tick(activity());
+        RunLog.tick(mc);
         // Nothing placed for a moment: the head turns back to where the camera looks, smoothly
         if (PrinterBridge.isIdle() && clientTicks - lastQueuedTick > 8 && !breaker.isBusy() && !fluids.isBusy()
                 && !rails.isBusy() && !entities.isBusy() && !airPlace.isActive()) {

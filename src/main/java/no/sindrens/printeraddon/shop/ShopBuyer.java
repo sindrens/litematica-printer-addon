@@ -1106,6 +1106,8 @@ public class ShopBuyer {
         no.sindrens.printeraddon.build.BuildLog.line("SHOP", String.format(java.util.Locale.ROOT,
                 "%d %s in %.1f s: %d clicks, the shop opened %d time%s, %d ticks between clicks at least",
                 order.got, order.location.name, (ticks - timedSince) / 20.0, timedClicks, timedOpens, timedOpens == 1 ? "" : "s", clickDelay()));
+        no.sindrens.printeraddon.build.RunLog.purchase(order.item, order.got,
+                order.got * order.location.buyPrice / Math.max(1, order.location.amountShown), timedClicks, ticks - timedSince);
         timedOrder = null;
     }
 

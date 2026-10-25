@@ -282,6 +282,11 @@ public class BlockBreaker {
             if (!shouldBreak(result, mode, pos)) {
                 continue;
             }
+            // A cactus grown where the schematic has air, with a block of the layer still to go in beside it: it
+            // breaks by itself once that's placed (breaking it takes 3 s while flying, 5 times slower than standing)
+            if (result == BlockCheck.Result.EXTRA && popsByItself(mc.level, schematic, pos)) {
+                continue;
+            }
 
             BlockPos immutable = pos.immutable();
             BlockState state = mc.level.getBlockState(pos);
@@ -301,7 +306,42 @@ public class BlockBreaker {
             bestDistance = distance;
         }
 
+        // A column of cactus to go: its lowest one, and the ones above it break by themselves (one break of 3 s instead
+        // of one for each)
+        if (best != null && mc.level.getBlockState(best).is(net.minecraft.world.level.block.Blocks.CACTUS)) {
+            BlockPos low = best;
+            while (mc.level.getBlockState(low.below()).is(net.minecraft.world.level.block.Blocks.CACTUS)
+                    && eye.distanceToSqr(Vec3.atCenterOf(low.below())) <= range * range
+                    && SchematicHelper.isInAnyArea(areas, low.below()) && !failed.containsKey(low.below())
+                    && shouldBreak(BlockCheck.check(mc.level, schematic, low.below()), mode, low.below())) {
+                low = low.below();
+            }
+            best = low;
+        }
         return best;
+    }
+
+    /**
+     * A cactus that will break by itself: beside it the schematic has a solid block of the layers being built that's
+     * still missing (a cactus can't stand next to one, it drops as soon as that's placed).
+     */
+    private static boolean popsByItself(net.minecraft.world.level.Level level, WorldSchematic schematic, BlockPos pos) {
+        if (!level.getBlockState(pos).is(net.minecraft.world.level.block.Blocks.CACTUS)) {
+            return false;
+        }
+        LayerManager layers = AutoBuild.INSTANCE.layers;
+        if (!layers.isActive() || pos.getY() < layers.getLayer() || pos.getY() > layers.getLayerTop()) {
+            return false;
+        }
+        for (Direction direction : Direction.Plane.HORIZONTAL) {
+            BlockPos side = pos.relative(direction);
+            BlockState wanted = schematic.getBlockState(side);
+            if (!wanted.isAir() && wanted.isSolid() && level.getBlockState(side).canBeReplaced()
+                    && BlockCheck.check(level, schematic, side) == BlockCheck.Result.MISSING) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static double range(LocalPlayer player) {

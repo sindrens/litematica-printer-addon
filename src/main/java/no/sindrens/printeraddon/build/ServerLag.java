@@ -50,6 +50,11 @@ public final class ServerLag {
         return tps;
     }
 
+    /** Ticks since the server's last time update (they come every second while it runs); 0 before the first. */
+    public static int ticksSinceTimeUpdate() {
+        return lastGameTime < 0 ? 0 : (int) Math.min(Integer.MAX_VALUE, (System.nanoTime() - lastNanos) / 50_000_000L);
+    }
+
     /** True while placing should wait for the server. */
     public static boolean shouldWait(Minecraft mc) {
         int below = Configs.Speed.LAG_PAUSE_TPS.getIntegerValue();

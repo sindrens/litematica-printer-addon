@@ -572,6 +572,7 @@ public class LayerManager {
 
             Chat.info(describeLayers() + " done.");
             AutoBuild.INSTANCE.stats.layerDone(describeLayers());
+            RunLog.layerEnd(describeLayers());
             AutoBuild.INSTANCE.speed.newLayer();
             for (int y = layer; y <= layerTop; y++) {
                 doneLayers.add(y);
@@ -715,6 +716,7 @@ public class LayerManager {
             Chat.info("\u00a7aBuild finished!");
             Chat.announce("Build finished", "everything in the schematic is placed", true);
             AutoBuild.INSTANCE.stats.layerDone("Last blocks");
+            RunLog.layerEnd("Last blocks");
             Chat.info(AutoBuild.INSTANCE.stats.total());
             reportUnfinished(mc, schematic);
             finished(mc);
@@ -746,6 +748,7 @@ public class LayerManager {
             AutoBuild.INSTANCE.deferred.removeAll(left);
             AutoBuild.INSTANCE.couldNotPlace.addAll(left);
             AutoBuild.INSTANCE.stats.layerDone("Last blocks");
+            RunLog.layerEnd("Last blocks");
             Chat.info(AutoBuild.INSTANCE.stats.total());
             Chat.warn("Build done, except " + left.size() + " block" + (left.size() == 1 ? "" : "s")
                     + " that couldn't be placed (listed below).");
@@ -855,6 +858,7 @@ public class LayerManager {
                 + " block" + (left.size() == 1 ? "" : "s") + " left on " + before + " are done at the end)") + ".");
         BuildLog.line("LAYER", "changed by hand from " + before + " to " + now + "; " + left.size() + " unfinished blocks of "
                 + before + " wait until the end");
+        RunLog.user("layer-changed", "from=\"" + before + "\" to=\"" + now + "\" leftForTheEnd=" + left.size());
     }
 
     /** Adds the unfinished blocks of one layer (those that are loaded) to the list. */

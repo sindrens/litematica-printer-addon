@@ -34,6 +34,9 @@ public final class ServerAcks {
     private static int minuteAnswers;
     private static long minuteTicks;
     private static long minuteMax;
+    private static int dropped;
+    /** How long the server took on the last click on each spot (ticks, kept like answeredAt). */
+    private static final Map<BlockPos, Integer> answerTook = new HashMap<>();
 
     private ServerAcks() {
     }
@@ -41,6 +44,8 @@ public final class ServerAcks {
     public static void reset() {
         waiting.clear();
         answeredAt.clear();
+        answerTook.clear();
+        dropped = 0;
         lastTried = null;
         sent = 0;
         answered = 0;
@@ -72,6 +77,7 @@ public final class ServerAcks {
         long now = AutoBuild.clientTicks;
         if (answeredAt.size() > 512) {
             answeredAt.values().removeIf(at -> now - at > TIMEOUT);
+            answerTook.keySet().retainAll(answeredAt.keySet());
         }
         for (Iterator<Map.Entry<BlockPos, Click>> it = waiting.entrySet().iterator(); it.hasNext(); ) {
             Map.Entry<BlockPos, Click> entry = it.next();
@@ -79,6 +85,7 @@ public final class ServerAcks {
             if (click.sequence() <= sequence) {
                 answeredAt.put(entry.getKey(), now);
                 long took = now - click.tick();
+                answerTook.put(entry.getKey(), (int) Math.min(Integer.MAX_VALUE, took));
                 minuteAnswers++;
                 minuteTicks += took;
                 minuteMax = Math.max(minuteMax, took);
@@ -106,6 +113,39 @@ public final class ServerAcks {
     /** Clicks still without an answer. */
     public static int waitingCount() {
         return waiting.size();
+    }
+
+    /**
+     * Forgets the clicks without an answer for this long (ticks): the server dropped them while it went on answering
+     * the others. Returns their spots, oldest first.
+     */
+    public static java.util.List<BlockPos> dropOlderThan(int ticks) {
+        long now = AutoBuild.clientTicks;
+        java.util.List<Map.Entry<BlockPos, Click>> old = new java.util.ArrayList<>();
+        for (Map.Entry<BlockPos, Click> entry : waiting.entrySet()) {
+            if (now - entry.getValue().tick() >= ticks) {
+                old.add(entry);
+            }
+        }
+        old.sort(java.util.Comparator.comparingLong(e -> e.getValue().tick()));
+        java.util.List<BlockPos> spots = new java.util.ArrayList<>(old.size());
+        for (Map.Entry<BlockPos, Click> entry : old) {
+            waiting.remove(entry.getKey());
+            spots.add(entry.getKey());
+        }
+        dropped += spots.size();
+        return spots;
+    }
+
+    /** Clicks the server never answered (dropped), since the start. */
+    public static int droppedCount() {
+        return dropped;
+    }
+
+    /** How long (ticks) the server took to answer the last click on this spot, or -1 if unknown. */
+    public static int answerTicks(BlockPos pos) {
+        Integer took = answerTook.get(pos);
+        return took == null ? -1 : took;
     }
 
     /** The server answers (or it's too early to tell). */

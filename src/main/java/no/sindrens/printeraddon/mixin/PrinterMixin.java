@@ -41,6 +41,7 @@ public class PrinterMixin {
             if (AutoBuild.INSTANCE.isRunning()) {
                 AutoBuild.INSTANCE.stats.placed();
                 no.sindrens.printeraddon.build.ServerWatch.onPlaced();
+                no.sindrens.printeraddon.build.RunLog.placedItem(AutoBuild.INSTANCE.lastTriedItem);
             }
         }
         // Each free turn, exactly what happened: placed, or why not (from what it was offered in this very turn)

@@ -43,9 +43,9 @@ public class ChestFetcher {
      * What a vault or chest has is trusted this long (only the add-on changes it during a build: any other menu is
      * closed): one that's known not to have what's wanted isn't opened (it was, three times in a log, for nothing).
      */
-    private static final long KNOWN_FOR = 20 * 60 * 10;
+    private static final long KNOWN_FOR = 20 * 60 * 30;
 
-    private enum Phase { GO, OPEN, TAKE, CLOSE }
+    private enum Phase { GO, OPEN, TAKE, VERIFY, CLOSE }
 
     /** A linked container (pos) or a vault (number, opened with the vault command). */
     private record Spot(@Nullable BlockPos pos, int vault) {
@@ -54,7 +54,11 @@ public class ChestFetcher {
         }
     }
 
-    private record Known(Map<Item, Integer> contents, long at) {
+    /** What a spot had when last open; {@code remembered}: from the file, from an earlier session (visited again once). */
+    private record Known(Map<Item, Integer> contents, long at, boolean remembered) {
+        Known(Map<Item, Integer> contents, long at) {
+            this(contents, at, false);
+        }
     }
 
     private final Map<Spot, Known> known = new HashMap<>();
@@ -77,6 +81,11 @@ public class ChestFetcher {
     /** Small stacks were put together in this spot's menu already; ticks left to wait for the server's answer. */
     private boolean mergedHere;
     private int mergeWait;
+    /** The inventory's counts before this spot's clicks, and what the clicks were to take (+) or put away (-). */
+    private final Map<Item, Integer> countsBefore = new HashMap<>();
+    private final Map<Item, Integer> clicked = new HashMap<>();
+    /** What a clicked tool was wanted as (a hoe as "a hoe"), to ask for it again if the click didn't go through. */
+    private final Map<Item, Item> wantedAs = new HashMap<>();
 
     /** A job (fetching or storing) runs, until its end is written down (see tick). */
     private boolean active;
@@ -87,6 +96,7 @@ public class ChestFetcher {
 
     public void reset() {
         known.clear();
+        loadRemembered();
         wanted.clear();
         storing.clear();
         toVisit.clear();
@@ -223,6 +233,22 @@ public class ChestFetcher {
         return storing.entrySet().stream().anyMatch(e -> stacks.getOrDefault(e.getKey(), 0) > e.getValue());
     }
 
+    /** How many of each item the inventory has. */
+    private static Map<Item, Integer> counts(Inventory inventory) {
+        Map<Item, Integer> counts = new HashMap<>();
+        for (int slot = 0; slot < Inventory.INVENTORY_SIZE; slot++) {
+            ItemStack stack = inventory.getItem(slot);
+            if (!stack.isEmpty()) {
+                counts.merge(stack.getItem(), stack.getCount(), Integer::sum);
+            }
+        }
+        return counts;
+    }
+
+    private static String name(Item item) {
+        return new ItemStack(item).getHoverName().getString();
+    }
+
     /** Stacks per item that may be put away (ordinary ones, never buckets). */
     private static Map<Item, Integer> stacks(Inventory inventory) {
         Map<Item, Integer> stacks = new HashMap<>();
@@ -257,7 +283,8 @@ public class ChestFetcher {
         List<Spot> unknown = new ArrayList<>();
         for (Spot spot : spots(mc)) {
             Known k = known.get(spot);
-            if (k == null) {
+            // Remembered from an earlier session: the player may have changed it since, so it's looked in once
+            if (k == null || k.remembered()) {
                 unknown.add(spot);
             } else if (wanted.keySet().stream().anyMatch(item -> k.contents().getOrDefault(item, 0) > 0)) {
                 toVisit.add(spot);
@@ -425,6 +452,10 @@ public class ChestFetcher {
                     }
                     StackMerge.checkNow(player.getInventory());
                 }
+                countsBefore.clear();
+                clicked.clear();
+                wantedAs.clear();
+                countsBefore.putAll(counts(player.getInventory()));
                 if (!storing.isEmpty()) {
                     Map<Item, Integer> stacks = stacks(player.getInventory());
                     for (Slot slot : menu.slots) {
@@ -439,6 +470,7 @@ public class ChestFetcher {
                                 && InventoryCleaner.ordinary(stack) && !InventoryCleaner.isBucket(stack.getItem());
                         if (store || storeWorn && Tools.wornSpecial(stack)) {
                             taken += stack.getCount();
+                            clicked.merge(stack.getItem(), -stack.getCount(), Integer::sum);
                             stacks.merge(stack.getItem(), -1, Integer::sum);
                             mc.gameMode.handleContainerInput(menu.containerId, slot.index, 0, ContainerInput.QUICK_MOVE, player);
                         }
@@ -452,8 +484,10 @@ public class ChestFetcher {
                     }
                     known.put(current, new Known(after, AutoBuild.clientTicks));
                     noteFill(menu);
+                    saveRemembered();
                     BuildLog.lineOrKeep("STORAGE", current.name() + ": put away, " + taken + " items so far" + fillText(current));
-                    phase = Phase.CLOSE;
+                    phase = clicked.isEmpty() ? Phase.CLOSE : Phase.VERIFY;
+                    waited = 0;
                     return true;
                 }
                 // A hoe is a hoe (a pickaxe a pickaxe...): of each kind wanted, the best plain one here (diamond
@@ -498,13 +532,60 @@ public class ChestFetcher {
                         wanted.put(key, want - count);
                         contents.merge(item, -count, Integer::sum);
                         taken += count;
+                        clicked.merge(item, count, Integer::sum);
+                        wantedAs.put(item, key);
                     }
                 }
                 known.put(current, new Known(contents, AutoBuild.clientTicks));
                 noteFill(menu);
+                saveRemembered();
                 PrinterAddon.debug("{}: took what was wanted, {} left wanted", current.name(), wanted);
                 BuildLog.line("STORAGE", current.name() + ": " + taken + " taken so far | still wanted " + describe(wanted)
                         + " | left in it " + describe(contents) + fillText(current));
+                phase = clicked.isEmpty() ? Phase.CLOSE : Phase.VERIFY;
+                waited = 0;
+            }
+            case VERIFY -> {
+                // The server's answer to the clicks first: a stone hoe "taken" from a vault was still in it (the click
+                // didn't go through), and a new one was bought and crafted
+                if (waited < 3 + 2 * ServerLag.pingTicks(mc) && player.containerMenu != player.inventoryMenu) {
+                    return true;
+                }
+                Map<Item, Integer> now = counts(player.getInventory());
+                for (Map.Entry<Item, Integer> entry : clicked.entrySet()) {
+                    Item item = entry.getKey();
+                    int expected = countsBefore.getOrDefault(item, 0) + entry.getValue();
+                    int actual = now.getOrDefault(item, 0);
+                    int missed = entry.getValue() > 0 ? expected - actual : actual - expected;
+                    if (missed <= 0) {
+                        continue;
+                    }
+                    taken -= missed;
+                    if (entry.getValue() > 0) {
+                        // Not taken after all: still wanted (from another spot, or bought), and still in this one
+                        wanted.merge(wantedAs.getOrDefault(item, item), missed, Integer::sum);
+                        BuildLog.line("STORAGE", current.name() + ": the server didn't hand over " + missed + " " + name(item)
+                                + " (the click didn't go through): still wanted");
+                    } else {
+                        Fill f = fill.get(current);
+                        BuildLog.line("STORAGE", current.name() + (f != null && f.used() >= f.total()
+                                ? " is full: " + missed + " " + name(item) + " stay in the inventory, for the next one"
+                                : ": the server didn't take " + missed + " " + name(item) + " (the click didn't go through): still in the inventory"));
+                    }
+                }
+                // The spot as the server has it now
+                AbstractContainerMenu menu = player.containerMenu;
+                if (menu != player.inventoryMenu) {
+                    Map<Item, Integer> contents = new HashMap<>();
+                    for (Slot slot : menu.slots) {
+                        if (!(slot.container instanceof Inventory) && !slot.getItem().isEmpty()) {
+                            contents.merge(slot.getItem().getItem(), slot.getItem().getCount(), Integer::sum);
+                        }
+                    }
+                    known.put(current, new Known(contents, AutoBuild.clientTicks));
+                    noteFill(menu);
+                    saveRemembered();
+                }
                 phase = Phase.CLOSE;
             }
             case CLOSE -> {
@@ -516,6 +597,121 @@ public class ChestFetcher {
             }
         }
         return true;
+    }
+
+    // Remembered per server: config/printer_addon/storage.txt, one line per vault or linked chest:
+    //   <server>|pv:<n> or chest:<x>,<y>,<z>|<saved at, ms>|<slots used>/<slots>|<item>=<count>,...
+    // so a new session knows what's in storage before opening anything (it still looks in each once, the player may
+    // have changed it since)
+
+    private static java.nio.file.Path storageFile() {
+        return fi.dy.masa.malilib.util.FileUtils.getConfigDirectory().resolve(PrinterAddon.MOD_ID).resolve("storage.txt");
+    }
+
+    private static String spotKey(Spot spot) {
+        return spot.pos() == null ? "pv:" + spot.vault() : "chest:" + spot.pos().getX() + "," + spot.pos().getY() + "," + spot.pos().getZ();
+    }
+
+    @Nullable
+    private static Spot spotOf(String key) {
+        try {
+            if (key.startsWith("pv:")) {
+                return new Spot(null, Integer.parseInt(key.substring(3)));
+            }
+            if (key.startsWith("chest:")) {
+                String[] xyz = key.substring(6).split(",");
+                return new Spot(new BlockPos(Integer.parseInt(xyz[0]), Integer.parseInt(xyz[1]), Integer.parseInt(xyz[2])), 0);
+            }
+        } catch (RuntimeException e) {
+            PrinterAddon.debug("Storage file: bad spot '{}'", key);
+        }
+        return null;
+    }
+
+    private void loadRemembered() {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null) {
+            return;
+        }
+        try {
+            if (!java.nio.file.Files.isRegularFile(storageFile())) {
+                return;
+            }
+            String server = no.sindrens.printeraddon.util.ServerName.current(mc);
+            StringBuilder said = new StringBuilder();
+            long oldest = 0;
+            for (String line : java.nio.file.Files.readAllLines(storageFile())) {
+                String[] parts = line.split("\\|", -1);
+                if (parts.length < 5 || !parts[0].equals(server)) {
+                    continue;
+                }
+                Spot spot = spotOf(parts[1]);
+                if (spot == null) {
+                    continue;
+                }
+                Map<Item, Integer> contents = new HashMap<>();
+                for (String entry : parts[4].split(",")) {
+                    int eq = entry.lastIndexOf('=');
+                    if (eq <= 0) {
+                        continue;
+                    }
+                    net.minecraft.resources.Identifier id = net.minecraft.resources.Identifier.tryParse(entry.substring(0, eq));
+                    if (id == null) {
+                        continue;
+                    }
+                    var item = net.minecraft.core.registries.BuiltInRegistries.ITEM.getOptional(id);
+                    if (item.isPresent()) {
+                        contents.merge(item.get(), Integer.parseInt(entry.substring(eq + 1)), Integer::sum);
+                    }
+                }
+                known.put(spot, new Known(contents, AutoBuild.clientTicks, true));
+                String[] fillParts = parts[3].split("/");
+                if (fillParts.length == 2) {
+                    fill.put(spot, new Fill(Integer.parseInt(fillParts[0]), Integer.parseInt(fillParts[1])));
+                }
+                oldest = Math.max(oldest, System.currentTimeMillis() - Long.parseLong(parts[2]));
+                said.append(said.length() == 0 ? "" : "; ").append(spot.name()).append(": ").append(parts[3]).append(" slots, ")
+                        .append(contents.isEmpty() ? "empty" : describe(contents));
+            }
+            if (said.length() > 0) {
+                BuildLog.line("STORAGE", "remembered from the last time (up to " + (oldest / 60000) + " min old, each looked in once): " + said);
+            }
+        } catch (Exception e) {
+            PrinterAddon.LOGGER.warn("Couldn't read what was in storage", e);
+        }
+    }
+
+    private void saveRemembered() {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null) {
+            return;
+        }
+        try {
+            String server = no.sindrens.printeraddon.util.ServerName.current(mc);
+            List<String> lines = new ArrayList<>();
+            if (java.nio.file.Files.isRegularFile(storageFile())) {
+                for (String line : java.nio.file.Files.readAllLines(storageFile())) {
+                    if (!line.startsWith(server + "|")) {
+                        lines.add(line);
+                    }
+                }
+            }
+            long now = System.currentTimeMillis();
+            for (Map.Entry<Spot, Known> entry : known.entrySet()) {
+                Fill f = fill.get(entry.getKey());
+                StringBuilder items = new StringBuilder();
+                entry.getValue().contents().forEach((item, count) -> {
+                    if (count > 0) {
+                        items.append(items.length() == 0 ? "" : ",").append(net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(item)).append('=').append(count);
+                    }
+                });
+                lines.add(server + "|" + spotKey(entry.getKey()) + "|" + now + "|" + (f == null ? "0/0" : f.used() + "/" + f.total()) + "|" + items);
+            }
+            java.nio.file.Files.createDirectories(storageFile().getParent());
+            java.nio.file.Files.write(storageFile(), lines);
+        } catch (Exception e) {
+            PrinterAddon.debug("Couldn't save what's in storage: {}", e.toString());
+        }
     }
 
     /** How full the open vault or chest is now (after the clicks: the client shows them at once). */

@@ -35,6 +35,10 @@ public class InteractActionMixin {
     @Unique
     private static float printer_addon$pitchO;
 
+    /** The sequence number before the click: its first packet ("use item on") goes out with the next one. */
+    @Unique
+    private static int printer_addon$sequenceBefore = -1;
+
     @Unique
     private static boolean printer_addon$sneaked;
     @Unique
@@ -44,7 +48,13 @@ public class InteractActionMixin {
     private void printer_addon$beforeClick(Minecraft client, LocalPlayer player, InteractionHand hand, BlockHitResult hit, CallbackInfo ci) {
         // An error in the add-on's part stops auto build and goes into the build log; the click and the game go on
         try {
+            printer_addon$sequenceBefore = Configs.enabled() && client.level != null
+                    ? ((ClientLevelAccessor) client.level).printer_addon$predictions().currentSequence() : -1;
             printer_addon$faceForClick(client, player, hand, hit, ci);
+            if (!ci.isCancelled() && Configs.enabled()) {
+                // The click's side, spot, the head's turn and the speed, for the line with its result (see RunLog)
+                no.sindrens.printeraddon.build.RunLog.click(client, hit.getBlockPos(), hit.getDirection(), hit.getLocation());
+            }
         } catch (RuntimeException | LinkageError e) {
             no.sindrens.printeraddon.build.AutoBuild.INSTANCE.error("the printer's click", e);
         }
@@ -173,9 +183,12 @@ public class InteractActionMixin {
 
     @Unique
     private void printer_addon$lookBack(Minecraft client, LocalPlayer player, InteractionHand hand, BlockHitResult hit, CallbackInfo ci) {
-        if (Configs.enabled() && client.level != null) {
-            // The click went out with this sequence number: the server answers it when it's done (see ServerAcks)
-            no.sindrens.printeraddon.build.ServerAcks.clicked(((ClientLevelAccessor) client.level).printer_addon$predictions().currentSequence());
+        if (Configs.enabled() && client.level != null && printer_addon$sequenceBefore >= 0
+                && ((ClientLevelAccessor) client.level).printer_addon$predictions().currentSequence() > printer_addon$sequenceBefore) {
+            // The click's first packet ("use item on") places the block, and the server answers it when it's done (see
+            // ServerAcks). Not the second one ("use item"): the player's server left that one unanswered at times, and
+            // with no click after it (a trip to the vaults next) placing waited 5 to 15 s for an answer that never came
+            no.sindrens.printeraddon.build.ServerAcks.clicked(printer_addon$sequenceBefore + 1);
         }
         if (printer_addon$sneaked) {
             // Back to what the keyboard says

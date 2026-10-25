@@ -315,6 +315,57 @@ public class Mover {
         }
     }
 
+    /** Room kept between the player's body and a cactus or berry bush: sideways, and below the feet. */
+    private static final double HARM_SIDE = 0.15;
+    private static final double HARM_BELOW = 0.2;
+    private long lastHarmNote = -1000;
+
+    /**
+     * The body about to touch a cactus (or a berry bush, fire...) next tick: up and over it instead. The game hurts
+     * the player as soon as the body is in the cactus's block, and the flights ran with the feet right on top of the
+     * layer: a cactus grown one block where its sand was still missing was brushed 6 times in a log (Y 96 to 97).
+     */
+    private void keepClearOfHarm(net.minecraft.world.level.Level level, LocalPlayer player) {
+        Vec3 motion = player.getDeltaMovement();
+        Vec3 next = player.position().add(motion);
+        BlockPos harm = harmNear(level, next);
+        if (harm == null) {
+            return;
+        }
+        player.setDeltaMovement(motion.x * 0.6, Math.max(motion.y, 0.2), motion.z * 0.6);
+        velocity = new Vec3(velocity.x * 0.6, Math.max(velocity.y, 0.2), velocity.z * 0.6);
+        if (tick - lastHarmNote > 40) {
+            lastHarmNote = tick;
+            BuildLog.line("SAFETY", "harm=" + level.getBlockState(harm).getBlock().toString().replace("Block{minecraft:", "").replace("}", "")
+                    + " at=" + harm.toShortString() + " feet=" + String.format(java.util.Locale.ROOT, "%.2f", player.getY())
+                    + ": rising over it");
+        }
+    }
+
+    /** A block that hurts (cactus, berry bush, fire...) where the player's body at these feet would touch it, or null. */
+    @Nullable
+    static BlockPos harmNear(net.minecraft.world.level.Level level, Vec3 feet) {
+        double half = 0.3 + HARM_SIDE;
+        int minX = (int) Math.floor(feet.x - half);
+        int maxX = (int) Math.floor(feet.x + half);
+        int minY = (int) Math.floor(feet.y - HARM_BELOW);
+        int maxY = (int) Math.floor(feet.y + 1.8);
+        int minZ = (int) Math.floor(feet.z - half);
+        int maxZ = (int) Math.floor(feet.z + half);
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        for (int x = minX; x <= maxX; x++) {
+            for (int y = minY; y <= maxY; y++) {
+                for (int z = minZ; z <= maxZ; z++) {
+                    pos.set(x, y, z);
+                    if (PathFinder.hurts(level.getBlockState(pos))) {
+                        return pos.immutable();
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
     /** Speeds up or slows down towards this motion, at most ACCEL a tick. */
     private void steer(LocalPlayer player, Vec3 wanted) {
         Vec3 change = wanted.subtract(velocity);
@@ -465,6 +516,7 @@ public class Mover {
         if (mc.player != null && (state != State.IDLE || velocity.lengthSqr() > 1.0e-6)) {
             halt(mc.player);
         }
+        RunLog.tripEnd(mc, "stopped");
         velocity = Vec3.ZERO;
         state = State.IDLE;
         path = null;
@@ -478,6 +530,9 @@ public class Mover {
 
     public void tick(Minecraft mc) {
         tickNow(mc);
+        if (mc.player != null && mc.level != null && flying(mc.player)) {
+            keepClearOfHarm(mc.level, mc.player);
+        }
         // Every change of what the player is doing, in the build log
         if (BuildLog.isOpen() && mc.player != null && (state != loggedState || !java.util.Objects.equals(target, loggedTarget))) {
             BuildLog.line("STATE", (loggedState == null ? "-" : loggedState) + " -> " + state
@@ -692,6 +747,7 @@ public class Mover {
         if (!inReach.isEmpty()) {
             if (state == State.WALKING) {
                 halt(player);
+                RunLog.tripEnd(mc, "arrived");
                 if (moveStartTick >= 0) {
                     BuildLog.line("MOVE", String.format("arrived at %s after %.1f s, %.1f blocks from %s; %d placeable in reach",
                             player.blockPosition().toShortString(), (tick - moveStartTick) / 20.0,
@@ -799,6 +855,10 @@ public class Mover {
     private static final int LANE_TALL = 3;
     /** How much further away a lane part counts when something tall stands between it and the player. */
     private static final double OVER_WALL = 30;
+    /** The next lane in order is taken when it's at most this much farther than the nearest. */
+    private static final double IN_ORDER_SLACK = 12;
+    /** Which way the sweep goes over the lanes (+1: to higher lane numbers). */
+    private int sweepDirection = 1;
     /** The lane being flown: its start and end (blocks of the layer); first flying to its start. */
     @Nullable
     private BlockPos laneStart;
@@ -905,6 +965,7 @@ public class Mover {
                 state = State.IDLE;
                 BuildLog.line("SWEEP", "all lanes of " + layers.describeLayers() + " flown; " + work.size()
                         + " blocks left for spot by spot");
+                RunLog.lanesDone(work.size());
                 return false;
             }
         }
@@ -1034,6 +1095,7 @@ public class Mover {
         }
         lanes = centers;
         laneIndex = -1;
+        sweepDirection = 1;
         laneEnd = null;
         BuildLog.line("SWEEP", String.format(java.util.Locale.ROOT, "%s in %d %s lanes %d wide, for %d blocks%s%s (reach %.2f, %.2f above the blocks, %.2f sideways)",
                 layer, centers.size(), lanesAlongX ? "east-west" : "north-south", width, blocks,
@@ -1083,6 +1145,21 @@ public class Mover {
                 best = part;
             }
         }
+        // The lane beside the one just flown, the way the sweep goes, unless another is much nearer: lane 4 was taken
+        // before lane 3 (lane 3's end was 1 block farther), and lane 3 was flown later from the other side
+        if (laneIndex >= 0) {
+            LanePart inOrder = null;
+            for (LanePart part : parts) {
+                if (part.index() == laneIndex + sweepDirection
+                        && (inOrder == null || partDistance(at, part) < partDistance(at, inOrder))) {
+                    inOrder = part;
+                }
+            }
+            if (inOrder != null && inOrder != best
+                    && partDistance(at, inOrder) + (overWall(player, inOrder) ? OVER_WALL : 0) <= nearest + IN_ORDER_SLACK) {
+                best = inOrder;
+            }
+        }
         // The layer's first lane: the edge nearest the player, then across in order. From the middle it swept to one
         // edge and flew back over the half it had done for the other (lane 11 down to 1, then back to 12)
         if (laneIndex < 0 && parts.size() > 1) {
@@ -1097,6 +1174,7 @@ public class Mover {
                 }
             }
             LanePart edge = partDistance(at, low) <= partDistance(at, high) ? low : high;
+            sweepDirection = edge == low ? 1 : -1;
             if (edge != best) {
                 BuildLog.line("SWEEP", "starting at the edge nearest the player: lane " + (edge.index() + 1) + " (lane "
                         + (best.index() + 1) + " was nearest, in the middle)");
@@ -1106,6 +1184,17 @@ public class Mover {
         laneIndex = best.index();
         int c = best.c();
         flownParts.computeIfAbsent(c, k -> new ArrayList<>()).add(new int[]{best.lo(), best.hi()});
+        // The lane's blocks, for the run log's summary at its end (what it left, and why)
+        if (RunLog.isActive()) {
+            List<BlockPos> laneBlocks = new ArrayList<>();
+            for (BlockPos pos : work) {
+                int along = lanesAlongX ? pos.getX() : pos.getZ();
+                if (inLayers(pos) && laneOf(lanesAlongX ? pos.getZ() : pos.getX()) == c && along >= best.lo() && along <= best.hi()) {
+                    laneBlocks.add(pos);
+                }
+            }
+            RunLog.laneStart((laneIndex + 1) + "/" + lanes.size(), laneBlocks, AutoBuild.INSTANCE.layers.getLayerTop());
+        }
         double along = lanesAlongX ? at.x : at.z;
         boolean forward = Math.abs(along - best.lo()) <= Math.abs(along - best.hi());
         int startAlong = forward ? best.lo() - 1 : best.hi() + 1;
@@ -1151,7 +1240,14 @@ public class Mover {
         Vec3 a = laneHover(lanePos(part.c(), part.lo() - 1, part.y()));
         Vec3 b = laneHover(lanePos(part.c(), part.hi() + 1, part.y()));
         Vec3 end = at.distanceToSqr(a) <= at.distanceToSqr(b) ? a : b;
-        return !FlyPath.clearAsFarAsKnown(player.level(), new Vec3(at.x, end.y, at.z), end);
+        Vec3 from = new Vec3(at.x, end.y, at.z);
+        if (FlyPath.clearAsFarAsKnown(player.level(), from, end)) {
+            return false;
+        }
+        // Only a wall when the way over it climbs: one cactus grown a block on the way isn't (it made lane 3 count
+        // 30 blocks farther, and lane 4 went first)
+        List<Vec3> over = FlyPath.lineWay(player.level(), from, end, (int) Math.floor(end.y + 0.01), true);
+        return over == null || over.stream().mapToDouble(p -> p.y).max().orElse(end.y) - end.y >= LANE_TALL;
     }
 
     /**
@@ -1296,6 +1392,11 @@ public class Mover {
     }
 
     private void flyAlongLane(LocalPlayer player, BlockPos to) {
+        if (laneApproach && to.equals(laneStart)) {
+            RunLog.tripStart(Minecraft.getInstance(), "lane-approach");
+        } else {
+            RunLog.tripEnd(Minecraft.getInstance(), "at-lane-start");
+        }
         flyTarget = laneHover(to);
         flyPath = null;
         target = to;
@@ -1375,6 +1476,16 @@ public class Mover {
         laneEnd = null;
     }
 
+    /** Flying along a lane now (not to its start): for the run log's time by category. */
+    public boolean onLane() {
+        return laneFlight() && !laneApproach;
+    }
+
+    /** "7/15" for the lane being flown (or flown to), "-" when none. */
+    public String laneName() {
+        return laneEnd != null && laneIndex >= 0 ? (laneIndex + 1) + "/" + lanes.size() : "-";
+    }
+
     /** The flight under way is along a lane (or to its start), not to a spot for a block. */
     private boolean laneFlight() {
         return laneEnd != null && spotFor == null && target != null && (target.equals(laneEnd) || target.equals(laneStart));
@@ -1452,6 +1563,12 @@ public class Mover {
     /** How many blocks the printer really places a tick while it has something in reach (for sweepSpeed). */
     private void learnRate(List<BlockPos> inReach) {
         int placed = AutoBuild.INSTANCE.stats.totalPlaced();
+        // Only while nothing else holds the printer back: the speed guard's limit (8 blocks a second) learned as the
+        // printer's own speed had the next lane flown at a third of the speed (0.27 blocks a tick against 0.8 to 0.9)
+        if (AutoBuild.INSTANCE.heldBackNow()) {
+            rateLastCount = placed;
+            return;
+        }
         if (rateLastCount >= 0 && !inReach.isEmpty()) {
             rateTicks++;
             ratePlaced += placed - rateLastCount;
@@ -1644,8 +1761,11 @@ public class Mover {
             areaPlacedCount = placedNow;
             areaProgressTick = tick;
         }
+        // Only while something there waits for the server's answer (it's placeable in a moment); else on at once (each
+        // of the last sand blocks of a layer had it wait 2 s before flying on)
         if (area != null && workByArea.get(area) != null && !workByArea.get(area).isEmpty()
-                && tick - areaProgressTick < stayTicks() && !anyDoable(mc, schematic, workByArea.get(area), spotExclude)) {
+                && tick - areaProgressTick < stayTicks() && !anyDoable(mc, schematic, workByArea.get(area), spotExclude)
+                && anyAnswerAwaited(workByArea.get(area))) {
             return null;
         }
         if (area == null || !anyDoable(mc, schematic, workByArea.get(area), spotExclude)) {
@@ -1929,6 +2049,20 @@ public class Mover {
     private int areaPlacedCount = -1;
     private long areaProgressTick;
 
+    /** One of these blocks (or the block under or beside it) was clicked and the server hasn't answered yet. */
+    private static boolean anyAnswerAwaited(List<BlockPos> blocks) {
+        // A server that doesn't answer clicks: no telling, so it stays the 2 s as before
+        if (!ServerAcks.works()) {
+            return true;
+        }
+        for (BlockPos pos : blocks) {
+            if (ServerAcks.isWaiting(pos) || ServerAcks.nextToWaiting(pos) || ServerAcks.unconfirmed(pos.below(), 3)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** How long an area with work left is kept after the last block placed: 2 s, longer with a high ping. */
     private static int stayTicks() {
         return Math.max(40, 3 * ServerLag.pingTicks(Minecraft.getInstance()) + 20);
@@ -2105,6 +2239,7 @@ public class Mover {
             if (state != State.FLYING || moveStartTick < 0) {
                 moveStartTick = tick;
                 moveFrom = player.position();
+                RunLog.tripStart(mc, errand != null ? "vault-or-chest" : sweepDone ? "leftover" : isNotLoaded(mc, goalBlock) ? "unloaded" : "spot");
             }
             BuildLog.line("MOVE", String.format("flying from %s to %.1f %.1f %.1f (%.1f blocks) for %s, area %s",
                     player.blockPosition().toShortString(), flyTarget.x, flyTarget.y, flyTarget.z,
@@ -2729,6 +2864,7 @@ public class Mover {
     private void logArrival(Minecraft mc, LocalPlayer player) {
         // Arriving counts as work here: the grace for blocks that become placeable a moment later starts now
         lastWorkTick = tick;
+        RunLog.tripEnd(mc, "arrived");
         if (moveStartTick < 0 || !BuildLog.isOpen()) {
             moveStartTick = -1;
             return;

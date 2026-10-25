@@ -73,6 +73,8 @@ public final class BuildLog {
             return;
         }
         try {
+            flushRepeats(out);
+            repeatKey = null;
             out.close();
         } catch (IOException ignored) {
         }
@@ -98,14 +100,34 @@ public final class BuildLog {
         pending.addLast(LocalDateTime.now().format(TIME) + " t=" + AutoBuild.clientTicks + " " + kind + " " + text);
     }
 
-    /** One line: time, game tick, kind, text. */
+    /** The last line written, and how often it came again right after (written once, with "×N", see line). */
+    @Nullable
+    private static String repeatKey;
+    private static int repeats;
+    private static String repeatLastTime = "";
+    private static long repeatLastTick;
+
+    /**
+     * One line: time, game tick, kind, text. The same line again and again in a row (kind and text alike) is written
+     * once, followed by one line "×N until <time>" when something else comes (120 lines the same in a row before).
+     */
     public static void line(String kind, String text) {
         BufferedWriter writer = out;
         if (writer == null) {
             return;
         }
         try {
-            writer.write(LocalDateTime.now().format(TIME));
+            String time = LocalDateTime.now().format(TIME);
+            String key = kind + ' ' + text;
+            if (key.equals(repeatKey)) {
+                repeats++;
+                repeatLastTime = time;
+                repeatLastTick = AutoBuild.clientTicks;
+                return;
+            }
+            flushRepeats(writer);
+            repeatKey = key;
+            writer.write(time);
             writer.write(" t=");
             writer.write(Long.toString(AutoBuild.clientTicks));
             writer.write(' ');
@@ -113,14 +135,24 @@ public final class BuildLog {
             writer.write(' ');
             writer.write(text);
             writer.newLine();
+            RunLog.mirror(time, AutoBuild.clientTicks, kind, text);
             long now = System.currentTimeMillis();
             if (now - lastFlush > 1000) {
                 lastFlush = now;
                 writer.flush();
+                RunLog.flushJson();
             }
         } catch (IOException e) {
             close();
         }
+    }
+
+    private static void flushRepeats(BufferedWriter writer) throws IOException {
+        if (repeats > 0 && repeatKey != null) {
+            writer.write(repeatLastTime + " t=" + repeatLastTick + " REPEAT ×" + repeats + " more of the line above (until " + repeatLastTime + ")");
+            writer.newLine();
+        }
+        repeats = 0;
     }
 
     /** Every add-on setting, for the start of the log. */
