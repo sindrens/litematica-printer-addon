@@ -107,3 +107,6 @@
 
 ## 26.2-0.16.1
 - Linking with Discord works for everyone (J+L).
+
+## 26.2-0.16.2
+- Sending a log or report works again (J+B → Report / share log).
