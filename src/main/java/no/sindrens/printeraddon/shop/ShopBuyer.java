@@ -95,6 +95,8 @@ public class ShopBuyer {
     private Phase phase;
     private int delay;
     private int waited;
+    /** Ticks this run waited for a lagging server without counting them (see ServerLag#hardLag). */
+    private int lagHeld;
     @Nullable
     private String before;
     @Nullable
@@ -393,6 +395,7 @@ public class ShopBuyer {
             return false;
         }
         running = true;
+        lagHeld = 0;
         selling = true;
         phase = Phase.OPEN;
         no.sindrens.printeraddon.build.BuildLog.line("SHOP", "selling " + describe(orders) + " (storage is full and the build doesn't need them)");
@@ -471,7 +474,7 @@ public class ShopBuyer {
                         affordable = affordable / stack * stack;
                     }
                     if (affordable < count) {
-                        no.sindrens.printeraddon.build.BuildLog.line("SHOP", String.format("%s: %d wanted, %d within the spending limit ($%,.0f left)",
+                        no.sindrens.printeraddon.build.BuildLog.line("SHOP", String.format(java.util.Locale.ROOT, "%s: %d wanted, %d within the spending limit ($%,.0f left)",
                                 names(List.of(entry.getKey())), count, affordable, budget));
                         count = affordable;
                     }
@@ -509,6 +512,7 @@ public class ShopBuyer {
             no.sindrens.printeraddon.build.BuildLog.line("SHOP", "buying by the stack is tried again (it didn't work 10 minutes ago)");
         }
         running = true;
+        lagHeld = 0;
         phase = Phase.OPEN;
         no.sindrens.printeraddon.build.BuildLog.line("SHOP", "buying " + describe(orders) + (stacksBroken ? " | a stack at a time (buying by the stack didn't work)" : ""));
         Chat.info("Buying from /" + shop.shopCommand + ": " + describe(orders) + ". Don't touch the menu.");
@@ -559,6 +563,14 @@ public class ShopBuyer {
         Order order = orders.peekFirst();
         if (order == null) {
             finish(mc);
+            return;
+        }
+        // A menu late because the server lags hard isn't a failure: the wait holds (up to a minute a run); a lag spike
+        // failed all three items of a trip, and the build stopped for sand
+        if (no.sindrens.printeraddon.build.ServerLag.hardLag(mc) && lagHeld < no.sindrens.printeraddon.build.ServerLag.MOST_LAG_HELD) {
+            if (lagHeld++ == 0) {
+                no.sindrens.printeraddon.build.BuildLog.line("SHOP", "the server lags: waiting for its menus without counting");
+            }
             return;
         }
         waited++;
@@ -1044,7 +1056,7 @@ public class ShopBuyer {
                     // Nothing arrived again. Stop, don't keep clicking.
                     Double balance = no.sindrens.printeraddon.build.CostEstimate.balance(mc);
                     fail(order, "the purchase of " + lastAmount + " " + order.location.name + " didn't arrive"
-                            + (balance != null ? String.format(" (balance $%,.0f)", balance) : " (not enough money?)")
+                            + (balance != null ? String.format(java.util.Locale.ROOT, " (balance $%,.0f)", balance) : " (not enough money?)")
                             + (serverSaid != null ? "; the server said \"" + serverSaid + "\"" : ""));
                     orders.forEach(o -> notBought.add(o.item));
                     orders.clear();
@@ -1155,7 +1167,7 @@ public class ShopBuyer {
             if (!sold.isEmpty()) {
                 StringBuilder sb = new StringBuilder("Sold ");
                 sold.forEach((item, n) -> sb.append(n).append(' ').append(new ItemStack(item).getHoverName().getString()).append(", "));
-                String text = sb.substring(0, sb.length() - 2) + (earned > 0 ? String.format(" (about $%,.2f)", earned) : "");
+                String text = sb.substring(0, sb.length() - 2) + (earned > 0 ? String.format(java.util.Locale.ROOT, " (about $%,.2f)", earned) : "");
                 Chat.info(text);
                 no.sindrens.printeraddon.build.BuildLog.line("SHOP", text);
             } else if (error == null) {
@@ -1167,7 +1179,7 @@ public class ShopBuyer {
             StringBuilder sb = new StringBuilder("Bought ");
             bought.forEach((item, n) -> sb.append(n).append(' ').append(new ItemStack(item).getHoverName().getString()).append(", "));
             String text = sb.substring(0, sb.length() - 2);
-            Chat.info(spent > 0 ? text + String.format(" (about $%,.2f)", spent) : text);
+            Chat.info(spent > 0 ? text + String.format(java.util.Locale.ROOT, " (about $%,.2f)", spent) : text);
         } else if (error == null) {
             Chat.warn("Nothing was bought.");
         }

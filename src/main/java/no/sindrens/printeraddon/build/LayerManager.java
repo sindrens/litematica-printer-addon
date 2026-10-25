@@ -43,6 +43,13 @@ public class LayerManager {
     /** The fewest blocks left on these layers so far: only a new low (or a block placed) is progress, not a count going up and down. */
     private int lowestRemaining = Integer.MAX_VALUE;
     private int ticksWithoutProgress;
+    /** The last LAYER line: its text, layers, when, and the conflicts it said. */
+    private String layerLineText = "";
+    private String layerLineLayers = "";
+    private long layerLineAt = -100000;
+    private int layerLineConflicts = -1;
+    /** Ticks in a row nothing was placed for a reason that isn't being stuck (see AutoBuild#notStuckBecause). */
+    private int ticksExcused;
     private int lastPlaced = -1;
     private int lastReportAt;
     private boolean reportedStuck;
@@ -266,7 +273,7 @@ public class LayerManager {
                 }
             }
         }
-        BuildLog.line("LAYER", String.format("start: %d layers known as done from the saved progress, %d read and done, %d gone past"
+        BuildLog.line("LAYER", String.format(java.util.Locale.ROOT, "start: %d layers known as done from the saved progress, %d read and done, %d gone past"
                         + " (%d blocks left there wait until the end); going on at Y %d | %.1f ms | %d skipped last time, tried again",
                 fromSave, doneLayers.size() - fromSave - passed, passed, leftovers, layer, (System.nanoTime() - started) / 1e6,
                 retriedFromBefore));
@@ -506,12 +513,23 @@ public class LayerManager {
                         .append(blockName(schematic.getBlockState(pos))).append(')');
             }
         }
-        BuildLog.line("LAYER", describeLayers() + ": " + remaining + " unfinished (" + findings.waiting.size()
-                + " waiting for something above, " + findings.water + " water still to go in) | conflicts "
-                + AutoBuild.INSTANCE.conflicts.size() + " | still needs " + findings.needs
+        // Only when something changed, and while building at most every 10 s (it came every 2 s, the same 1400 times
+        // with "conflicts 2882"); the conflicts only when their number changed
+        int conflictCount = AutoBuild.INSTANCE.conflicts.size();
+        String layerText = describeLayers() + ": " + remaining + " unfinished (" + findings.waiting.size()
+                + " waiting for something above, " + findings.water + " water still to go in)"
+                + (conflictCount != layerLineConflicts ? " | conflicts " + conflictCount : "") + " | still needs " + findings.needs
                 + (parts.unloaded.isEmpty() ? "" : " | not loaded: " + parts.unloaded.size() + " parts, "
                 + (parts.unloaded.size() - notSeen) + " of them seen finished, " + parts.unloadedBlocks + " blocks in the others")
-                + (leftText.length() > 0 ? " | left: " + leftText : ""));
+                + (leftText.length() > 0 ? " | left: " + leftText : "");
+        boolean newLayer = !describeLayers().equals(layerLineLayers);
+        if (newLayer || !layerText.equals(layerLineText) && AutoBuild.clientTicks - layerLineAt >= 20 * 10) {
+            BuildLog.line("LAYER", layerText);
+            layerLineText = layerText;
+            layerLineLayers = describeLayers();
+            layerLineAt = AutoBuild.clientTicks;
+            layerLineConflicts = conflictCount;
+        }
         if (!AutoBuild.INSTANCE.deferred.isEmpty()) {
             deferredNeeds(mc.level, schematic, AutoBuild.INSTANCE.deferred, findings);
         }
@@ -631,10 +649,14 @@ public class LayerManager {
             lastPlaced = placed;
             ticksWithoutProgress = 0;
             reportedStuck = false;
+            ticksExcused = 0;
+        } else if (excused(mc, interval)) {
+            // The server lagging, or a trip for items: waiting, not stuck
         } else if (mc.player == null || !AutoBuild.INSTANCE.mover.isTravelling(mc.player)) {
             // Flying to the next blocks isn't standing still: no "nothing placed" warning for a long flight (a flight
             // that never gets anywhere is caught by the watchdog, see AutoBuild)
             ticksWithoutProgress += interval;
+            ticksExcused = 0;
         }
 
         status = describeLayers() + ": " + remaining + " left";
@@ -728,8 +750,10 @@ public class LayerManager {
             lastRemaining = left.size();
             ticksWithoutProgress = 0;
             reportedStuck = false;
-        } else {
+            ticksExcused = 0;
+        } else if (!excused(mc, interval)) {
             ticksWithoutProgress += interval;
+            ticksExcused = 0;
         }
         status = "Last blocks: " + left.size() + " left";
 
@@ -859,6 +883,9 @@ public class LayerManager {
         BuildLog.line("LAYER", "changed by hand from " + before + " to " + now + "; " + left.size() + " unfinished blocks of "
                 + before + " wait until the end");
         RunLog.user("layer-changed", "from=\"" + before + "\" to=\"" + now + "\" leftForTheEnd=" + left.size());
+        // The summary of the layers left by hand under their own name (all of Y 102-103 was written as "Y 101", the
+        // layer chosen by hand right before the end)
+        RunLog.layerEnd(before + ", left by hand");
     }
 
     /** Adds the unfinished blocks of one layer (those that are loaded) to the list. */
@@ -988,7 +1015,7 @@ public class LayerManager {
             return y;
         }
         if (onTop > 0) {
-            BuildLog.line("LAYER", String.format("Y %d %s Y %d: on Y %d, %d blocks still to place stand on Y %d %s, %d others%s",
+            BuildLog.line("LAYER", String.format(java.util.Locale.ROOT, "Y %d %s Y %d: on Y %d, %d blocks still to place stand on Y %d %s, %d others%s",
                     y + 1, together ? "built together with" : "not built together with", y, y + 1, onTop, y, kinds, others,
                     water > 0 ? ", " + water + " with water" : ""));
         }
@@ -1158,6 +1185,24 @@ public class LayerManager {
         ticksUntilCheck = 0;
         // Not known yet whether the new layer has water: nothing else goes in until the first check says
         waterPending = -1;
+    }
+
+    /**
+     * Nothing placed, for a reason that isn't being stuck (the server lagging, a trip for items): those ticks don't
+     * count towards the "nothing placed" report. Once as long as that report waits for, the build log says so instead.
+     */
+    private boolean excused(Minecraft mc, int interval) {
+        String why = AutoBuild.INSTANCE.notStuckBecause(mc);
+        if (why == null) {
+            return false;
+        }
+        int before = ticksExcused;
+        ticksExcused += interval;
+        int reportAfter = Configs.Layers.STUCK_REPORT_SECONDS.getIntegerValue() * 20;
+        if (before < reportAfter && ticksExcused >= reportAfter) {
+            BuildLog.line("STUCK-SUPPRESSED", "reason=" + why + " nothing placed for " + ticksExcused / 20 + "s, not counted as stuck");
+        }
+        return true;
     }
 
     private void reportStuck(Minecraft mc, WorldSchematic schematic, List<SchematicHelper.Area> areas) {

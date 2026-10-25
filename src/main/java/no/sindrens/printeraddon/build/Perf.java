@@ -33,8 +33,8 @@ public final class Perf {
         TIMES.entrySet().stream()
                 .sorted((a, b) -> Long.compare(b.getValue()[0], a.getValue()[0]))
                 .forEach(e -> sb.append(e.getKey()).append(' ')
-                        .append(String.format("%.2f", e.getValue()[0] / 1e6 / n)).append('/')
-                        .append(String.format("%.1f", e.getValue()[1] / 1e6)).append(" ms, "));
+                        .append(String.format(java.util.Locale.ROOT, "%.2f", e.getValue()[0] / 1e6 / n)).append('/')
+                        .append(String.format(java.util.Locale.ROOT, "%.1f", e.getValue()[1] / 1e6)).append(" ms, "));
         TIMES.clear();
         ticks = 0;
         return sb.isEmpty() ? "-" : sb.substring(0, sb.length() - 2);

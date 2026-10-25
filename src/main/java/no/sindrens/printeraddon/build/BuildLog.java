@@ -113,7 +113,7 @@ public final class BuildLog {
      */
     public static void line(String kind, String text) {
         BufferedWriter writer = out;
-        if (writer == null) {
+        if (writer == null || debugOnly(kind, text)) {
             return;
         }
         try {
@@ -145,6 +145,18 @@ public final class BuildLog {
         } catch (IOException e) {
             close();
         }
+    }
+
+    /**
+     * Kinds written only with "Debug log" on: a line for every block tried and placed, every item switch, and the
+     * status lines BEAT sums up every 10 s. An hour of building was 19.5 MB, 70 % of it TRY and PLACED lines; what
+     * goes wrong (NOCHANGE, WRONG, GIVEUP, a hotbar slot the server changed) is always written.
+     */
+    private static final java.util.Set<String> DEBUG_ONLY = java.util.Set.of("TRY", "PLACED", "TURNS", "SNAP", "SCAN", "STEP", "DETAIL");
+
+    private static boolean debugOnly(String kind, String text) {
+        return (DEBUG_ONLY.contains(kind) || kind.equals("HOTBAR") && text.startsWith("switch "))
+                && !no.sindrens.printeraddon.config.Configs.Generic.DEBUG_LOG.getBooleanValue();
     }
 
     private static void flushRepeats(BufferedWriter writer) throws IOException {

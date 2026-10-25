@@ -50,6 +50,18 @@ public final class ServerLag {
         return tps;
     }
 
+    /**
+     * The server lags hard (no word for 2 s, or under 10 ticks a second): its menus answer late or not at all (a
+     * supply trip came back with nothing after 94 s), so no trips start, and the waits of one under way don't count
+     * down. Never in singleplayer, nor before the first time update.
+     */
+    public static boolean hardLag(Minecraft mc) {
+        return !mc.hasSingleplayerServer() && (ticksSinceTimeUpdate() > 40 || lastGameTime >= 0 && tps < 10);
+    }
+
+    /** Most of a menu's waiting held back for a lag (see hardLag) per shop or vault run: then it fails as usual. */
+    public static final int MOST_LAG_HELD = 20 * 60;
+
     /** Ticks since the server's last time update (they come every second while it runs); 0 before the first. */
     public static int ticksSinceTimeUpdate() {
         return lastGameTime < 0 ? 0 : (int) Math.min(Integer.MAX_VALUE, (System.nanoTime() - lastNanos) / 50_000_000L);
@@ -67,9 +79,9 @@ public final class ServerLag {
         if (wait != paused) {
             paused = wait;
             if (wait) {
-                Chat.warnEvery("lag", 5 * 60_000L, String.format("The server lags (%.0f ticks per second): placing waits until it catches up.", silent ? 0 : tps));
+                Chat.warnEvery("lag", 5 * 60_000L, String.format(java.util.Locale.ROOT, "The server lags (%.0f ticks per second): placing waits until it catches up.", silent ? 0 : tps));
             } else {
-                Chat.quiet(String.format("The server is back to %.0f ticks per second: placing again.", tps));
+                Chat.quiet(String.format(java.util.Locale.ROOT, "The server is back to %.0f ticks per second: placing again.", tps));
             }
         }
         return wait;

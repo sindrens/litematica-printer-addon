@@ -64,8 +64,160 @@ public class BlockBreaker {
         return target != null;
     }
 
+    /** Breaking this block, or one up to 3 under it in its column (a column of cactus falls with its lowest). */
+    public boolean breakingUnder(BlockPos pos) {
+        return target != null && target.getX() == pos.getX() && target.getZ() == pos.getZ()
+                && pos.getY() >= target.getY() && pos.getY() - target.getY() <= 3;
+    }
+
+    /**
+     * Standing on the block under the feet while breaking, flying off: the game breaks blocks 5 times slower off the
+     * ground (a cactus took 66 ticks while flying, 12 standing). Only when there's something to stand on right under
+     * the feet (the player hovers on top of the layer), no cactus near, and not on the block being broken.
+     */
+    private boolean standing;
+    private int standingTicks;
+    /**
+     * Nothing to stand on under the feet (a lane flown along the empty row beside a cactus row): first a short hop,
+     * at most a block sideways, onto a block of the layer that's there, then standing there while breaking.
+     */
+    @Nullable
+    private Vec3 hopTo;
+    private int hopTicks;
+    private static final int HOP_TICKS = 20;
+    /** The spot to stand at is at most this many blocks to the side (a hop of 0.6 s at most). */
+    private static final int HOP_REACH = 2;
+
+    public boolean isStanding() {
+        return standing || hopTo != null;
+    }
+
+    /** Where to stand for breaking this block: a spot beside the player on top of a block that's there, or null. */
+    @Nullable
+    private Vec3 standSpot(LocalPlayer player, BlockPos target) {
+        net.minecraft.world.level.Level level = player.level();
+        Vec3 at = player.position();
+        BlockPos feet = BlockPos.containing(at.x, at.y + 0.3, at.z);
+        double range = range(player);
+        Vec3 best = null;
+        double bestDistance = Double.MAX_VALUE;
+        // Why the spots around didn't do, for the build log when none does
+        int noFooting = 0;
+        int harm = 0;
+        int far = 0;
+        int blocked = 0;
+        for (int dx = -HOP_REACH; dx <= HOP_REACH; dx++) {
+            for (int dz = -HOP_REACH; dz <= HOP_REACH; dz++) {
+                BlockPos spotFeet = feet.offset(dx, 0, dz);
+                BlockPos below = spotFeet.below();
+                if (below.equals(target) || !FlyPath.fits(level, spotFeet)) {
+                    blocked++;
+                    continue;
+                }
+                net.minecraft.world.phys.shapes.VoxelShape shape = level.getBlockState(below).getCollisionShape(level, below);
+                if (shape.isEmpty() || shape.max(Direction.Axis.Y) < 0.999) {
+                    noFooting++;
+                    continue;
+                }
+                Vec3 spot = new Vec3(spotFeet.getX() + 0.5, spotFeet.getY(), spotFeet.getZ() + 0.5);
+                if (Mover.harmNear(level, spot) != null) {
+                    harm++;
+                    continue;
+                }
+                if (spot.add(0, player.getEyeHeight(), 0).distanceToSqr(Vec3.atCenterOf(target)) > range * range) {
+                    far++;
+                    continue;
+                }
+                if (!FlyPath.clear(level, at, spot) || !harmFreeWay(level, at, spot)) {
+                    blocked++;
+                    continue;
+                }
+                double distance = at.distanceToSqr(spot);
+                if (distance < bestDistance) {
+                    bestDistance = distance;
+                    best = spot;
+                }
+            }
+        }
+        if (best == null) {
+            BuildLog.lineOrKeep("BREAK", "no spot to stand at for " + target.toShortString().replace(" ", "") + " from "
+                    + String.format(java.util.Locale.ROOT, "%.1f,%.1f,%.1f", at.x, at.y, at.z) + ": noFooting=" + noFooting
+                    + " cactusNear=" + harm + " outOfReach=" + far + " blocked=" + blocked);
+        }
+        return best;
+    }
+
+    /** Nothing that hurts near the body anywhere on the straight way from a to b. */
+    private static boolean harmFreeWay(net.minecraft.world.level.Level level, Vec3 a, Vec3 b) {
+        Vec3 d = b.subtract(a);
+        int steps = Math.max(1, (int) Math.ceil(d.length() / 0.3));
+        for (int i = 1; i <= steps; i++) {
+            if (Mover.harmNear(level, a.add(d.scale((double) i / steps))) != null) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** On the way to the spot to stand at: true while still going (the break starts once there). */
+    private boolean hopping(Minecraft mc, LocalPlayer player) {
+        if (hopTo == null) {
+            return false;
+        }
+        Vec3 to = hopTo.subtract(player.position());
+        if (to.lengthSqr() < 0.06 * 0.06 || ++hopTicks > HOP_TICKS) {
+            hopTo = null;
+            player.setDeltaMovement(Vec3.ZERO);
+            standForBreaking(player, target);
+            mc.gameMode.startDestroyBlock(target, face);
+            player.swing(InteractionHand.MAIN_HAND);
+            return false;
+        }
+        double length = to.length();
+        player.setDeltaMovement(to.scale(Math.min(0.2, length) / length));
+        return true;
+    }
+
+    private void standForBreaking(LocalPlayer player, BlockPos pos) {
+        net.minecraft.world.entity.player.Abilities abilities = player.getAbilities();
+        if (standing || !abilities.flying || !abilities.mayfly || !Configs.Breaking.STAND_TO_BREAK.getBooleanValue()) {
+            return;
+        }
+        BlockPos under = BlockPos.containing(player.getX(), player.getY() - 0.06, player.getZ());
+        if (pos.equals(under) || player.level().noCollision(player, player.getBoundingBox().move(0, -0.06, 0))
+                || Mover.harmNear(player.level(), player.position()) != null) {
+            return;
+        }
+        abilities.flying = false;
+        player.onUpdateAbilities();
+        standing = true;
+        standingTicks = 0;
+    }
+
+    /** Flying again after breaking (or when standing didn't work out). */
+    private void flyAgain(LocalPlayer player) {
+        if (!standing) {
+            return;
+        }
+        standing = false;
+        net.minecraft.world.entity.player.Abilities abilities = player.getAbilities();
+        if (abilities.mayfly && !abilities.flying) {
+            abilities.flying = true;
+            player.onUpdateAbilities();
+        }
+    }
+
     public int getBrokenCount() {
         return brokenCount;
+    }
+
+    /** Breaks done, of them standing, and the ticks they took (for the run log). */
+    private int breaks;
+    private int standingBreaks;
+    private long breakTicks;
+
+    public String summary() {
+        return "breaks=" + breaks + " standing=" + standingBreaks + " avgTicks=" + (breaks == 0 ? 0 : breakTicks / breaks);
     }
 
     public void resetBrokenCount() {
@@ -84,6 +236,10 @@ public class BlockBreaker {
             mc.gameMode.stopDestroyBlock();
         }
         target = null;
+        hopTo = null;
+        if (mc.player != null) {
+            flyAgain(mc.player);
+        }
     }
 
     /**
@@ -100,7 +256,9 @@ public class BlockBreaker {
         }
 
         if (target != null) {
-            continueBreaking(mc, player, schematic, mode);
+            if (!hopping(mc, player)) {
+                continueBreaking(mc, player, schematic, mode);
+            }
             return true;
         }
 
@@ -138,11 +296,23 @@ public class BlockBreaker {
 
         ticksOnTarget = 0;
         face = faceTowardsPlayer(player, pos);
-
         selectBestTool(player, state);
         lookAt(player, pos);
-        PrinterAddon.debug("Breaking {} at {} with {}", state, target.toShortString(),
-                player.getInventory().getItem(player.getInventory().getSelectedSlot()));
+        // A block that takes long: standing for it (here, or a hop beside); one that breaks at once (a flower) from the air
+        boolean slow = state.getDestroySpeed(mc.level, pos) > 0.05f && Configs.Breaking.STAND_TO_BREAK.getBooleanValue()
+                && player.getAbilities().flying && player.getAbilities().mayfly;
+        if (slow && player.level().noCollision(player, player.getBoundingBox().move(0, -0.06, 0))) {
+            hopTo = standSpot(player, target);
+            hopTicks = 0;
+        }
+        PrinterAddon.debug("Breaking {} at {} with {}{}", state, target.toShortString(),
+                player.getInventory().getItem(player.getInventory().getSelectedSlot()), hopTo != null ? ", from " + hopTo : "");
+        if (hopTo != null) {
+            return;
+        }
+        if (slow) {
+            standForBreaking(player, target);
+        }
         mc.gameMode.startDestroyBlock(target, face);
         player.swing(InteractionHand.MAIN_HAND);
     }
@@ -157,11 +327,21 @@ public class BlockBreaker {
                 forced.remove(pos);
             }
             // Gone (or fixed): done
-            PrinterAddon.debug("Done with {} after {} ticks ({})", pos.toShortString(), ticksOnTarget, result);
+            PrinterAddon.debug("Done with {} after {} ticks ({}{})", pos.toShortString(), ticksOnTarget, result, standing ? ", standing" : "");
+            breakTicks += ticksOnTarget;
+            breaks++;
+            if (standing) {
+                standingBreaks++;
+            }
             target = null;
             brokenCount++;
             cooldown = Configs.Speed.breakCooldownTicks();
+            flyAgain(player);
             return;
+        }
+        // Standing didn't work out (nothing held the player after all): flying again, breaking on from the air
+        if (standing && ++standingTicks > 3 && !player.onGround()) {
+            flyAgain(player);
         }
 
         int timeout = Configs.Breaking.BREAK_TIMEOUT_SECONDS.getIntegerValue() * 20;

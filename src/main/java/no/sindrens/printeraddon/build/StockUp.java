@@ -40,6 +40,12 @@ public final class StockUp {
     private final Map<Item, Integer> clearFirst = new LinkedHashMap<>();
     /** Just bought: put into the vaults next. */
     private Item storing;
+    /**
+     * What the trip wants each of the layer's items to be at in the inventory when it's done: the share of what was
+     * just bought stays in the inventory, and the last visit to the vaults takes the rest of the trip's items (it took
+     * them out again in a visit of its own, after putting everything away).
+     */
+    private final Map<Item, Integer> target = new LinkedHashMap<>();
     private boolean active;
     private int purchases;
     private int stored;
@@ -57,6 +63,7 @@ public final class StockUp {
         toStock.clear();
         clearFirst.clear();
         bought.clear();
+        target.clear();
         storing = null;
         active = false;
     }
@@ -68,17 +75,14 @@ public final class StockUp {
 
     /**
      * Starts a round when it's worth it: storage with room, and the build needing many more stacks of what the trip is
-     * about to buy than it takes. {@code wants}: what the trip buys now (what the vaults didn't have);
-     * {@code layerItems}: the items the layer is built of (put away first when the inventory has little room).
+     * about to buy than it takes. {@code wants}: what the trip buys now (what the vaults don't have); {@code tripWants}:
+     * all the trip gets (also from the vaults); {@code layerItems}: the items the layer is built of (put away first when
+     * the inventory has little room).
      */
-    public boolean start(Minecraft mc, Map<Item, Integer> wants, Map<Item, Integer> neededWhole, ChestFetcher fetcher,
-                         Collection<Item> layerItems) {
+    public boolean start(Minecraft mc, Map<Item, Integer> wants, Map<Item, Integer> tripWants, Map<Item, Integer> neededWhole,
+                         ChestFetcher fetcher, Collection<Item> layerItems) {
         if (!Configs.Shop.STOCK_UP.getBooleanValue() || !Configs.Shop.AUTO_BUY.getBooleanValue() || mc.player == null
                 || !ChestFetcher.hasStorage(mc)) {
-            return false;
-        }
-        if (fetcher.storageFull()) {
-            BuildLog.line("STOCK", "skip reason=vaults-full");
             return false;
         }
         int[] level = ChestFetcher.fillLevel();
@@ -109,7 +113,8 @@ public final class StockUp {
                 clear.clear();
                 clearStacks = 0;
             } else {
-                BuildLog.line("STOCK", "skip reason=vault-room vaultFree=" + vaultFree + " keepFree=" + keep + " total=" + total);
+                BuildLog.line("STOCK", "skip reason=" + (fetcher.storageFull() ? "vaults-full" : "vault-room") + " vaultFree="
+                        + vaultFree + " keepFree=" + keep + " total=" + total);
                 return false;
             }
         }
@@ -167,6 +172,11 @@ public final class StockUp {
         clearFirst.clear();
         clearFirst.putAll(clear);
         bought.clear();
+        target.clear();
+        for (Item item : layerItems) {
+            target.put(item, inventory.countItem(item) + tripWants.getOrDefault(item, 0));
+        }
+        tripWants.forEach((item, count) -> target.putIfAbsent(item, inventory.countItem(item) + count));
         active = true;
         purchases = 0;
         stored = 0;
@@ -202,8 +212,28 @@ public final class StockUp {
         if (storing != null) {
             Item item = storing;
             storing = null;
-            if (build.fetcher.startStore(mc, Map.of(item, 0))) {
+            // The trip's share of it stays; the last purchase's extra goes in with the trip's other items coming out
+            // A part-used stack among the kept ones holds less than a stack: one more stays (64 string were short
+            // after a round, and a vault visit of their own took them out again)
+            int keepStacks = stacksFor(item, target.getOrDefault(item, 0));
+            if (keepStacks > 0 && inventory.countItem(item) % Math.max(1, item.getDefaultMaxStackSize()) != 0) {
+                keepStacks++;
+            }
+            Map<Item, Integer> keep = Map.of(item, keepStacks);
+            boolean last = toStock.values().stream().noneMatch(count -> count > 0);
+            Map<Item, Integer> take = new LinkedHashMap<>();
+            if (last) {
+                target.forEach((other, want) -> {
+                    int missing = want - inventory.countItem(other);
+                    if (!bought.containsKey(other) && missing > 0) {
+                        take.put(other, missing);
+                    }
+                });
+            }
+            if (take.isEmpty() ? build.fetcher.startStore(mc, keep) : build.fetcher.startSwap(mc, keep, take)) {
                 stored++;
+                BuildLog.line("STOCK", "step=put-away item=" + name(item) + " keepStacks=" + keep.get(item)
+                        + (take.isEmpty() ? "" : " andTake={" + describe(take) + "}"));
                 return true;
             }
             BuildLog.line("STOCK", "stop reason=nowhere-to-put item=" + name(item));
@@ -257,6 +287,12 @@ public final class StockUp {
         }
         reset();
         return false;
+    }
+
+    /** Stacks that this many of the item take. */
+    private static int stacksFor(Item item, int count) {
+        int stack = Math.max(1, item.getDefaultMaxStackSize());
+        return Math.max(0, (count + stack - 1) / stack);
     }
 
     private static int stacksOf(Inventory inventory, Item item) {

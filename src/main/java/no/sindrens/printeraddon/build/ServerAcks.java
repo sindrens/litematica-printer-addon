@@ -37,6 +37,17 @@ public final class ServerAcks {
     private static int dropped;
     /** How long the server took on the last click on each spot (ticks, kept like answeredAt). */
     private static final Map<BlockPos, Integer> answerTook = new HashMap<>();
+    /**
+     * The answers by what the spot had right after (the game has put back what the server says by then): the block,
+     * or still nothing (the server didn't place it, or its block update comes after the answer). A spot answered
+     * empty that gets its block a moment later without another click was a late update; clicked again, a retry. 18 %
+     * of a log's clicks were on spots clicked before, and it wasn't known which of the two it was.
+     */
+    private static int answersPlaced;
+    private static int answersEmpty;
+    private static int lateBlocks;
+    private static int retries;
+    private static final Map<BlockPos, Long> answeredEmpty = new HashMap<>();
 
     private ServerAcks() {
     }
@@ -45,6 +56,8 @@ public final class ServerAcks {
         waiting.clear();
         answeredAt.clear();
         answerTook.clear();
+        answeredEmpty.clear();
+        answersPlaced = answersEmpty = lateBlocks = retries = 0;
         dropped = 0;
         lastTried = null;
         sent = 0;
@@ -63,6 +76,9 @@ public final class ServerAcks {
     public static void clicked(int sequence) {
         if (lastTried == null) {
             return;
+        }
+        if (answeredEmpty.remove(lastTried) != null) {
+            retries++;
         }
         waiting.put(lastTried, new Click(sequence, AutoBuild.clientTicks));
         lastTried = null;
@@ -91,9 +107,45 @@ public final class ServerAcks {
                 minuteMax = Math.max(minuteMax, took);
                 answered++;
                 ServerWatch.onAnswer(took);
+                if (placedNow(entry.getKey())) {
+                    answersPlaced++;
+                } else {
+                    answersEmpty++;
+                    answeredEmpty.put(entry.getKey(), now);
+                }
                 it.remove();
             }
         }
+    }
+
+    /** The spot has what the schematic wants there (as the client has it now). */
+    private static boolean placedNow(BlockPos pos) {
+        net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+        fi.dy.masa.litematica.world.WorldSchematic schematic = SchematicHelper.world();
+        return mc.level != null && schematic != null && BlockCheck.check(mc.level, schematic, pos) == BlockCheck.Result.OK;
+    }
+
+    /** Every tick: spots answered empty that have their block now, without another click (a late block update). */
+    public static void tick() {
+        if (answeredEmpty.isEmpty()) {
+            return;
+        }
+        long now = AutoBuild.clientTicks;
+        for (Iterator<Map.Entry<BlockPos, Long>> it = answeredEmpty.entrySet().iterator(); it.hasNext(); ) {
+            Map.Entry<BlockPos, Long> entry = it.next();
+            if (placedNow(entry.getKey())) {
+                lateBlocks++;
+                it.remove();
+            } else if (now - entry.getValue() > TIMEOUT) {
+                it.remove();
+            }
+        }
+    }
+
+    /** "placed=812 empty=96 late=80 retries=12": the answers so far by what the spot had (see answersPlaced). */
+    public static String answerResults() {
+        return "answersPlaced=" + answersPlaced + " answersEmpty=" + answersEmpty + " lateBlockUpdates=" + lateBlocks
+                + " retriesAfterEmpty=" + retries;
     }
 
     /** How long (ticks) the oldest click still without an answer has waited; 0 when none waits. */
@@ -188,7 +240,7 @@ public final class ServerAcks {
     /** "answers in 2.4 ticks on average, 9 at most" for the last minute (then counts again). */
     public static String minute() {
         String text = minuteAnswers == 0 ? (sent > 0 && answered == 0 ? "no answers to clicks (fixed waits used)" : "-")
-                : String.format("server answers clicks in %.1f ticks on average, %d at most", minuteTicks / (double) minuteAnswers, minuteMax);
+                : String.format(java.util.Locale.ROOT, "server answers clicks in %.1f ticks on average, %d at most", minuteTicks / (double) minuteAnswers, minuteMax);
         minuteAnswers = 0;
         minuteTicks = 0;
         minuteMax = 0;

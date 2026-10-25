@@ -33,7 +33,7 @@ public class Chat {
     /** Status message, hidden when chat messages are turned off. */
     public static void info(String message) {
         remember(message);
-        no.sindrens.printeraddon.build.BuildLog.line("info", message);
+        no.sindrens.printeraddon.build.BuildLog.line("INFO", message);
         PrinterAddon.LOGGER.info(message);
         if (Configs.Generic.CHAT_MESSAGES.getBooleanValue()) {
             send(message);
@@ -46,7 +46,7 @@ public class Chat {
      */
     public static void quiet(String message) {
         remember(message);
-        no.sindrens.printeraddon.build.BuildLog.line("info", message);
+        no.sindrens.printeraddon.build.BuildLog.line("INFO", message);
         PrinterAddon.LOGGER.info(message);
         if (Configs.Generic.DETAILED_CHAT.getBooleanValue()) {
             send("\u00a77" + message);

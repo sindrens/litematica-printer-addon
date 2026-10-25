@@ -72,6 +72,8 @@ public class ChestFetcher {
     private Spot current;
     private Phase phase;
     private int waited;
+    /** Ticks this run waited for a lagging server without counting them (see ServerLag#hardLag). */
+    private int lagHeld;
     private int taken;
     private int gap;
     /** The current spot's menu was open at some point (closed again by the player: opened once more). */
@@ -80,6 +82,10 @@ public class ChestFetcher {
     private boolean retried;
     /** Small stacks were put together in this spot's menu already; ticks left to wait for the server's answer. */
     private boolean mergedHere;
+    /** Junk thrown out and strays put in (see InventoryCleaner) while this spot is open. */
+    private boolean cleanedHere;
+    /** Fewer free inventory slots than this on a supply trip: blocks the build doesn't use go into the vault. */
+    private static final int STRAYS_BELOW_FREE = 18;
     private int mergeWait;
     /** The inventory's counts before this spot's clicks, and what the clicks were to take (+) or put away (-). */
     private final Map<Item, Integer> countsBefore = new HashMap<>();
@@ -131,10 +137,14 @@ public class ChestFetcher {
     /** What's being done, for the status line. */
     public String describe() {
         String where = current != null ? current.name() : "storage";
-        return storing.isEmpty() ? "taking " + describe(wanted) + " from " + where : "putting items away in " + where;
+        return storing.isEmpty() ? "taking " + describe(wanted) + " from " + where
+                : "putting items away in " + where + (anyWanted() ? " and taking " + describe(wanted) : "");
     }
 
-    /** The last time leftovers were put away, some didn't fit anywhere. */
+    /**
+     * The last time leftovers were put away, some didn't fit anywhere; until a vault or chest with room is open again
+     * (it stayed set for a whole run while the trips took 1 000 items out of the vaults, so STOCK never ran).
+     */
     private boolean storageFull;
     /** Storing without flying anywhere (vaults, and linked chests within reach): when auto build has stopped. */
     private boolean nearOnly;
@@ -218,7 +228,30 @@ public class ChestFetcher {
         storing.putAll(items);
         taken = 0;
         active = true;
+        lagHeld = 0;
         return true;
+    }
+
+    /**
+     * Puts stacks of these items away until the given number of stacks of each is left (as startStore), and in the same
+     * visits takes these (as start): after a purchase into the vaults, its extra goes in and what the trip takes comes
+     * out of the same vault, one visit instead of three (a trip with buying went to the vaults 6 times, 9 s).
+     */
+    public boolean startSwap(Minecraft mc, Map<Item, Integer> keepStacks, Map<Item, Integer> take) {
+        if (!startStore(mc, keepStacks)) {
+            return false;
+        }
+        take.forEach((item, count) -> {
+            int room = ShopBuyer.room(mc, item);
+            if (count > 0 && room > 0) {
+                wanted.put(item, Math.min(count, room));
+            }
+        });
+        return true;
+    }
+
+    private boolean anyWanted() {
+        return wanted.values().stream().anyMatch(count -> count > 0);
     }
 
     private boolean anyLeftToStore(Inventory inventory) {
@@ -299,6 +332,7 @@ public class ChestFetcher {
         }
         taken = 0;
         active = true;
+        lagHeld = 0;
         Chat.quiet("Looking in " + toVisit.size() + " vault" + (toVisit.size() == 1 ? "" : "s") + "/chest"
                 + (toVisit.size() == 1 ? "" : "s") + " for " + describe(wanted) + " before buying.");
         return true;
@@ -316,7 +350,19 @@ public class ChestFetcher {
             return true;
         }
         if (current == null && !storing.isEmpty()) {
-            if (!anyLeftToStore(player.getInventory()) || toVisit.isEmpty()) {
+            // All put away, only taking left: not to a spot known to have none of what's wanted
+            if (!anyLeftToStore(player.getInventory()) && anyWanted()) {
+                toVisit.removeIf(spot -> {
+                    Known k = known.get(spot);
+                    return k != null && !k.remembered() && wanted.entrySet().stream()
+                            .noneMatch(e -> e.getValue() > 0 && k.contents().getOrDefault(e.getKey(), 0) > 0);
+                });
+            }
+            if (!anyLeftToStore(player.getInventory()) && !anyWanted() || toVisit.isEmpty()) {
+                if (anyWanted() && taken > 0) {
+                    BuildLog.line("STORAGE", "put away and took what there was; still wanted " + describe(wanted));
+                }
+                wanted.clear();
                 // Everywhere visited and some still here: storage is full (they're sold or kept, see InventoryCleaner)
                 storageFull = anyLeftToStore(player.getInventory());
                 if (storageFull) {
@@ -342,6 +388,7 @@ public class ChestFetcher {
             seenOpen = false;
             retried = false;
             mergedHere = false;
+            cleanedHere = false;
             mergeWait = 0;
         } else if (current == null) {
             wanted.values().removeIf(count -> count <= 0);
@@ -360,7 +407,15 @@ public class ChestFetcher {
             seenOpen = false;
             retried = false;
             mergedHere = false;
+            cleanedHere = false;
             mergeWait = 0;
+        }
+        // A vault slow to open because the server lags hard isn't a failure: the wait holds (up to a minute a run)
+        if (phase != Phase.GO && ServerLag.hardLag(mc) && lagHeld < ServerLag.MOST_LAG_HELD) {
+            if (lagHeld++ == 0) {
+                BuildLog.line("STORAGE", "the server lags: waiting for " + current.name() + " without counting");
+            }
+            return true;
         }
         waited++;
 
@@ -383,8 +438,8 @@ public class ChestFetcher {
             }
             case OPEN -> {
                 player.setShiftKeyDown(false);
-                BuildLog.line("STORAGE", "opening " + current.name() + (storing.isEmpty() ? " to take " + describe(wanted) : " to put away " + storing.keySet())
-                        + (retried ? " (again)" : ""));
+                BuildLog.line("STORAGE", "opening " + current.name() + (storing.isEmpty() ? " to take " + describe(wanted) : " to put away " + storing.keySet()
+                        + (anyWanted() ? " and take " + describe(wanted) : "")) + (retried ? " (again)" : ""));
                 if (current.pos() == null) {
                     PrinterAddon.debug("Opening {}", current.name());
                     player.connection.sendCommand(Configs.Shop.VAULT_COMMAND.getStringValue() + " " + current.vault());
@@ -456,6 +511,15 @@ public class ChestFetcher {
                 clicked.clear();
                 wantedAs.clear();
                 countsBefore.putAll(counts(player.getInventory()));
+                // Junk out (cactus flowers from breaking), as a player would with the vault open, and when the trip is
+                // short of room the blocks the build doesn't use in: each slot is a stack more in the next purchase
+                if (!cleanedHere) {
+                    cleanedHere = true;
+                    InventoryCleaner.throwJunk(mc, player, menu, current.name());
+                    if (!nearOnly && InventoryCleaner.freeSlots(player.getInventory()) < STRAYS_BELOW_FREE) {
+                        AutoBuild.INSTANCE.cleaner.storeStrays(mc, player, menu, current.name());
+                    }
+                }
                 if (!storing.isEmpty()) {
                     Map<Item, Integer> stacks = stacks(player.getInventory());
                     for (Slot slot : menu.slots) {
@@ -486,9 +550,12 @@ public class ChestFetcher {
                     noteFill(menu);
                     saveRemembered();
                     BuildLog.lineOrKeep("STORAGE", current.name() + ": put away, " + taken + " items so far" + fillText(current));
-                    phase = clicked.isEmpty() ? Phase.CLOSE : Phase.VERIFY;
-                    waited = 0;
-                    return true;
+                    if (!anyWanted()) {
+                        phase = clicked.isEmpty() ? Phase.CLOSE : Phase.VERIFY;
+                        waited = 0;
+                        return true;
+                    }
+                    // And what's wanted from it, in the same visit (the clicks above show in the menu at once)
                 }
                 // A hoe is a hoe (a pickaxe a pickaxe...): of each kind wanted, the best plain one here (diamond
                 // first, then the one with the most uses left; never the player's own enchanted or netherite ones)
@@ -728,6 +795,9 @@ public class ChestFetcher {
         }
         if (total > 0 && current != null) {
             fill.put(current, new Fill(used, total));
+            if (used < total) {
+                storageFull = false;
+            }
         }
     }
 

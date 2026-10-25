@@ -28,7 +28,59 @@ public final class Clicks {
     private Clicks() {
     }
 
-    /** A block that does something when clicked (opens a menu, switches): placing against it needs sneaking. */
+    /**
+     * A block about to go away: a cactus flower (broken as one of the "always break" blocks), a cactus that can't stand
+     * any more (a block beside it, nothing under it: it drops on the server's next tick) or that is being broken. A
+     * block clicked against one of those that is gone on the server by the time the click gets there is put INTO its
+     * spot: a string meant to float over a grown cactus landed in the growth spot under it. A grown cactus that still
+     * stands is as good as any block to click against: the sand placed against it is what makes it drop (holding
+     * those back left 379 blocks of a test layer given up).
+     */
+    public static boolean goingAway(net.minecraft.world.level.Level level, BlockPos pos) {
+        BlockState state = level.getBlockState(pos);
+        if (state.is(net.minecraft.world.level.block.Blocks.CACTUS_FLOWER) || BlockBreaker.alwaysBreak(state)) {
+            return true;
+        }
+        return state.is(net.minecraft.world.level.block.Blocks.CACTUS)
+                && (!state.canSurvive(level, pos) || AutoBuild.INSTANCE.breaker.breakingUnder(pos));
+    }
+
+    /** The sides the printer's guesser guides try, in their order: what most blocks are placed with (sand, cactus, string...). */
+    private static final net.minecraft.core.Direction[] GUESSER_ORDER = {net.minecraft.core.Direction.NORTH,
+            net.minecraft.core.Direction.SOUTH, net.minecraft.core.Direction.EAST, net.minecraft.core.Direction.WEST,
+            net.minecraft.core.Direction.UP, net.minecraft.core.Direction.DOWN};
+
+    /**
+     * The block the printer would click against to place this one, or null when there's none. Its own choice: most
+     * blocks go by its guesser guides (the first side of north, south, east, west, up, down with something clickable
+     * there); slabs, torches, signs, heads, banners and chests by its general guide (down, up, north, south, west, east,
+     * one that doesn't open first).
+     */
+    @javax.annotation.Nullable
+    public static BlockPos clickedFor(net.minecraft.world.level.Level level, BlockPos pos) {
+        WorldSchematic schematic = SchematicHelper.world();
+        Block wanted = schematic == null ? null : schematic.getBlockState(pos).getBlock();
+        boolean general = wanted instanceof net.minecraft.world.level.block.SlabBlock || wanted instanceof net.minecraft.world.level.block.TorchBlock
+                || wanted instanceof net.minecraft.world.level.block.SignBlock || wanted instanceof net.minecraft.world.level.block.AbstractSkullBlock
+                || wanted instanceof net.minecraft.world.level.block.AbstractBannerBlock || wanted instanceof net.minecraft.world.level.block.ChestBlock;
+        BlockPos first = null;
+        for (net.minecraft.core.Direction side : general ? net.minecraft.core.Direction.values() : GUESSER_ORDER) {
+            BlockPos next = pos.relative(side);
+            BlockState state = level.getBlockState(next);
+            if (state.getShape(level, next).isEmpty() || state.getBlock() instanceof net.minecraft.world.level.block.SignBlock
+                    || state.canBeReplaced()) {
+                continue;
+            }
+            if (!general || !isInteractive(state)) {
+                return next;
+            }
+            if (first == null) {
+                first = next;
+            }
+        }
+        return first;
+    }
+
     public static boolean isInteractive(BlockState state) {
         Block block = state.getBlock();
         return block instanceof BaseEntityBlock || block instanceof DoorBlock || block instanceof TrapDoorBlock

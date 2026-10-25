@@ -122,10 +122,15 @@ public class Configs implements IConfigHandler {
         public static final ConfigBoolean SKIP_CONTAINERS = new ConfigBoolean("skipContainers", true,
                 "Never break chests, barrels, hoppers, shulker boxes, furnaces etc., even if they are wrong.",
                 "Never break containers");
+        public static final ConfigBoolean STAND_TO_BREAK = new ConfigBoolean("standToBreak", true,
+                "While breaking a block, stop flying for a moment and stand on the block under your feet when there is\n"
+                        + "one (the game breaks blocks 5 times slower in the air: a cactus takes 3 s flying, 0.6 s standing).\n"
+                        + "Never next to a cactus, never on the block being broken; it flies on right after.",
+                "Stand while breaking");
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
                 BREAK_WRONG_BLOCKS, BREAK_WRONG_STATE, BREAK_RANGE, MIN_TOOL_DURABILITY, BREAK_TIMEOUT_SECONDS,
-                WRONG_FOR_TICKS, MAX_BREAKS_PER_BLOCK, LOOK_AT_BLOCKS, ALWAYS_BREAK, SKIP_CONTAINERS);
+                WRONG_FOR_TICKS, MAX_BREAKS_PER_BLOCK, LOOK_AT_BLOCKS, ALWAYS_BREAK, SKIP_CONTAINERS, STAND_TO_BREAK);
     }
 
     public static class Layers {

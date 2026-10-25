@@ -201,6 +201,16 @@ public class FarmTest implements FabricClientGameTest {
             } else {
                 restock(context, server);
             }
+            // PRINTER_ADDON_JUNK=1: cactus flowers from breaking and blocks of the player's own that the build doesn't use
+            // in the inventory, like on the player's tower: the flowers are thrown out, the blocks go into a vault on a
+            // supply trip short of room
+            if (System.getenv("PRINTER_ADDON_JUNK") != null) {
+                for (String command : List.of("give @p cactus_flower 192", "give @p iron_bars 48", "give @p purple_concrete 49",
+                        "give @p bamboo_sign 2")) {
+                    server.runCommand(command);
+                }
+                System.out.println("FARM TEST: cactus flowers and blocks the build doesn't use in the inventory");
+            }
             context.waitTicks(20);
 
             context.runOnClient(mc -> {

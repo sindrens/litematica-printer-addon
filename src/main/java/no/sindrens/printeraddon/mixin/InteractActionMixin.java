@@ -50,6 +50,15 @@ public class InteractActionMixin {
         try {
             printer_addon$sequenceBefore = Configs.enabled() && client.level != null
                     ? ((ClientLevelAccessor) client.level).printer_addon$predictions().currentSequence() : -1;
+            // Never against a block about to go (a flower, a grown cactus): gone on the server first, the block would go
+            // into its spot. Held for a moment instead (it's broken or drops meanwhile)
+            if (Configs.enabled() && client.level != null && no.sindrens.printeraddon.build.AutoBuild.INSTANCE.isRunning()
+                    && !client.level.getBlockState(hit.getBlockPos()).canBeReplaced()
+                    && no.sindrens.printeraddon.build.Clicks.goingAway(client.level, hit.getBlockPos())) {
+                no.sindrens.printeraddon.build.AutoBuild.INSTANCE.clickSkipped(client, hit.getBlockPos().relative(hit.getDirection()), hit.getBlockPos());
+                ci.cancel();
+                return;
+            }
             printer_addon$faceForClick(client, player, hand, hit, ci);
             if (!ci.isCancelled() && Configs.enabled()) {
                 // The click's side, spot, the head's turn and the speed, for the line with its result (see RunLog)

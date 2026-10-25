@@ -186,10 +186,13 @@ public final class RunLog {
     /** Times the player rose up away from a cactus (see Mover#keepClearOfHarm), and times one really hurt. */
     private static int runHarmLifts;
     private static int runHarmTouches;
+    /** Junk thrown out (cactus flowers from breaking) and blocks the build doesn't use put in a vault, in items. */
+    private static int runJunkThrown;
+    private static int runStraysStored;
 
     // Clicks waiting for their result: what the click was like
     private record ClickInfo(long tick, String face, Vec3 hit, float yaw, float pitch, double speed, double eye, double serverEye,
-                             long sinceSwitch) {
+                             long sinceSwitch, String against, boolean supportFresh, boolean belowFresh) {
     }
 
     private static final Map<BlockPos, ClickInfo> clicks = new HashMap<>();
@@ -237,6 +240,7 @@ public final class RunLog {
         minuteSettleTicks = 0;
         minuteStart = now;
         runClicks = runMissed = runWrong = runTrips = runPurchases = runHarmLifts = runHarmTouches = 0;
+        runJunkThrown = runStraysStored = 0;
         runTravel = 0;
         missCauses.clear();
         giveUps.clear();
@@ -268,7 +272,8 @@ public final class RunLog {
                 "wrongBlocks", runWrong, "givenUp", giveUps.values().stream().mapToInt(Integer::intValue).sum(),
                 "givenUpBy", giveUps.toString(), "trips", runTrips, "travel", round(runTravel), "purchases", runPurchases,
                 "spent", Math.round(spent), "spentPerBlock", run.placed == 0 ? 0 : round(spent / run.placed),
-                "cactusTouches", runHarmTouches, "cactusLifts", runHarmLifts,
+                "cactusTouches", runHarmTouches, "cactusLifts", runHarmLifts, "clickAnswers", ServerAcks.answerResults(),
+                "breaking", AutoBuild.INSTANCE.breaker.summary(), "junkThrown", runJunkThrown, "straysStored", runStraysStored,
                 "guard", ServerWatch.summary(), "times", run.breakdown());
         emit("RUN-END", report);
         compareWithLast();
@@ -369,7 +374,8 @@ public final class RunLog {
         if (build.mover.onLane()) {
             return Cat.LANE_FLYING;
         }
-        if (build.mover.isTravelling(mc.player)) {
+        // To the next lane's start too: it was "stuck" for half a second at every lane, 18 s of a test run
+        if (build.mover.isTravelling(mc.player) || build.mover.laneApproaching()) {
             return Cat.TRANSIT;
         }
         if (build.mover.printerReachCount() > 0 || build.lastUnfinishedCount > 0) {
@@ -399,13 +405,32 @@ public final class RunLog {
         int ping = mc.getConnection() == null || mc.getConnection().getPlayerInfo(player.getUUID()) == null
                 ? -1 : mc.getConnection().getPlayerInfo(player.getUUID()).getLatency();
         String pause = build.pausedThisTick();
-        emit("SEC", kv("placedThisSec", second.placed, "clicksThisSec", secClicks, "failsThisSec", secFails,
-                "placedPerSec10s", round(perSec10), "activity", most.key, "lane", build.mover.laneName(), "pos", pos(player.position()),
-                "speedBlocksPerTick", round(Math.sqrt(motion.x * motion.x + motion.z * motion.z)),
-                "feetOverLayerTop", signed(player.getY() - (build.layers.getLayerTop() + 1)),
-                "inReachMover", build.mover.printerReachCount(), "printerUnfinished", build.lastUnfinishedCount,
-                "printerHeld", build.lastHeldCount, "printerNotReady", build.lastNotReadyCount, "printerOffered", build.lastOfferedCount,
-                "pause", pause == null ? "-" : pause.replace(' ', '-'), "tps", round(ServerLag.tps()), "pingMs", ping, "fps", mc.getFps()));
+        // One line every 10 s (it was every second, next to four other status lines): sums over the 10 s, the rest as now
+        for (Cat cat : CATS) {
+            beat.ticks[cat.ordinal()] += second.ticks[cat.ordinal()];
+        }
+        beat.placed += second.placed;
+        beatClicks += secClicks;
+        beatFails += secFails;
+        if (secondCount % 10 == 0) {
+            Cat main = most;
+            for (Cat cat : CATS) {
+                if (beat.ticks[cat.ordinal()] > beat.ticks[main.ordinal()]) {
+                    main = cat;
+                }
+            }
+            emit("BEAT", kv("placed10s", beat.placed, "clicks10s", beatClicks, "missed10s", beatFails, "rate10s", round(perSec10) + "/s",
+                    "activity", main.key, "times", beat.breakdown(), "lane", build.mover.laneName(), "pos", pos(player.position()),
+                    "speedBlocksPerTick", round(Math.sqrt(motion.x * motion.x + motion.z * motion.z)),
+                    "feetOverLayerTop", signed(player.getY() - (build.layers.getLayerTop() + 1)),
+                    "inReachMover", build.mover.printerReachCount(), "printerUnfinished", build.lastUnfinishedCount,
+                    "printerHeld", build.lastHeldCount, "printerNotReady", build.lastNotReadyCount, "printerOffered", build.lastOfferedCount,
+                    "pause", pause == null ? "-" : pause.replace(' ', '-'), "tps", round(ServerLag.tps()), "pingMs", ping, "fps", mc.getFps(),
+                    "free", InventoryCleaner.freeSlots(player.getInventory()), "items", layerItemsHeld(player)));
+            beat.reset(AutoBuild.clientTicks);
+            beatClicks = 0;
+            beatFails = 0;
+        }
         second.reset(AutoBuild.clientTicks);
         secClicks = 0;
         secFails = 0;
@@ -419,6 +444,23 @@ public final class RunLog {
         }
         // Holds not seen for a while are over
         holds.values().removeIf(hold -> AutoBuild.clientTicks - hold.seen() > 10);
+    }
+
+    /** The 10 s a BEAT line sums up. */
+    private static final Span beat = new Span();
+    private static int beatClicks;
+    private static int beatFails;
+
+    /** How many of each of the layer's items the inventory holds, "sand=385 string=133". */
+    private static String layerItemsHeld(LocalPlayer player) {
+        StringBuilder sb = new StringBuilder();
+        for (Item item : AutoBuild.INSTANCE.layers.layerNeeds().keySet()) {
+            if (Tools.isMarker(item)) {
+                continue;
+            }
+            sb.append(sb.length() == 0 ? "" : " ").append(itemName(item)).append('=').append(player.getInventory().countItem(item));
+        }
+        return sb.length() == 0 ? "-" : sb.toString();
     }
 
     private static String changes(String before, String after) {
@@ -460,9 +502,16 @@ public final class RunLog {
         double lag = ServerLag.pingTicks(mc) / 2.0 + 1;
         Vec3 serverEye = eye.subtract(motion.scale(lag));
         net.minecraft.world.phys.AABB box = new net.minecraft.world.phys.AABB(clicked);
+        // What was clicked against (the block itself for an air place)
+        String against = at.equals(clicked) ? "air-place" : mc.level == null ? "?"
+                : LayerManager.blockName(mc.level.getBlockState(clicked)) + "(" + side(at, clicked) + ")";
+        // Clicked against a block (or onto one, for sand) the server may not have had yet: for the miss's cause
+        boolean supportFresh = !at.equals(clicked) && ServerAcks.unconfirmed(clicked, 10);
+        boolean belowFresh = ServerAcks.unconfirmed(at.below(), 10);
         clicks.put(at.immutable(), new ClickInfo(AutoBuild.clientTicks, face.getSerializedName(), hit, player.getYRot(), player.getXRot(),
                 Math.sqrt(motion.x * motion.x + motion.z * motion.z), Math.sqrt(box.distanceToSqr(eye)), Math.sqrt(box.distanceToSqr(serverEye)),
-                AutoBuild.clientTicks - lastSwitchTick));
+                AutoBuild.clientTicks - lastSwitchTick, against, supportFresh, belowFresh));
+        laneClicks++;
         if (clicks.size() > 512) {
             clicks.values().removeIf(c -> AutoBuild.clientTicks - c.tick() > 200);
         }
@@ -485,9 +534,33 @@ public final class RunLog {
             return "";
         }
         int answer = ServerAcks.answerTicks(pos);
-        return String.format(Locale.ROOT, " | face=%s hit=%.2f,%.2f,%.2f yaw=%.1f pitch=%.1f speed=%.2f eyeDist=%.2f serverEyeDist=%.2f sinceSwitch=%dt answer=%s",
-                info.face(), info.hit().x, info.hit().y, info.hit().z, info.yaw(), info.pitch(), info.speed(), info.eye(), info.serverEye(),
-                Math.min(9999, info.sinceSwitch()), answer < 0 ? "none" : answer + "t");
+        // Ticks since the last item switch only when it can matter (sinceSwitch=8470t was noise)
+        return String.format(Locale.ROOT, " | face=%s hit=%.2f,%.2f,%.2f against=%s yaw=%.1f pitch=%.1f speed=%.2f eyeDist=%.2f serverEyeDist=%.2f%s answer=%s",
+                info.face(), info.hit().x, info.hit().y, info.hit().z, info.against(), info.yaw(), info.pitch(), info.speed(), info.eye(),
+                info.serverEye(), info.sinceSwitch() <= 20 ? " sinceSwitch=" + info.sinceSwitch() + "t" : "", answer < 0 ? "none" : answer + "t");
+    }
+
+    /** "D" when {@code other} is below {@code pos}, "U" above, "N", "S", "W", "E" beside it. */
+    private static String side(BlockPos pos, BlockPos other) {
+        for (Direction direction : Direction.values()) {
+            if (pos.relative(direction).equals(other)) {
+                return direction.getSerializedName().substring(0, 1).toUpperCase(Locale.ROOT);
+            }
+        }
+        return "?";
+    }
+
+    /** The six blocks around this spot now, for the line of a click that placed nothing or the wrong block. */
+    public static String neighbours(Minecraft mc, BlockPos pos) {
+        if (mc.level == null) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder(" nb=");
+        for (Direction direction : Direction.values()) {
+            sb.append(direction.getSerializedName().substring(0, 1).toUpperCase(Locale.ROOT)).append(':')
+                    .append(LayerManager.blockName(mc.level.getBlockState(pos.relative(direction)))).append(direction == Direction.EAST ? "" : ",");
+        }
+        return sb.toString();
     }
 
     /** The most likely reason a click placed nothing or the wrong block. */
@@ -506,8 +579,22 @@ public final class RunLog {
             cause = "in-the-way(" + mc.level.getEntities(null, new net.minecraft.world.phys.AABB(pos)).getFirst().getType().toShortString() + ")";
         } else if (wrong) {
             cause = "placed-against-another-block";
+        } else if (info == null) {
+            cause = "refused-other";
+        } else if (info.sinceSwitch() == 0) {
+            // Refused, split by what was likely behind it (99 % of a log's misses were all "refused-by-server")
+            cause = "refused-same-tick-as-switch";
+        } else if (ServerLag.tps() < 12 || ServerLag.ticksSinceTimeUpdate() > 30) {
+            cause = "refused-during-lag";
+        } else if (info.belowFresh() && SchematicHelper.world() != null
+                && SchematicHelper.world().getBlockState(pos).getBlock() instanceof net.minecraft.world.level.block.FallingBlock) {
+            cause = "refused-falling-block-on-new-block";
+        } else if (info.supportFresh()) {
+            cause = "refused-against-new-block";
+        } else if (info.speed() > 0.2 && info.serverEye() > 4.0) {
+            cause = "refused-moving-far";
         } else {
-            cause = "refused-by-server";
+            cause = "refused-other";
         }
         String key = cause.contains("(") ? cause.substring(0, cause.indexOf('(')) : cause;
         missCauses.merge(key, 1, Integer::sum);
@@ -517,6 +604,8 @@ public final class RunLog {
             runMissed++;
         }
         secFails++;
+        laneMisses++;
+        layerMisses++;
         if (info != null && info.sinceSwitch() <= 3) {
             minuteMissAfterSwitch++;
         }
@@ -530,6 +619,7 @@ public final class RunLog {
         }
         lastSwitchTick = AutoBuild.clientTicks;
         minuteSwitches++;
+        laneSwitches++;
         switchPairs.merge(itemName(from) + ">" + itemName(to), 1, Integer::sum);
     }
 
@@ -604,7 +694,15 @@ public final class RunLog {
         speedSum = 0;
         speedTicks = 0;
         lane.reset(AutoBuild.clientTicks);
+        laneClicks = laneMisses = laneSwitches = 0;
     }
+
+    /** Misses during the layer (see LAYER-DONE). */
+    private static int layerMisses;
+    /** Clicks, misses and item switches during the lane (see LANE-END). */
+    private static int laneClicks;
+    private static int laneMisses;
+    private static int laneSwitches;
 
     /** The lane is over (the next begins, all are flown, the layer changed): what it did and what it left, and why. */
     public static void laneEnd(String why) {
@@ -641,7 +739,8 @@ public final class RunLog {
                 "placedAll", lane.placed, "time", seconds(ticks), "placedPerSec", round(lane.placed / (ticks / 20.0)), "paused", seconds(Math.max(0, paused)),
                 "pausedBy", pausedOnly.breakdown(), "feetOverTopMin", feetMin == Double.MAX_VALUE ? "-" : signed(feetMin),
                 "feetOverTopMax", feetMax == -Double.MAX_VALUE ? "-" : signed(feetMax),
-                "avgSpeedBlocksPerTick", round(speedTicks == 0 ? 0 : speedSum / speedTicks), "leftWhy", reasons.toString()));
+                "avgSpeedBlocksPerTick", round(speedTicks == 0 ? 0 : speedSum / speedTicks), "clicks", laneClicks, "missed", laneMisses,
+                "switches", laneSwitches, "leftWhy", reasons.toString()));
         if (!listed.isEmpty()) {
             BuildLog.line("LANE-LEFT", "lane=" + laneName + " " + String.join(" ", listed) + (left > listed.size() ? " (+" + (left - listed.size()) + " more)" : ""));
         }
@@ -704,6 +803,11 @@ public final class RunLog {
                 "leftoverTime", seconds(layerLeftoverTicks), "leftoverPlacedPerSec",
                 round(layerLeftoverTicks == 0 ? 0 : layerLeftoverPlaced / (layerLeftoverTicks / 20.0)),
                 "trips", layerTrips, "travel", round(layerTravel), "top3", layer.top(3), "times", layer.breakdown()));
+        // The short line to compare layers and runs by
+        emit("LAYER-DONE", kv("layer", name.replace("Layers ", "").replace("Layer ", "").replace(" ", ""), "time", seconds(ticks),
+                "placed", layer.placed, "rate", Math.round(layer.placed * 60.0 / (ticks / 20.0)) + "/m", "lanePlaced", layerLanePlaced,
+                "leftovers", layerLeftovers < 0 ? "-" : layerLeftovers, "leftoverTime", seconds(layerLeftoverTicks),
+                "buy", seconds(layer.ticks[Cat.BUYING.ordinal()] + layer.ticks[Cat.VAULT.ordinal()]), "missed", layerMisses));
         resetLayer(AutoBuild.clientTicks, name);
     }
 
@@ -718,6 +822,7 @@ public final class RunLog {
         layerLeftovers = -1;
         layerTrips = 0;
         layerTravel = 0;
+        layerMisses = 0;
         lanesDone = false;
     }
 
@@ -774,7 +879,8 @@ public final class RunLog {
         supplyQuiet = 0;
         supplyPurchases = 0;
         supplyBought.clear();
-        emit("SUPPLY-START", kv("trigger", trigger, "lane", supplyWhere, "invFree", supplyInvFree, "vaultFree", supplyVaultFree));
+        emit("SUPPLY-START", kv("trigger", trigger, "lane", supplyWhere, "invFree", supplyInvFree, "vaultFree", supplyVaultFree,
+                "slots", slotUse(mc.player)));
     }
 
     /**
@@ -803,7 +909,44 @@ public final class RunLog {
         emit("SUPPLY-END", kv("trigger", supplyTrigger, "time", seconds(AutoBuild.clientTicks - supplyStart), "purchases", supplyPurchases,
                 "bought", supplyBought.toString(), "spent", Math.round(AutoBuild.INSTANCE.spentTotal() - supplySpent),
                 "invFreeBefore", supplyInvFree, "invFreeAfter", mc.player == null ? -1 : InventoryCleaner.freeSlots(mc.player.getInventory()),
-                "vaultFreeBefore", supplyVaultFree, "vaultFreeAfter", AutoBuild.INSTANCE.fetcher.knownFreeSlots(), "lane", supplyWhere));
+                "vaultFreeBefore", supplyVaultFree, "vaultFreeAfter", AutoBuild.INSTANCE.fetcher.knownFreeSlots(), "lane", supplyWhere,
+                "slots", mc.player == null ? "-" : slotUse(mc.player)));
+    }
+
+    /**
+     * What the inventory's 36 slots hold, for the supply lines: the layer's items (and how many of those stacks aren't
+     * full), junk, blocks the build doesn't use, tools and the rest. Each slot not free is a stack less in a purchase.
+     */
+    private static String slotUse(LocalPlayer player) {
+        java.util.Set<Item> layerItems = AutoBuild.INSTANCE.layers.layerNeeds().keySet();
+        int build = 0;
+        int partial = 0;
+        int junk = 0;
+        int strays = 0;
+        int tools = 0;
+        int other = 0;
+        int free = 0;
+        for (int slot = 0; slot < net.minecraft.world.entity.player.Inventory.INVENTORY_SIZE; slot++) {
+            net.minecraft.world.item.ItemStack stack = player.getInventory().getItem(slot);
+            if (stack.isEmpty()) {
+                free++;
+            } else if (layerItems.contains(stack.getItem())) {
+                build++;
+                if (stack.getCount() < stack.getMaxStackSize()) {
+                    partial++;
+                }
+            } else if (InventoryCleaner.isJunk(stack)) {
+                junk++;
+            } else if (stack.isDamageableItem()) {
+                tools++;
+            } else if (AutoBuild.INSTANCE.cleaner.isStray(stack)) {
+                strays++;
+            } else {
+                other++;
+            }
+        }
+        return "free=" + free + " build=" + build + " buildPartial=" + partial + " junk=" + junk + " notForBuild=" + strays
+                + " tools=" + tools + " other=" + other;
     }
 
     /** A purchase is done: what, how many, the price, the clicks and how long. */
@@ -827,6 +970,16 @@ public final class RunLog {
     /** A cactus (or berry bush) of the build really hurt the player. */
     public static void harmTouch() {
         runHarmTouches++;
+    }
+
+    /** Junk thrown out (see InventoryCleaner#isJunk). */
+    public static void junkThrown(int items) {
+        runJunkThrown += items;
+    }
+
+    /** Blocks the build doesn't use put in a vault (see InventoryCleaner#isStray). */
+    public static void straysStored(int items) {
+        runStraysStored += items;
     }
 
     /** Something happened: damage, a disconnect, a reconnect... */
@@ -1023,7 +1176,7 @@ public final class RunLog {
                 case '\t' -> sb.append("\\t");
                 default -> {
                     if (c < 0x20) {
-                        sb.append(String.format("\\u%04x", (int) c));
+                        sb.append(String.format(java.util.Locale.ROOT, "\\u%04x", (int) c));
                     } else {
                         sb.append(c);
                     }

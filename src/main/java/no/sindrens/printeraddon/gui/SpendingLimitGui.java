@@ -27,8 +27,8 @@ public class SpendingLimitGui extends GuiTextInputBase {
         Minecraft mc = Minecraft.getInstance();
         Double estimate = CostEstimate.estimate(mc);
         Double balance = CostEstimate.balance(mc);
-        String info = (estimate != null ? String.format("The rest of the build costs about $%,.0f", estimate) : "No shop scan yet (J+S): no cost estimate")
-                + (balance != null ? String.format(", your balance is $%,.0f", balance) : "");
+        String info = (estimate != null ? String.format(java.util.Locale.ROOT, "The rest of the build costs about $%,.0f", estimate) : "No shop scan yet (J+S): no cost estimate")
+                + (balance != null ? String.format(java.util.Locale.ROOT, ", your balance is $%,.0f", balance) : "");
         this.addLabel(this.dialogLeft, this.dialogTop - 14, this.dialogWidth, 10, 0xFFFFFFFF, info);
         ButtonGeneric noLimit = new ButtonGeneric(this.dialogLeft, this.dialogTop + this.dialogHeight + 4, this.dialogWidth, 20,
                 "No limit: start");

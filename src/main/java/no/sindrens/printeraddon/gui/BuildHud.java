@@ -82,10 +82,10 @@ public final class BuildHud {
         // last minute alone
         double average = build.stats.averageRate();
         String eta = average > 0.5 ? BuildStats.time((long) (left / average * 60_000)) : "working it out";
-        add(lines, colors, String.format("%,d blocks left in the build, about %s to go", left, eta)
+        add(lines, colors, String.format(java.util.Locale.ROOT, "%,d blocks left in the build, about %s to go", left, eta)
                 + (build.wholeKnown() ? "" : " (still counting)"), TEXT);
-        add(lines, colors, String.format("%.0f blocks/min now, %s on average, %s", rate,
-                average > 0 ? String.format("%.0f", average) : "-", build.speed.describe()), GREY);
+        add(lines, colors, String.format(java.util.Locale.ROOT, "%.0f blocks/min now, %s on average, %s", rate,
+                average > 0 ? String.format(java.util.Locale.ROOT, "%.0f", average) : "-", build.speed.describe()), GREY);
         int busy = build.stats.printerBusyPercent();
         add(lines, colors, "Printer busy " + busy + "%" + (busy < 80 ? " (mostly idle because: " + build.stats.printerIdleReason() + ")" : ""), GREY);
         String guard = no.sindrens.printeraddon.build.ServerWatch.describe();

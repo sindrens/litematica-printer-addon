@@ -160,8 +160,8 @@ public class BuildStats {
             BuildLog.line("TURNS", (sb.length() > 2 ? sb.substring(0, sb.length() - 2) : "-")
                     + " | in reach: mover " + build.mover.printerReachCount() + ", printer " + build.lastUnfinishedCount
                     + " unfinished, " + build.lastHeldCount + " held back, " + build.lastOfferedCount + " offered"
-                    + " | " + build.mover.describe() + String.format(" | %.1f blocks/s", build.mover.speedPerSecond())
-                    + (player != null ? String.format(" | at %.1f %.1f %.1f", player.getX(), player.getY(), player.getZ()) : ""));
+                    + " | " + build.mover.describe() + String.format(java.util.Locale.ROOT, " | %.1f blocks/s", build.mover.speedPerSecond())
+                    + (player != null ? String.format(java.util.Locale.ROOT, " | at %.1f %.1f %.1f", player.getX(), player.getY(), player.getZ()) : ""));
             java.util.Arrays.fill(secondTurns, 0);
             secondStart = AutoBuild.clientTicks;
         }
@@ -256,7 +256,7 @@ public class BuildStats {
         int turns = Math.max(1, ticks / interval);
         StringBuilder sb = new StringBuilder();
         sb.append(placed).append(" placed in ").append(time(millis))
-                .append(String.format(" (%.0f per game minute, %.0f per real minute, %d%% of the interval turns used)",
+                .append(String.format(java.util.Locale.ROOT, " (%.0f per game minute, %.0f per real minute, %d%% of the interval turns used)",
                         placed * 1200.0 / Math.max(1, ticks), placed * 60_000.0 / Math.max(1, millis),
                         Math.min(100, placed * 100 / turns)));
         if (ticks > 0) {
@@ -273,6 +273,6 @@ public class BuildStats {
 
     public static String time(long millis) {
         long s = millis / 1000;
-        return s >= 3600 ? String.format("%d:%02d:%02d", s / 3600, s / 60 % 60, s % 60) : String.format("%d:%02d", s / 60, s % 60);
+        return s >= 3600 ? String.format(java.util.Locale.ROOT, "%d:%02d:%02d", s / 3600, s / 60 % 60, s % 60) : String.format(java.util.Locale.ROOT, "%d:%02d", s / 60, s % 60);
     }
 }

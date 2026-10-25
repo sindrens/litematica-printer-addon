@@ -30,7 +30,7 @@ public final class Diagnose {
                 .append(": is ").append(BlockText.of(current)).append(", should be ").append(BlockText.of(target));
 
         double distance = Math.sqrt(mc.player.getEyePosition().distanceToSqr(Vec3.atCenterOf(pos)));
-        sb.append(String.format(" | %.1f blocks away", distance));
+        sb.append(String.format(java.util.Locale.ROOT, " | %.1f blocks away", distance));
         double reach = Math.min(me.aleksilassila.litematica.printer.config.Configs.PRINTING_RANGE.getDoubleValue(),
                 mc.player.blockInteractionRange());
         if (distance > reach) {

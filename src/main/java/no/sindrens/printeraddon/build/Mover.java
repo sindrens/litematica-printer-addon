@@ -392,7 +392,16 @@ public class Mover {
      */
     /** Waiting for the server's answer to a click on it or next to it (the printer isn't given it meanwhile). */
     private static boolean heldBack(BlockPos pos) {
-        return ServerAcks.works() && (ServerAcks.isWaiting(pos) || ServerAcks.nextToWaiting(pos));
+        if (!ServerAcks.works()) {
+            return false;
+        }
+        if (ServerAcks.isWaiting(pos) || ServerAcks.nextToWaiting(pos)) {
+            return true;
+        }
+        // Or what it's clicked against was placed a moment ago (see AutoBuild#filterPositions)
+        net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+        BlockPos support = mc.level == null ? null : Clicks.clickedFor(mc.level, pos);
+        return support != null && ServerAcks.unconfirmed(support, 4);
     }
 
     private double glideSpeedFor(LocalPlayer player, List<BlockPos> inReach, double reach) {
@@ -545,12 +554,15 @@ public class Mover {
         if (mc.player != null && mc.level != null && flying(mc.player)) {
             keepClearOfHarm(mc.level, mc.player);
         }
-        // Every change of what the player is doing, in the build log
+        // Every change of what the player is doing, in the build log; a new target in the same state only with "Debug
+        // log" (STATE FLYING -> FLYING was most of 680 lines an hour)
         if (BuildLog.isOpen() && mc.player != null && (state != loggedState || !java.util.Objects.equals(target, loggedTarget))) {
-            BuildLog.line("STATE", (loggedState == null ? "-" : loggedState) + " -> " + state
-                    + (target != null ? " | target " + target.toShortString() : "")
-                    + " | area " + areaName(area) + " | at " + mc.player.blockPosition().toShortString()
-                    + " | " + describe());
+            if (state != loggedState || no.sindrens.printeraddon.config.Configs.Generic.DEBUG_LOG.getBooleanValue()) {
+                BuildLog.line("STATE", (loggedState == null ? "-" : loggedState) + " -> " + state
+                        + (target != null ? " | target " + target.toShortString() : "")
+                        + " | area " + areaName(area) + " | at " + mc.player.blockPosition().toShortString()
+                        + " | " + describe());
+            }
             loggedState = state;
             loggedTarget = target;
         }
@@ -761,7 +773,7 @@ public class Mover {
                 halt(player);
                 RunLog.tripEnd(mc, "arrived");
                 if (moveStartTick >= 0) {
-                    BuildLog.line("MOVE", String.format("arrived at %s after %.1f s, %.1f blocks from %s; %d placeable in reach",
+                    BuildLog.line("MOVE", String.format(java.util.Locale.ROOT, "arrived at %s after %.1f s, %.1f blocks from %s; %d placeable in reach",
                             player.blockPosition().toShortString(), (tick - moveStartTick) / 20.0,
                             Math.sqrt(player.position().distanceToSqr(moveFrom)), BlockPos.containing(moveFrom).toShortString(),
                             inReach.size()));
@@ -828,7 +840,7 @@ public class Mover {
         // (standing still here "placing within reach" with nothing in reach was the long stops in the logs)
         if (state != State.WALKING && state != State.FLYING && hoverPoint(mc, nearest).distanceToSqr(player.position()) < 0.3 * 0.3) {
             BlockPos block = spotFor != null ? spotFor : nearest;
-            skip(block, String.format("the spot planned for it is right where the player is, but it isn't in the printer's reach from here"
+            skip(block, String.format(java.util.Locale.ROOT, "the spot planned for it is right where the player is, but it isn't in the printer's reach from here"
                     + " (%.2f from the eye, printer range %.2f)", Math.sqrt(eye.distanceToSqr(Vec3.atCenterOf(block))), reach));
             dropWork(block);
             state = State.IDLE;
@@ -875,6 +887,12 @@ public class Mover {
     private static final double OVER_WALL = 30;
     /** The next lane in order is taken when it's at most this much farther than the nearest. */
     private static final double IN_ORDER_SLACK = 12;
+    /** A lane part with fewer blocks than this isn't flown as a lane (see nextLane). */
+    private static final int MIN_LANE_PART = 20;
+    private int lastTinyParts = -1;
+    /** Held at a lane's end at most this long while blocks in reach are still to be placed (see sweepTick). */
+    private static final int LANE_END_WAIT = 20;
+    private int laneEndWaited;
     /** Which way the sweep goes over the lanes (+1: to higher lane numbers). */
     private int sweepDirection = 1;
     /** The lane being flown: its start and end (blocks of the layer); first flying to its start. */
@@ -902,6 +920,8 @@ public class Mover {
     private static final double SWEEP_SAFE = 0.45;
     /** A layer with fewer unfinished blocks than this isn't worth lanes. */
     private static final int SWEEP_MIN_BLOCKS = 40;
+    /** Nor one with fewer than this many on average for each lane it would take. */
+    private static final int LANE_MIN_BLOCKS = 40;
 
     private long lastLaneStallNote = -100000;
     /** Blocks the printer didn't take while in reach (see tickNow), until when they're left out. */
@@ -977,6 +997,12 @@ public class Mover {
                     return true;
                 }
                 flyAlongLane(player, laneApproach ? laneStart : laneEnd);
+            } else if (laneEnd != null && !inReach.isEmpty() && laneEndWaited < LANE_END_WAIT) {
+                // At the lane's end with blocks in reach still to go in (most only waiting for the server's answer to
+                // the block next to them): a moment for those, not left for spot by spot after the lanes
+                laneEndWaited++;
+                settle(player);
+                return true;
             } else if (!nextLane(player)) {
                 sweepDone = true;
                 laneEnd = null;
@@ -1018,11 +1044,15 @@ public class Mover {
         int lowestY = Integer.MAX_VALUE;
         int chains = 0;
         int blocks = 0;
+        int breaks = 0;
         for (BlockPos pos : work) {
             if (!inLayers(pos)) {
                 continue;
             }
             blocks++;
+            if (BlockCheck.check(player.level(), schematic, pos).needsBreaking()) {
+                breaks++;
+            }
             minX = Math.min(minX, pos.getX());
             maxX = Math.max(maxX, pos.getX());
             minZ = Math.min(minZ, pos.getZ());
@@ -1071,6 +1101,13 @@ public class Mover {
         // of the farm can't place from up there); one lane more when that's the only way
         int span = to - from + 1;
         int count = (span + width - 1) / width;
+        // Few blocks for that many lanes, or mostly wrong blocks to break (each stops the lane anyway): spot by spot,
+        // from one to the next. A layer of grown cactus to clear, 146 blocks, took 11 lanes and 284 s
+        if (blocks < count * LANE_MIN_BLOCKS || breaks * 2 > blocks) {
+            BuildLog.line("SWEEP", layer + " spot by spot: " + (breaks * 2 > blocks ? breaks + " of " + blocks
+                    + " blocks are wrong ones to break" : "only " + blocks + " blocks for " + count + " lanes"));
+            return 0;
+        }
         int alongFrom = lanesAlongX ? minX : minZ;
         int alongTo = lanesAlongX ? maxX : maxZ;
         int first = from + laneHalf - (count * width - span) / 2;
@@ -1141,6 +1178,25 @@ public class Mover {
      */
     private boolean nextLane(LocalPlayer player) {
         List<LanePart> parts = laneParts(player);
+        // A part with only a few blocks isn't flown as a lane (the first three lanes of a layer, 1, 2 and 5 blocks,
+        // took 15 s, mostly flying to them): the lanes beside it reach some of them, the rest go spot by spot after
+        // the lanes. Not a part not loaded yet (unknown how much is there)
+        int tiny = 0;
+        int tinyBlocks = 0;
+        for (LanePart part : parts) {
+            if (part.blocks() < MIN_LANE_PART && part.unloaded() == 0) {
+                tiny++;
+                tinyBlocks += part.blocks();
+            }
+        }
+        if (tiny > 0) {
+            parts.removeIf(part -> part.blocks() < MIN_LANE_PART && part.unloaded() == 0);
+            if (tiny != lastTinyParts) {
+                lastTinyParts = tiny;
+                BuildLog.line("SWEEP", tiny + " lane part" + (tiny == 1 ? "" : "s") + " with fewer than " + MIN_LANE_PART
+                        + " blocks (" + tinyBlocks + " in all) not flown as lanes: placed from the lanes beside them or after the lanes");
+            }
+        }
         if (parts.isEmpty()) {
             return false;
         }
@@ -1230,6 +1286,7 @@ public class Mover {
         laneEnd = freeLaneEnd(player, end, start);
         laneRetries = 0;
         laneRetryDistance = Double.MAX_VALUE;
+        laneEndWaited = 0;
         // What the lane takes: if the inventory won't last it, it's topped up first, not halfway along it
         AutoBuild.INSTANCE.beforeLane(laneItems(c, best.lo(), best.hi()));
         // Flown to its start first when that's not right here, or not in the clear from here (over a wall: the lane
@@ -1303,7 +1360,9 @@ public class Mover {
             int from = lanesAlongX ? part[0] : part[2];
             int to = lanesAlongX ? part[1] : part[3];
             for (int c : lanes) {
-                if (crossTo >= c - laneHalf && crossFrom <= c + laneHalf && !flown(c, from, to)) {
+                // Flown along to within 2 blocks of its ends counts (the printer reached those): a part not loaded when
+                // the lane went by kept lane 8 open, and after the last lane it flew 139 blocks back there for nothing
+                if (crossTo >= c - laneHalf && crossFrom <= c + laneHalf && !flown(c, Math.min(to, from + 2), Math.max(from, to - 2))) {
                     spans.computeIfAbsent(c, k -> new ArrayList<>()).add(new int[]{from, to, AutoBuild.INSTANCE.layers.getLayer(), 0, 1});
                 }
             }
@@ -1438,7 +1497,7 @@ public class Mover {
             }
             Integer before = laneLines.put(c, line);
             if (line != c && (before == null || before != line)) {
-                BuildLog.line("SWEEP", String.format("lane %d is flown along %s %d, the row beside its middle: %d places on its "
+                BuildLog.line("SWEEP", String.format(java.util.Locale.ROOT, "lane %d is flown along %s %d, the row beside its middle: %d places on its "
                                 + "middle (%s %d) have a cactus or something else in the way at the hover height, %d on that row",
                         lanes.indexOf(c) + 1, lanesAlongX ? "z" : "x", line, middle, lanesAlongX ? "z" : "x", c, inTheWay(player, line)));
             }
@@ -1510,9 +1569,14 @@ public class Mover {
         if (schematic == null) {
             return items;
         }
+        // Everything the printer reaches from the lane's line on the way, a row beyond the lane's own on either side:
+        // it places those too (a lane of 366 blocks placed 818), and two trips started near a lane's end ("string 8
+        // left" at 82 and 96 %) after the check at its start
+        int line = lineOf(c);
+        int band = laneHalf + 1;
         for (BlockPos pos : work) {
             int along = lanesAlongX ? pos.getX() : pos.getZ();
-            if (Math.abs((lanesAlongX ? pos.getZ() : pos.getX()) - c) > laneHalf || !inLayers(pos) || along < from || along > to) {
+            if (Math.abs((lanesAlongX ? pos.getZ() : pos.getX()) - line) > band || !inLayers(pos) || along < from - band || along > to + band) {
                 continue;
             }
             net.minecraft.world.item.ItemStack stack = StateRules.itemFor(schematic.getBlockState(pos));
@@ -1520,6 +1584,9 @@ public class Mover {
                 items.merge(stack.getItem(), 1, Integer::sum);
             }
         }
+        // And some to spare: a trip starts at this many left anyway
+        int left = Configs.Shop.BUY_WHEN_LEFT.getIntegerValue();
+        items.replaceAll((item, count) -> count + count / 10 + left);
         return items;
     }
 
@@ -1572,6 +1639,11 @@ public class Mover {
     /** Flying along a lane now (not to its start): for the run log's time by category. */
     public boolean onLane() {
         return laneFlight() && !laneApproach;
+    }
+
+    /** Flying to the start of the next lane (placing what's in reach on the way). */
+    public boolean laneApproaching() {
+        return laneFlight() && laneApproach;
     }
 
     /** "7/15" for the lane being flown (or flown to), "-" when none. */
@@ -1835,6 +1907,7 @@ public class Mover {
         int layer = AutoBuild.INSTANCE.layers.getLayer();
         if (layer != sweepLayer) {
             sweepLayer = layer;
+            routeLoggedFor = -1;
             unloadable.clear();
             lastAreaOrder = Long.MIN_VALUE;
             area = null;
@@ -1869,13 +1942,17 @@ public class Mover {
             // The nearest area with something placeable (by how far its square is), with a small extra cost for areas
             // behind in the usual order (north-west to south-east, snaking), so it doesn't hop back and forth.
             // Areas that aren't loaded yet come when nothing loaded is left, nearest first: none is skipped
-            List<Long> byCost = new ArrayList<>(keys);
-            byCost.sort(java.util.Comparator.comparingDouble(key -> areaCost(key, from)));
             Long next = null;
-            for (Long key : byCost) {
-                if (anyDoable(mc, schematic, workByArea.get(key), spotExclude)) {
-                    next = key;
-                    break;
+            if (sweepDone) {
+                next = routeNext(mc, schematic, workByArea, keys, from);
+            } else {
+                List<Long> byCost = new ArrayList<>(keys);
+                byCost.sort(java.util.Comparator.comparingDouble(key -> areaCost(key, from)));
+                for (Long key : byCost) {
+                    if (anyDoable(mc, schematic, workByArea.get(key), spotExclude)) {
+                        next = key;
+                        break;
+                    }
                 }
             }
             if (next == null) {
@@ -1952,7 +2029,7 @@ public class Mover {
             planSpacing = spacing;
             plan = lawnPlan(area, from, y, spacing);
             planIndex = 0;
-            BuildLog.line("PLAN", String.format("area %s: %d spots %d apart (reach %.2f, %.2f above the blocks, %.2f sideways)",
+            BuildLog.line("PLAN", String.format(java.util.Locale.ROOT, "area %s: %d spots %d apart (reach %.2f, %.2f above the blocks, %.2f sideways)",
                     areaName(area), plan.size(), spacing, planR, eyeAbove, sideways));
         }
         for (int step = 0; step < plan.size(); step++) {
@@ -2022,7 +2099,7 @@ public class Mover {
         double max = reach - 0.25;
         double learned = ReachStats.reach(max);
         if (Math.abs(learned - loggedReach) >= 0.2) {
-            BuildLog.line("LEARN", String.format("planning with reach %.2f (most %.2f): %s", learned, max, ReachStats.explain(max)));
+            BuildLog.line("LEARN", String.format(java.util.Locale.ROOT, "planning with reach %.2f (most %.2f): %s", learned, max, ReachStats.explain(max)));
             loggedReach = learned;
         }
         return learned;
@@ -2162,6 +2239,106 @@ public class Mover {
     }
 
     /** How far the player is from an area's square, plus the extra cost for going back against the usual order. */
+    /** Areas in the leftovers' route when it was last written to the build log (-1: not yet). */
+    private int routeLoggedFor = -1;
+
+    /**
+     * After the lanes (or on a layer done spot by spot): the areas with something placeable as one short route from
+     * where the player is (nearest first, then shortened by turning legs around: 2-opt), and its first area. Area by
+     * area in their usual order, with a cost for going back, the leftovers' flights were 2 to 3 times the straight way.
+     */
+    @Nullable
+    private Long routeNext(Minecraft mc, WorldSchematic schematic, Map<Long, List<BlockPos>> workByArea,
+                           java.util.Collection<Long> keys, Vec3 from) {
+        List<Long> route = new ArrayList<>();
+        Map<Long, double[]> at = new HashMap<>();
+        int blocks = 0;
+        for (Long key : keys) {
+            List<BlockPos> list = workByArea.get(key);
+            if (list == null) {
+                continue;
+            }
+            // Where its placeable blocks are, on average
+            double sx = 0;
+            double sz = 0;
+            int n = 0;
+            for (BlockPos pos : list) {
+                if (!spotExclude.contains(pos) && canDoNow(mc, schematic, pos)) {
+                    sx += pos.getX() + 0.5;
+                    sz += pos.getZ() + 0.5;
+                    n++;
+                }
+            }
+            if (n > 0) {
+                at.put(key, new double[]{sx / n, sz / n});
+                route.add(key);
+                blocks += n;
+            }
+        }
+        if (route.isEmpty()) {
+            return null;
+        }
+        double[] start = {from.x, from.z};
+        // Nearest first
+        List<Long> left = new ArrayList<>(route);
+        route.clear();
+        double[] here = start;
+        while (!left.isEmpty()) {
+            Long best = null;
+            double bestDistance = Double.MAX_VALUE;
+            for (Long key : left) {
+                double d = planeDistance(here, at.get(key));
+                if (d < bestDistance) {
+                    bestDistance = d;
+                    best = key;
+                }
+            }
+            route.add(best);
+            left.remove(best);
+            here = at.get(best);
+        }
+        double nearestFirst = routeLength(route, at, start);
+        // 2-opt on the open route from the player: legs a-b and c-d become a-c and b-d when that's shorter
+        boolean better = true;
+        for (int pass = 0; better && pass < 20; pass++) {
+            better = false;
+            for (int i = 0; i < route.size() - 1; i++) {
+                for (int k = i + 1; k < route.size(); k++) {
+                    double[] a = i == 0 ? start : at.get(route.get(i - 1));
+                    double[] b = at.get(route.get(i));
+                    double[] c = at.get(route.get(k));
+                    double[] d = k + 1 < route.size() ? at.get(route.get(k + 1)) : null;
+                    double before = planeDistance(a, b) + (d == null ? 0 : planeDistance(c, d));
+                    double after = planeDistance(a, c) + (d == null ? 0 : planeDistance(b, d));
+                    if (after < before - 0.01) {
+                        java.util.Collections.reverse(route.subList(i, k + 1));
+                        better = true;
+                    }
+                }
+            }
+        }
+        if (route.size() != routeLoggedFor) {
+            routeLoggedFor = route.size();
+            BuildLog.line("LEFTOVER-PLAN", String.format(java.util.Locale.ROOT, "areas=%d blocks=%d route=%.0f nearestFirst=%.0f first=%s",
+                    route.size(), blocks, routeLength(route, at, start), nearestFirst, areaName(route.getFirst()).replace(" ", "")));
+        }
+        return route.getFirst();
+    }
+
+    private static double planeDistance(double[] a, double[] b) {
+        return Math.hypot(a[0] - b[0], a[1] - b[1]);
+    }
+
+    private static double routeLength(List<Long> route, Map<Long, double[]> at, double[] start) {
+        double length = 0;
+        double[] here = start;
+        for (Long key : route) {
+            length += planeDistance(here, at.get(key));
+            here = at.get(key);
+        }
+        return length;
+    }
+
     private double areaCost(long key, Vec3 from) {
         double minX = ((int) key) * 16;
         double minZ = ((int) (key >> 32)) * 16;
@@ -2334,7 +2511,7 @@ public class Mover {
                 moveFrom = player.position();
                 RunLog.tripStart(mc, errand != null ? "vault-or-chest" : sweepDone ? "leftover" : isNotLoaded(mc, goalBlock) ? "unloaded" : "spot");
             }
-            BuildLog.line("MOVE", String.format("flying from %s to %.1f %.1f %.1f (%.1f blocks) for %s, area %s",
+            BuildLog.line("MOVE", String.format(java.util.Locale.ROOT, "flying from %s to %.1f %.1f %.1f (%.1f blocks) for %s, area %s",
                     player.blockPosition().toShortString(), flyTarget.x, flyTarget.y, flyTarget.z,
                     Math.sqrt(player.position().distanceToSqr(flyTarget)), goalBlock.toShortString(), areaName(area)));
             state = State.FLYING;
@@ -2896,7 +3073,7 @@ public class Mover {
             List<Vec3> near = FlyPath.findNear(mc.level, from, block, planR, player.getEyeHeight(), reserved::contains);
             if (near != null) {
                 Vec3 spot = near.getLast();
-                BuildLog.line("MOVE", String.format("the planned spot %s can't be got to: flying to %.1f %.1f %.1f instead, %.2f from %s (%d turns)",
+                BuildLog.line("MOVE", String.format(java.util.Locale.ROOT, "the planned spot %s can't be got to: flying to %.1f %.1f %.1f instead, %.2f from %s (%d turns)",
                         BlockPos.containing(flyTarget).toShortString(), spot.x, spot.y, spot.z,
                         Math.sqrt(spot.add(0, player.getEyeHeight(), 0).distanceToSqr(Vec3.atCenterOf(block))), block.toShortString(), near.size()));
                 flyPath = near;
@@ -2911,7 +3088,7 @@ public class Mover {
             if (leg != null) {
                 flyPath = leg;
                 flyLeg = true;
-                BuildLog.line("MOVE", String.format("long way to %s (%.0f blocks): flying the first part to %s (%d turns)",
+                BuildLog.line("MOVE", String.format(java.util.Locale.ROOT, "long way to %s (%.0f blocks): flying the first part to %s (%d turns)",
                         BlockPos.containing(flyTarget).toShortString(), from.distanceTo(flyTarget),
                         BlockPos.containing(leg.getLast()).toShortString(), leg.size()));
                 return true;
@@ -2993,7 +3170,7 @@ public class Mover {
                 }
             }
         }
-        BuildLog.line("MOVE", String.format("arrived at %s after %.1f s, %.1f blocks from %s; %d placeable in reach",
+        BuildLog.line("MOVE", String.format(java.util.Locale.ROOT, "arrived at %s after %.1f s, %.1f blocks from %s; %d placeable in reach",
                 player.blockPosition().toShortString(), (tick - moveStartTick) / 20.0,
                 Math.sqrt(player.position().distanceToSqr(moveFrom)), BlockPos.containing(moveFrom).toShortString(), placeable));
         moveStartTick = -1;
@@ -3001,6 +3178,11 @@ public class Mover {
 
     /** Turns flying on (sending the fly command once if needed). Returns false while waiting for it. */
     private boolean ensureFlying(LocalPlayer player) {
+        // Standing on the layer for a moment to break a block faster, or hopping there (see BlockBreaker#isStanding):
+        // the breaker moves the player meanwhile; flying on once it's done
+        if (AutoBuild.INSTANCE.breaker.isStanding()) {
+            return false;
+        }
         Abilities abilities = player.getAbilities();
         if (abilities.flying) {
             return true;

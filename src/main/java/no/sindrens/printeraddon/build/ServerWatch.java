@@ -170,6 +170,7 @@ public final class ServerWatch {
         if (windowStart < 0) {
             windowStart = now;
         }
+        ServerAcks.tick();
         placedPerTick[(int) (now % RATE_TICKS)] = placedThisTick;
         placedThisTick = 0;
         // Not in singleplayer (the test world lags with the game itself), unless a test asks for it
@@ -353,8 +354,8 @@ public final class ServerWatch {
                     : String.format(Locale.ROOT, "answers=%d answerP50=%dt answerP95=%dt answerMax=%dt", windowAnswerCount,
                     percentile(sorted, windowAnswerCount, 0.5), percentile(sorted, windowAnswerCount, 0.95), sorted[windowAnswerCount - 1]);
             BuildLog.line("SERVER", String.format(Locale.ROOT,
-                    "window=%.0fs placedPerSec=%.1f %s dropped=%d waiting=%d oldestWaiting=%s tps=%.1f ping=%dms packetsOutPerSec=%.0f (%s)%s%s",
-                    secs, placed / secs, answers, droppedInWindow, ServerAcks.waitingCount(), seconds(ServerAcks.oldestWaiting()),
+                    "window=%.0fs placedPerSec=%.1f %s %s dropped=%d waiting=%d oldestWaiting=%s tps=%.1f ping=%dms packetsOutPerSec=%.0f (%s)%s%s",
+                    secs, placed / secs, answers, ServerAcks.answerResults(), droppedInWindow, ServerAcks.waitingCount(), seconds(ServerAcks.oldestWaiting()),
                     ServerLag.tps(), pingMs(mc), packetsTotal.get() / secs, kinds,
                     stalls > 0 ? " stalls=" + stalls + " stalledFor=" + seconds(stalledFor) : "",
                     describe() != null ? " guard=\"" + describe() + "\"" : ""));

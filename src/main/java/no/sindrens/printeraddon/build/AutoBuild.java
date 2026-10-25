@@ -43,7 +43,7 @@ public class AutoBuild {
     private java.util.List<CraftPlan.Step> craftAfterBuying = java.util.List.of();
     /** Items a crafting round was for: if they're still missing afterwards, crafting didn't work out. */
     private java.util.Set<net.minecraft.world.item.Item> craftingFor = java.util.Set.of();
-    private final InventoryCleaner cleaner = new InventoryCleaner();
+    final InventoryCleaner cleaner = new InventoryCleaner();
     public final BuildStats stats = new BuildStats();
     public final SpeedTuner speed = new SpeedTuner();
     /** Client ticks since the game started (game time can stand still, e.g. with /tick freeze). */
@@ -58,6 +58,27 @@ public class AutoBuild {
     @javax.annotation.Nullable
     public net.minecraft.world.item.Item lastTriedItem;
 
+    /**
+     * The printer's click on this spot was against a block about to go (see InteractActionMixin): it didn't go out, and
+     * isn't counted as a click that placed nothing.
+     */
+    public void clickSkipped(Minecraft mc, net.minecraft.core.BlockPos target, net.minecraft.core.BlockPos against) {
+        speed.clickSkipped(target);
+        // Not a try: no click went out (the tries count towards giving the block up)
+        Tries tries = triesAt.get(target);
+        if (tries != null) {
+            if (tries.count() <= 1) {
+                triesAt.remove(target);
+            } else {
+                triesAt.put(target.immutable(), new Tries(tries.state(), tries.count() - 1, tries.since()));
+            }
+        }
+        if (mc.level != null) {
+            BuildLog.line("CLICK-SKIP", target.toShortString().replace(" ", "") + " against=" + LayerManager.blockName(mc.level.getBlockState(against))
+                    + "@" + against.toShortString().replace(" ", "") + ": it's about to go, the block would land in its spot");
+        }
+    }
+
     /** The printer is about to click this spot with this item (null: none in particular). */
     public void printerTried(net.minecraft.core.BlockPos pos, @javax.annotation.Nullable net.minecraft.world.item.Item item) {
         Minecraft mc = Minecraft.getInstance();
@@ -69,7 +90,7 @@ public class AutoBuild {
             triedDuringBuild.add(pos.immutable());
             if (BuildLog.isOpen()) {
                 fi.dy.masa.litematica.world.WorldSchematic schematic = SchematicHelper.world();
-                BuildLog.line("TRY", String.format("%s: is %s, wants %s | with %s, in hand %s | %.2f from the eye | player at %.1f %.1f %.1f",
+                BuildLog.line("TRY", String.format(java.util.Locale.ROOT, "%s: is %s, wants %s | with %s, in hand %s | %.2f from the eye | player at %.1f %.1f %.1f",
                         pos.toShortString(), shortState(mc.level.getBlockState(pos)),
                         schematic != null ? shortState(schematic.getBlockState(pos)) : "?",
                         item == null ? "nothing" : net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(item).getPath(),
@@ -106,6 +127,9 @@ public class AutoBuild {
 
     private record Tries(net.minecraft.world.level.block.state.BlockState state, int count, long since) {
     }
+
+    /** A block is clicked against only this long after the server's answer to its own click (see filterPositions). */
+    private static final int SUPPORT_CONFIRMED_AFTER = 4;
 
     /**
      * Given up on only after this long since the first of its tries: all 41 give-ups of a log were placed after all,
@@ -243,7 +267,8 @@ public class AutoBuild {
      */
     private void watchdog(Minecraft mc) {
         int placed = stats.totalPlaced();
-        if (placed != watchPlaced || !layers.isActive() || !mover.hasWork() || breaker.isBusy() || fluids.isBusy()) {
+        if (placed != watchPlaced || !layers.isActive() || !mover.hasWork() || breaker.isBusy() || fluids.isBusy()
+                || notStuckBecause(mc) != null) {
             if (placed != watchPlaced) {
                 watchStrikes = 0;
             }
@@ -357,7 +382,38 @@ public class AutoBuild {
 
     private void cantBuy(java.util.Collection<net.minecraft.world.item.Item> items) {
         items.forEach(item -> couldntBuy.put(item, clientTicks + RETRY_BUYING));
+        items.forEach(item -> buyFailures.put(item, MAX_BUY_FAILURES));
     }
+
+    /**
+     * The shop didn't deliver these (a menu that didn't open, the wrong page, nothing arrived): tried again in a while,
+     * sooner the first times. During a lag spike the shop failed for all three items of a trip, they weren't tried
+     * for 5 minutes, and the build stopped for the sand meanwhile.
+     */
+    private void didntDeliver(java.util.Collection<net.minecraft.world.item.Item> items) {
+        for (net.minecraft.world.item.Item item : items) {
+            int failures = buyFailures.merge(item, 1, Integer::sum);
+            long wait = RETRY_AFTER[Math.min(failures, RETRY_AFTER.length) - 1];
+            couldntBuy.put(item, clientTicks + wait);
+            BuildLog.line("SHOP", new net.minecraft.world.item.ItemStack(item).getHoverName().getString() + " not delivered (" + failures
+                    + (failures == 1 ? " time" : " times") + "): tried again in " + wait / 20 + " s" + (failures >= MAX_BUY_FAILURES
+                    ? "; the build waits for it no more once it's used up" : ""));
+        }
+    }
+
+    /** How often each item wasn't delivered in a row (see didntDeliver). */
+    private final java.util.Map<net.minecraft.world.item.Item, Integer> buyFailures = new java.util.HashMap<>();
+    private static final long[] RETRY_AFTER = {20 * 30, 20 * 60, 20 * 120, RETRY_BUYING};
+    private static final int MAX_BUY_FAILURES = 3;
+
+    /** The shop failed for this item lately, but it's tried again soon: not reason enough to stop for it. */
+    private boolean retryPending(net.minecraft.world.item.Item item) {
+        return couldntBuy.containsKey(item) && buyFailures.getOrDefault(item, 0) < MAX_BUY_FAILURES;
+    }
+
+    private long lagNotedAt = -100000;
+    /** How many conflicts the build log's last list of them had (see logConflicts). */
+    private int conflictsLogged;
 
     /** True while the shop is known not to deliver this item (for a few minutes after it didn't). */
     private boolean cantGet(net.minecraft.world.item.Item item) {
@@ -444,6 +500,24 @@ public class AutoBuild {
     }
 
     /** A trip for items goes on after its current part (see buyMissing). */
+    /**
+     * Why nothing being placed isn't being stuck right now: the server lagging or slow to answer, or a trip for items
+     * (null: none of those). A lag of 19 s raised "nothing placed for 30 s" with 13 "missing" blocks listed.
+     */
+    @javax.annotation.Nullable
+    public String notStuckBecause(Minecraft mc) {
+        if (ServerLag.hardLag(mc) || ServerLag.shouldWait(mc)) {
+            return "server-lag";
+        }
+        if (ServerWatch.stalled()) {
+            return "server-slow";
+        }
+        if (no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.isRunning() || fetcher.isBusy() || crafter.isBusy() || tripGoingOn()) {
+            return "supply-trip";
+        }
+        return null;
+    }
+
     public boolean tripGoingOn() {
         return tripGoesOn;
     }
@@ -631,11 +705,25 @@ public class AutoBuild {
             boolean onUnconfirmed = acks && result == BlockCheck.Result.MISSING
                     && schematic.getBlockState(pos).getBlock() instanceof net.minecraft.world.level.block.FallingBlock
                     && ServerAcks.unconfirmed(pos.below(), 3);
-            if (waiting || givenUp(pos) || nextToWaiting || onUnconfirmed || heldForBelow(mc, schematic, pos) || itemSettling(mc, schematic, pos)) {
+            // Not clicked against a block about to go (a flower, a grown cactus): it would land in that block's spot
+            net.minecraft.core.BlockPos support = result == BlockCheck.Result.MISSING
+                    && !me.aleksilassila.litematica.printer.config.Configs.PRINT_IN_AIR.getBooleanValue() ? Clicks.clickedFor(mc.level, pos) : null;
+            boolean supportGoing = support != null && Clicks.goingAway(mc.level, support);
+            // Nor against a block the server may not have yet (its click unanswered, or answered a moment ago): 85 % of
+            // a log's refused clicks were against a block placed at most 10 ticks before
+            boolean supportUnconfirmed = acks && support != null && ServerAcks.unconfirmed(support, SUPPORT_CONFIRMED_AFTER);
+            // Nor a block that can't stand there as things are (a cactus with its sand still to come, or next to a
+            // block): the click is refused, and costs a turn
+            boolean cantStand = result == BlockCheck.Result.MISSING && !schematic.getBlockState(pos).canSurvive(mc.level, pos);
+            if (waiting || givenUp(pos) || nextToWaiting || onUnconfirmed || supportGoing || supportUnconfirmed || cantStand
+                    || heldForBelow(mc, schematic, pos) || itemSettling(mc, schematic, pos)) {
                 held++;
                 if (RunLog.isActive()) {
                     RunLog.hold(pos, waiting ? "awaiting-answer" : givenUp(pos) ? "given-up" : nextToWaiting ? "next-to-unanswered"
                             : onUnconfirmed ? "below-unconfirmed(" + pos.below().toShortString().replace(" ", "") + ")"
+                            : supportGoing ? "support-going(" + LayerManager.blockName(mc.level.getBlockState(support)) + ")"
+                            : supportUnconfirmed ? "support-unconfirmed(" + support.toShortString().replace(" ", "") + ")"
+                            : cantStand ? "cant-stand-there-yet"
                             : itemSettling(mc, schematic, pos) ? "item-settling" : "held-for-below");
                 }
                 continue;
@@ -1071,14 +1159,20 @@ public class AutoBuild {
         return sb.toString();
     }
 
-    /** The conflicts found so far, in the build log at most every 30 s while there are new ones; said once in chat. */
+    /**
+     * The conflicts found so far, in the build log when they're first found and again once there are twice as many
+     * (the whole list, 9 KB, came 23 times in an hour), and at the end; said once in chat.
+     */
     private void logConflicts() {
         if (!conflictsChanged || clientTicks - conflictsLoggedAt < 20 * 30) {
             return;
         }
         conflictsChanged = false;
         conflictsLoggedAt = clientTicks;
-        BuildLog.line("CONFLICT", conflicts.size() + " so far, left alone: " + conflictSummary());
+        if (conflicts.size() >= 2 * conflictsLogged || conflictsLogged == 0) {
+            conflictsLogged = conflicts.size();
+            BuildLog.line("CONFLICT", conflicts.size() + " so far, left alone: " + conflictSummary());
+        }
         if (!conflictsTold && conflicts.size() >= 10) {
             conflictsTold = true;
             ConflictGroup biggest = conflictGroups.values().stream().max(java.util.Comparator.comparingInt(g -> g.count)).orElse(null);
@@ -1198,7 +1292,7 @@ public class AutoBuild {
             // A tool that can't be had (a recipe the server doesn't allow) never stops the build: tilling or
             // breaking waits for it, everything else goes on (a stone shovel that couldn't be crafted stopped a build)
             if (have == 0 && !Tools.isMarker(item)) {
-                outOfSomething |= !gettable(mc, item) || !autoBuy;
+                outOfSomething |= !autoBuy || !gettable(mc, item) && !retryPending(item);
             }
             // Only once it's (nearly) used up: this many or fewer left; or the lane about to be flown takes more than
             // is left (topped up before it, not with a stop halfway along it: 14 s in the middle of a lane once)
@@ -1241,6 +1335,18 @@ public class AutoBuild {
         if (!due && !goesOn) {
             pauseIfOut(mc, outOfSomething);
             return false;
+        }
+        // Not to the vaults or the shop while the server lags hard: its menus didn't open, or opened the wrong page,
+        // and a trip came back with nothing after 94 s. Building waits for the server meanwhile anyway
+        if (ServerLag.hardLag(mc)) {
+            if (clientTicks - lagNotedAt > 20 * 10) {
+                lagNotedAt = clientTicks;
+                BuildLog.line("SUPPLY", String.format(java.util.Locale.ROOT, "waiting: the server lags (%.0f ticks per second, last word %.1f s ago)",
+                        ServerLag.tps(), ServerLag.ticksSinceTimeUpdate() / 20.0));
+            }
+            tripGoesOn = goesOn;
+            buyCooldown = 20;
+            return goesOn;
         }
         if (!goesOn) {
             fetchedThisTrip = false;
@@ -1343,6 +1449,27 @@ public class AutoBuild {
                 fromStorage.merge(net.minecraft.world.item.Items.STICK, 2 * tools, Integer::sum);
             }
         }
+        // Something the vaults are known to be out of, to be bought in bulk into them: that first, before taking from
+        // them (taken out, it was all put away again to make room for the purchase, and taken out once more)
+        if (!fetchedThisTrip && !stockedThisTrip && autoBuy && storage) {
+            java.util.Map<net.minecraft.world.item.Item, Integer> shortfall = new java.util.LinkedHashMap<>();
+            list.forEach((item, count) -> {
+                int known = fetcher.knownCount(item);
+                if (count > known) {
+                    shortfall.put(item, count - known);
+                }
+            });
+            if (!shortfall.isEmpty()) {
+                stockedThisTrip = true;
+                if (stock.start(mc, shortfall, list, neededWhole, fetcher, layerNeeds.keySet())) {
+                    stock.step(mc, this);
+                    tripGoesOn = true;
+                    buyCooldown = 0;
+                    mover.stop(mc);
+                    return true;
+                }
+            }
+        }
         if (!fetchedThisTrip && fetcher.start(mc, fromStorage)) {
             fetchedThisTrip = true;
             mover.stop(mc);
@@ -1357,7 +1484,7 @@ public class AutoBuild {
 
         // The shop has to be used and the build needs much more than fits: one whole inventory of each into the vaults
         // first, one step a round (make room, buy, put away, buy...); then the trip takes its share from the vaults
-        if (!stockedThisTrip && stock.start(mc, list, neededWhole, fetcher, layerNeeds.keySet())) {
+        if (!stockedThisTrip && stock.start(mc, list, list, neededWhole, fetcher, layerNeeds.keySet())) {
             stockedThisTrip = true;
             if (!stock.step(mc, this)) {
                 fetchedThisTrip = false;
@@ -1434,7 +1561,7 @@ public class AutoBuild {
         if (budget <= 1) {
             if (!warnedLimit) {
                 warnedLimit = true;
-                Chat.warn(String.format("Spending limit reached ($%,.0f of $%,.0f): nothing more is bought. Start again (J+B) for a new limit,"
+                Chat.warn(String.format(java.util.Locale.ROOT, "Spending limit reached ($%,.0f of $%,.0f): nothing more is bought. Start again (J+B) for a new limit,"
                         + " or bring the items.", spentTotal, spendLimit));
                 BuildLog.line("SHOP", "spending limit reached: " + spendingLine());
             }
@@ -1461,7 +1588,7 @@ public class AutoBuild {
             return true;
         }
         cantBuy(no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.notSold());
-        cantBuy(no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.notBought());
+        didntDeliver(no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.notBought());
         // Nothing to buy after all (e.g. no shop scan): still craft what can be crafted from the inventory
         for (CraftPlan.Step step : craftAfterBuying) {
             crafter.craft(step.item(), step.count());
@@ -1692,6 +1819,7 @@ public class AutoBuild {
         emptyDuringBuild.clear();
         triedDuringBuild.clear();
         conflicts.clear();
+        conflictsLogged = 0;
         conflictGroups.clear();
         conflictsChanged = false;
         conflictsTold = false;
@@ -1705,6 +1833,7 @@ public class AutoBuild {
         wholeByY.clear();
         wholePartial.clear();
         couldntBuy.clear();
+        buyFailures.clear();
         warnedLimit = false;
         buying = false;
         buyCooldown = 0;
@@ -1984,7 +2113,7 @@ public class AutoBuild {
         spentTotal = 0;
         start(mc);
         if (running) {
-            Chat.info(limit < 0 ? "Spending limit: none." : String.format("Spending limit for this build: $%,.0f.", limit));
+            Chat.info(limit < 0 ? "Spending limit: none." : String.format(java.util.Locale.ROOT, "Spending limit for this build: $%,.0f.", limit));
         }
     }
 
@@ -2005,8 +2134,8 @@ public class AutoBuild {
 
     /** "Spent $1,234 of $50,000" for the on-screen display. */
     public String spendingLine() {
-        return spendLimit < 0 ? String.format("Spent $%,.0f (no limit)", spentTotal)
-                : String.format("Spent $%,.0f of $%,.0f", spentTotal, spendLimit);
+        return spendLimit < 0 ? String.format(java.util.Locale.ROOT, "Spent $%,.0f (no limit)", spentTotal)
+                : String.format(java.util.Locale.ROOT, "Spent $%,.0f of $%,.0f", spentTotal, spendLimit);
     }
 
     /**
@@ -2172,7 +2301,7 @@ public class AutoBuild {
             return;
         }
         int placed = stats.totalPlaced();
-        BuildLog.line("SNAP", String.format("at %.1f %.1f %.1f | %s | placed %d in 5 s (%d total) | %s | mover %s | printer busy %d%% (%s) | interval %d | free slots %d | fps %d",
+        BuildLog.line("SNAP", String.format(java.util.Locale.ROOT, "at %.1f %.1f %.1f | %s | placed %d in 5 s (%d total) | %s | mover %s | printer busy %d%% (%s) | interval %d | free slots %d | fps %d",
                 mc.player.getX(), mc.player.getY(), mc.player.getZ(), layers.status(), placed - placedAtSnapshot, placed,
                 doing(), mover.details(), stats.printerBusyPercent(), stats.printerIdleReason(), speed.interval(),
                 InventoryCleaner.freeSlots(mc.player.getInventory()), mc.getFps()));
@@ -2272,12 +2401,13 @@ public class AutoBuild {
             buying = false;
             spentTotal += buyer.spent();
             cantBuy(buyer.notSold());
-            cantBuy(buyer.notBought());
+            didntDeliver(buyer.notBought());
             // Bought, and none of it failed: buyable again whenever needed (a purchase that stopped halfway, out
             // of money, isn't tried again right away)
             for (net.minecraft.world.item.Item item : buyer.bought().keySet()) {
                 if (!buyer.notBought().contains(item)) {
                     couldntBuy.remove(item);
+                    buyFailures.remove(item);
                 }
             }
             if (!buyer.notBought().isEmpty()) {

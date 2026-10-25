@@ -236,6 +236,11 @@ public class SpeedTuner {
      * click that placed nothing: it says nothing about the speed (counted as one, an empty hotbar slowed redstone
      * down from interval 2 to 12).
      */
+    /** The click for this spot didn't go out (see InteractActionMixin): not one that placed nothing. */
+    public void clickSkipped(BlockPos pos) {
+        picks.removeIf(pick -> pick.pos().equals(pos));
+    }
+
     public void emptyHand(BlockPos pos) {
         minuteEmptyHand++;
         picks.removeIf(pick -> pick.pos().equals(pos));
@@ -350,7 +355,8 @@ public class SpeedTuner {
                 String where = outcome == Outcome.LANDED_NEXT ? "landed in a neighbouring spot instead" : "is "
                         + AutoBuild.shortState(mc.level.getBlockState(pick.pos())) + ", should be " + AutoBuild.shortState(schematic.getBlockState(pick.pos()));
                 BuildLog.line("WRONG", pick.pos().toShortString() + " " + where + " | " + how + " | "
-                        + AutoBuild.INSTANCE.inventory.describe(mc) + RunLog.clickInfo(pick.pos()) + " cause=" + RunLog.cause(mc, pick.pos(), true));
+                        + AutoBuild.INSTANCE.inventory.describe(mc) + RunLog.clickInfo(pick.pos()) + RunLog.neighbours(mc, pick.pos())
+                        + " cause=" + RunLog.cause(mc, pick.pos(), true));
                 // A block of another item than the one clicked with: the server had another item in the hand (the
                 // switch didn't get there), not a click too fast. The held slot is sent again, the speed stays (10
                 // observers for pistons slowed pistons down to interval 5, and it took 2.6 minutes to get back to 2)
@@ -386,7 +392,7 @@ public class SpeedTuner {
                 s.nothing++;
                 BuildLog.line("NOCHANGE", pick.pos().toShortString() + " is still " + AutoBuild.shortState(mc.level.getBlockState(pick.pos()))
                         + " (wants " + AutoBuild.shortState(schematic.getBlockState(pick.pos())) + ") | " + how + RunLog.clickInfo(pick.pos())
-                        + " cause=" + RunLog.cause(mc, pick.pos(), false));
+                        + RunLog.neighbours(mc, pick.pos()) + " cause=" + RunLog.cause(mc, pick.pos(), false));
                 // Too fast can also mean the clicks don't get through at all: most of the last ones placed nothing
                 int missed = 0;
                 int known = Math.min(RECENT, s.recentCount);

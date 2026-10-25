@@ -170,10 +170,10 @@ public final class CostEstimate {
             }
             double cost = missing * price.each();
             total += cost;
-            lines.add(String.format("%,d %s: $%,.0f%s", missing, name, cost, price.how().isEmpty() ? "" : " (" + price.how() + ")"));
+            lines.add(String.format(java.util.Locale.ROOT, "%,d %s: $%,.0f%s", missing, name, cost, price.how().isEmpty() ? "" : " (" + price.how() + ")"));
         }
 
-        Chat.info("§lThis build:§r " + String.format("%,d", blocks) + " blocks left to place.");
+        Chat.info("§lThis build:§r " + String.format(java.util.Locale.ROOT, "%,d", blocks) + " blocks left to place.");
         if (shop == null) {
             Chat.warn("No shop scan for this server yet (J+S), so no prices.");
         } else if (lines.isEmpty() && notSold.isEmpty()) {
@@ -187,9 +187,9 @@ public final class CostEstimate {
                 Chat.info(" - and " + (lines.size() - 8) + " more");
             }
             Double balance = balance(mc);
-            Chat.info(String.format("§lCost: about $%,.0f§r", total) + (balance == null ? ""
-                    : String.format(" | balance $%,.0f%s", balance, balance >= total ? " §a(enough)"
-                    : String.format(" §c(short by $%,.0f)", total - balance))));
+            Chat.info(String.format(java.util.Locale.ROOT, "§lCost: about $%,.0f§r", total) + (balance == null ? ""
+                    : String.format(java.util.Locale.ROOT, " | balance $%,.0f%s", balance, balance >= total ? " §a(enough)"
+                    : String.format(java.util.Locale.ROOT, " §c(short by $%,.0f)", total - balance))));
         }
         if (!notSold.isEmpty()) {
             Chat.warn("Not in the shop, bring these: " + String.join(", ", notSold));

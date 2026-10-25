@@ -2,22 +2,31 @@ package no.sindrens.printeraddon.build;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.ContainerInput;
+import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.Rarity;
 import no.sindrens.printeraddon.PrinterAddon;
+import no.sindrens.printeraddon.config.Configs;
+import no.sindrens.printeraddon.shop.ShopBuyer;
 
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 
 /**
  * Makes room in the inventory when it's (almost) full: puts leftover building materials of this schematic that
  * no block still needs into storage (vaults, linked chests); when that's full (or there is none), sells in the shop
- * what it buys back, keeps the rest, and drops only when the build is stuck for room. Never touches anything else
- * (tools, food, valuables, renamed or enchanted items, items the build still needs).
+ * what it buys back, keeps the rest, and drops only when the build is stuck for room. Junk from breaking (cactus
+ * flowers) is thrown out, and blocks the build doesn't use go into a vault when a supply trip is short of room.
+ * Never touches anything else (tools, food, valuables, renamed or enchanted items, items the build still needs).
  */
 public class InventoryCleaner {
     /** Below this many free slots, leftovers are dropped. */
@@ -92,6 +101,110 @@ public class InventoryCleaner {
         }
         off.removeAll(special);
         return off;
+    }
+
+    /**
+     * Junk: what breaking the "always break" blocks gives when the schematic has none of them (cactus flowers on the
+     * farm). 311 of them filled 5 slots in one run, so every purchase was 5 stacks smaller, and the shop doesn't buy
+     * them. Thrown out while a vault is open on a supply trip (see ChestFetcher), or sold when the shop buys them back.
+     */
+    public static boolean isJunk(ItemStack stack) {
+        return !stack.isEmpty() && plain(stack) && stack.getItem() instanceof BlockItem block
+                && BlockBreaker.alwaysBreak(block.getBlock().defaultBlockState())
+                && !AutoBuild.INSTANCE.schematicBlocks.contains(block.getBlock());
+    }
+
+    /** Junk the shop buys back, with leftovers to be sold: kept for selling, not thrown out. */
+    private static boolean sellsJunk(Minecraft mc, Item item) {
+        return Configs.Shop.SELL_LEFTOVERS.getBooleanValue() && ShopBuyer.sellPrice(mc, item) != null;
+    }
+
+    /**
+     * Throws the junk out of the inventory part of an open vault or chest, a stack a click, as a player would (ctrl+Q
+     * over it). Returns how many items went.
+     */
+    public static int throwJunk(Minecraft mc, LocalPlayer player, AbstractContainerMenu menu, String where) {
+        if (mc.gameMode == null || !menu.getCarried().isEmpty()) {
+            return 0;
+        }
+        Map<Item, Integer> thrown = new LinkedHashMap<>();
+        int items = 0;
+        for (Slot slot : menu.slots) {
+            ItemStack stack = slot.getItem();
+            if (slot.container instanceof Inventory && isJunk(stack) && !sellsJunk(mc, stack.getItem())) {
+                thrown.merge(stack.getItem(), stack.getCount(), Integer::sum);
+                items += stack.getCount();
+                mc.gameMode.handleContainerInput(menu.containerId, slot.index, 1, ContainerInput.THROW, player);
+            }
+        }
+        if (items > 0) {
+            BuildLog.line("JUNK", "threw out " + describe(thrown) + " while " + where + " was open (from breaking; the shop doesn't buy it back)");
+            RunLog.junkThrown(items);
+        }
+        return items;
+    }
+
+    /**
+     * A block the build doesn't use at all (your own iron bars, concrete and signs: 3 slots in a run where each slot
+     * was a stack less in every purchase). Only ordinary stackable blocks: never junk, food, buckets, tools, rare,
+     * renamed or enchanted items, nor anything the build or the add-on's crafting uses.
+     */
+    public boolean isStray(ItemStack stack) {
+        Item item = stack.getItem();
+        return !stack.isEmpty() && plain(stack) && item instanceof BlockItem block && stack.getMaxStackSize() > 1
+                && stack.getRarity() == Rarity.COMMON && !stack.has(DataComponents.FOOD) && !isJunk(stack) && !isBucket(item)
+                && !materials.contains(item) && !CRAFTING_LEFTOVERS.contains(item) && !Tools.hoeMaterial(item)
+                && !AutoBuild.INSTANCE.schematicBlocks.contains(block.getBlock())
+                && !AutoBuild.INSTANCE.layers.layerNeeds().containsKey(item);
+    }
+
+    /**
+     * Puts the strays (see isStray) into the open vault or chest while it keeps its free part (see StockUp#keepFree).
+     * Returns how many items went in.
+     */
+    public int storeStrays(Minecraft mc, LocalPlayer player, AbstractContainerMenu menu, String where) {
+        if (mc.gameMode == null || !menu.getCarried().isEmpty()) {
+            return 0;
+        }
+        int free = 0;
+        int total = 0;
+        for (Slot slot : menu.slots) {
+            if (!(slot.container instanceof Inventory)) {
+                total++;
+                if (slot.getItem().isEmpty()) {
+                    free++;
+                }
+            }
+        }
+        int room = free - StockUp.keepFree(total);
+        Map<Item, Integer> stored = new LinkedHashMap<>();
+        int items = 0;
+        for (Slot slot : menu.slots) {
+            ItemStack stack = slot.getItem();
+            if (room <= 0) {
+                break;
+            }
+            if (slot.container instanceof Inventory && isStray(stack)) {
+                stored.merge(stack.getItem(), stack.getCount(), Integer::sum);
+                items += stack.getCount();
+                room--;
+                mc.gameMode.handleContainerInput(menu.containerId, slot.index, 0, ContainerInput.QUICK_MOVE, player);
+            }
+        }
+        if (items > 0) {
+            BuildLog.line("STORAGE", where + ": put in " + describe(stored) + " (blocks this build doesn't use: room for the trip)");
+            no.sindrens.printeraddon.util.Chat.quiet("Put " + describe(stored) + " in " + where + ": this build doesn't use them,"
+                    + " and the supply trip needs the room.");
+            RunLog.straysStored(items);
+        }
+        return items;
+    }
+
+    private static String describe(Map<Item, Integer> items) {
+        StringBuilder sb = new StringBuilder();
+        items.forEach((item, count) -> sb.append(sb.length() == 0 ? "" : ", ").append(count).append(' ')
+                .append(new ItemStack(item).getHoverName().getString()));
+        return sb.toString();
     }
 
     /** A bucket of any kind (water, lava, empty...): kept, and never a reason to go shopping. */
@@ -171,6 +284,9 @@ public class InventoryCleaner {
         }
         Inventory inventory = player.getInventory();
         if (protectWornTools(mc, inventory, fetcher)) {
+            return true;
+        }
+        if (junk(mc, player, inventory)) {
             return true;
         }
         // A new layer doesn't empty the inventory by itself: what the layer doesn't need stays (the next layer may
@@ -263,6 +379,52 @@ public class InventoryCleaner {
                 return true;
             }
             // No linked chest: they're dropped on the next ticks
+        }
+        return false;
+    }
+
+    /**
+     * Junk (see isJunk) once it fills 2 slots, or room runs short: sold when the shop buys it back; else thrown out while
+     * the player stands still, when there's no storage to throw it out at (see ChestFetcher) or no trip came by in time
+     * (3 slots of it).
+     */
+    private boolean junk(Minecraft mc, LocalPlayer player, Inventory inventory) {
+        int slots = 0;
+        int first = -1;
+        Set<Item> sell = new HashSet<>();
+        for (int slot = 0; slot < Inventory.INVENTORY_SIZE; slot++) {
+            ItemStack stack = inventory.getItem(slot);
+            if (isJunk(stack)) {
+                slots++;
+                if (sellsJunk(mc, stack.getItem())) {
+                    sell.add(stack.getItem());
+                } else if (first < 0) {
+                    first = slot;
+                }
+            }
+        }
+        if (slots < 2 && (slots == 0 || freeSlots(inventory) >= MIN_FREE_SLOTS)) {
+            return false;
+        }
+        if (!sell.isEmpty() && sinceSold > 20 * 60 * 5) {
+            sinceSold = 0;
+            if (ShopBuyer.INSTANCE.startSelling(mc, sell)) {
+                BuildLog.line("JUNK", "selling " + sell.stream().map(i -> new ItemStack(i).getHoverName().getString()).toList()
+                        + " (from breaking; the shop buys it back)");
+                return true;
+            }
+        }
+        boolean storage = ChestFetcher.hasStorage(mc);
+        if (first >= 0 && (!storage || slots >= 3) && player.getDeltaMovement().horizontalDistanceSqr() < 1.0e-4) {
+            ItemStack stack = inventory.getItem(first);
+            BuildLog.line("JUNK", "threw out " + stack.getCount() + " " + stack.getHoverName().getString() + " (from breaking; "
+                    + (storage ? slots + " slots of it before a trip came by" : "no vault or chest to do it at")
+                    + ", the shop doesn't buy it back)");
+            RunLog.junkThrown(stack.getCount());
+            mc.gameMode.handleContainerInput(player.inventoryMenu.containerId, first < 9 ? 36 + first : first, 1,
+                    ContainerInput.THROW, player);
+            cooldown = COOLDOWN;
+            return true;
         }
         return false;
     }
