@@ -132,6 +132,7 @@ public final class Reconnect {
         if (server != null) {
             BuildLog.lineOrKeep("RECONNECT", "joined " + server.ip + " again (try " + tries + ")");
             Chat.info("Joined the server again: going on with auto build once back at the build.");
+            no.sindrens.printeraddon.discord.DiscordLink.event("rejoined", "Joined the server again, going on with the build.");
             rejoins.addLast(AutoBuild.clientTicks);
             server = null;
             joinedAt = AutoBuild.clientTicks;

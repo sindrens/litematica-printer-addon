@@ -41,7 +41,11 @@ public class Hotkeys {
             KeybindSettings.create(KeybindSettings.Context.ANY, KeyAction.PRESS, false, true, false, true),
             "Stop everything (auto build, breaking, shop scan). Also works while a menu is open.", "Stop everything");
 
+    public static final ConfigHotkey LINK_DISCORD = new ConfigHotkey("linkDiscord", "J,L",
+            "Link the game with the Printer Addon Discord: type /link on Discord, then enter the code here.",
+            "Link with Discord");
+
     public static final ImmutableList<ConfigHotkey> HOTKEY_LIST = ImmutableList.of(
-            OPEN_SETTINGS, BUILD_MENU, TOGGLE_ADDON, TOGGLE_AUTO_BUILD, FIX_WRONG_NOW, CLEAR_EXTRA_BLOCKS, NEXT_LAYER, PREVIOUS_LAYER,
+            OPEN_SETTINGS, LINK_DISCORD, BUILD_MENU, TOGGLE_ADDON, TOGGLE_AUTO_BUILD, FIX_WRONG_NOW, CLEAR_EXTRA_BLOCKS, NEXT_LAYER, PREVIOUS_LAYER,
             SHOW_COST, BUILD_REPORT, SCAN_SHOP, STOP_ALL);
 }

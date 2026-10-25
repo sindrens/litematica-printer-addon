@@ -1576,6 +1576,8 @@ public class AutoBuild {
                 Chat.warn(String.format(java.util.Locale.ROOT, "Spending limit reached ($%,.0f of $%,.0f): nothing more is bought. Start again (J+B) for a new limit,"
                         + " or bring the items.", spentTotal, spendLimit));
                 BuildLog.line("SHOP", "spending limit reached: " + spendingLine());
+                no.sindrens.printeraddon.discord.DiscordLink.event("no_money", "Spending limit reached: " + spendingLine()
+                        + ". Nothing more is bought; bring the items or start again with a new limit.");
             }
             cantBuy(toBuy.keySet());
             craftAfterBuying = java.util.List.of();
@@ -1774,10 +1776,61 @@ public class AutoBuild {
         }
     }
 
+    // ---- Discord (see DiscordLink): pause / resume / stop from the control room
+    public static final String PAUSE_REASON = "paused from Discord";
+    private boolean remotePaused;
+    private boolean remoteStopping;
+    @javax.annotation.Nullable
+    private String pausedSpending;
+
+    public boolean isRemotelyPaused() {
+        return remotePaused && !running;
+    }
+
+    /** Stops for now, keeping the spending limit; nothing is put away and no log question is asked. */
+    public void pauseRemote(Minecraft mc) {
+        if (!running) {
+            return;
+        }
+        pausedSpending = spendingText();
+        stop(mc, PAUSE_REASON, false);
+        remotePaused = true;
+    }
+
+    /** Goes on after a pause from Discord, with the same spending limit. */
+    public void resumeRemote(Minecraft mc) {
+        if (running) {
+            return;
+        }
+        String spending = pausedSpending;
+        remotePaused = false;
+        pausedSpending = null;
+        start(mc);
+        if (running && spending != null) {
+            restoreSpending(spending);
+        }
+    }
+
+    /** Stopped from Discord: like the player's own stop, without the log question (nobody may be at the game). */
+    public void stopRemote(Minecraft mc) {
+        remotePaused = false;
+        pausedSpending = null;
+        if (!running) {
+            return;
+        }
+        remoteStopping = true;
+        try {
+            stop(mc, null);
+        } finally {
+            remoteStopping = false;
+        }
+    }
+
     public void start(Minecraft mc) {
         if (running) {
             return;
         }
+        remotePaused = false;
         if (AreaBreaker.INSTANCE.isRunning()) {
             Chat.warn("Auto break is running: stop it first (J+B, Auto break tab), then start auto build.");
             return;
@@ -1988,8 +2041,10 @@ public class AutoBuild {
             }
             // Every run's log is worth having: asked about after every stop, the player's own too. Not for a disconnect
             // (it picks up again once back) and not when nothing could start
-            String ended = reason != null ? reason : resumeLater ? "disconnected" : stopNote != null ? stopNote : "stopped-by-you";
-            RunLog.end(mc, ended, !resumeLater && !"could-not-start".equals(stopNote));
+            String ended = reason != null ? reason : resumeLater ? "disconnected" : stopNote != null ? stopNote
+                    : remoteStopping ? "stopped from Discord" : "stopped-by-you";
+            boolean fromDiscord = PAUSE_REASON.equals(reason) || remoteStopping;
+            RunLog.end(mc, ended, !resumeLater && !"could-not-start".equals(stopNote) && !fromDiscord);
             disconnectReason = "";
             logIgnored(mc);
             BuildLog.line("PERF", Perf.report());
@@ -2061,6 +2116,8 @@ public class AutoBuild {
         BuildLog.lineOrKeep("DISCONNECT", "the connection ended: " + reason + " | " + ServerLag.describe());
         // Kicked or the server restarting while building, or on the way back to it: join again by itself
         if (running || buildingWhenLeft || Resume.pending()) {
+            no.sindrens.printeraddon.discord.DiscordLink.event("kicked", reason
+                    + (Configs.Generic.RECONNECT.getBooleanValue() ? " (joining again by itself)" : ""));
             Reconnect.connectionEnded(Minecraft.getInstance(), reason);
         }
     }

@@ -285,6 +285,7 @@ public final class RunLog {
                 "breaking", AutoBuild.INSTANCE.breaker.summary(), "junkThrown", runJunkThrown, "straysStored", runStraysStored,
                 "guard", ServerWatch.summary(), "times", run.breakdown());
         emit("RUN-END", report);
+        no.sindrens.printeraddon.discord.DiscordLink.runEnded(why, run.placed, secs, spent, what);
         String adviceText = advice(ticks);
         emit("RUN-ADVICE", kv("top3", adviceText));
         compareWithLast();

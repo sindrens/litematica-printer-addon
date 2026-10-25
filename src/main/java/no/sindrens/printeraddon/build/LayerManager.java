@@ -194,6 +194,11 @@ public class LayerManager {
         return layer;
     }
 
+    /** The build's lowest and highest Y (for progress on Discord), or null before a start. */
+    public int[] yRange() {
+        return maxY >= minY ? new int[]{minY, maxY} : null;
+    }
+
     /** Starts at the lowest unfinished layer. Returns false if there is no schematic placed. */
     public boolean start(Minecraft mc) {
         deadEndsLayer = Integer.MIN_VALUE;

@@ -19,6 +19,7 @@ public class ClientTick implements IClientTickHandler {
 
     private void tick(Minecraft mc) {
         AutoBuild.clientTicks++;
+        no.sindrens.printeraddon.discord.DiscordLink.tick(mc);
         if (mc.player == null || mc.level == null) {
             ShopScanner.INSTANCE.cancel(null);
             ShopBuyer.INSTANCE.cancel(null);

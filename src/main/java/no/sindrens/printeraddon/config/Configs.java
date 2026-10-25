@@ -95,8 +95,16 @@ public class Configs implements IConfigHandler {
                         + "The .jsonl has the same lines; send that one when something went wrong.",
                 "Text build log");
 
+        public static final ConfigBoolean DISCORD_SYNC = new ConfigBoolean("discordSync", true,
+                "Linked with Discord (J+L): send live status and alerts to your control room on the Printer Addon Discord,\n"
+                        + "and take Pause / Resume / Stop from there. Never sends chat, coordinates, chests or vaults.",
+                "Discord sync");
+        public static final ConfigString DISCORD_API = new ConfigString("discordApi", "http://localhost:8787/api/v1",
+                "The Printer Addon bot's address. Leave it as it is unless the developer says otherwise.",
+                "Discord bot address");
+
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                ADDON_ENABLED, AUTO_BUILD, SHOW_HUD, RESUME_AFTER_REJOIN, RECONNECT, BACK_COMMANDS, BUILD_RENDER_DISTANCE, SPEED_PRESET, APPLY_SPEED_TO_PRINTER, TURN_VIEW_FOR_PRINTER, CHAT_MESSAGES, DETAILED_CHAT, STATUS_FILE, DEBUG_LOG, TEXT_LOG, SHARE_LOGS, LOG_CHANNEL);
+                ADDON_ENABLED, AUTO_BUILD, SHOW_HUD, RESUME_AFTER_REJOIN, RECONNECT, BACK_COMMANDS, BUILD_RENDER_DISTANCE, SPEED_PRESET, APPLY_SPEED_TO_PRINTER, TURN_VIEW_FOR_PRINTER, CHAT_MESSAGES, DETAILED_CHAT, STATUS_FILE, DEBUG_LOG, TEXT_LOG, SHARE_LOGS, LOG_CHANNEL, DISCORD_SYNC, DISCORD_API);
     }
 
     public static class Breaking {

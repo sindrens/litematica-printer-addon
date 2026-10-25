@@ -27,6 +27,16 @@ public class KeyCallbacks {
                 GuiBase.openGui(new ConfigGui());
                 return true;
             }
+            if (key == Hotkeys.LINK_DISCORD.getKeybind()) {
+                Minecraft m = Minecraft.getInstance();
+                if (m.player != null) {
+                    no.sindrens.printeraddon.util.Chat.info(no.sindrens.printeraddon.discord.DiscordLink.isLinked()
+                            ? "Linked with Discord as " + no.sindrens.printeraddon.discord.DiscordLink.linkedTo() + ". To link again: type the new code."
+                            : "Type the code from §b/link§r on Discord (looks like PRINT-AB12) and press Enter.");
+                    fi.dy.masa.malilib.gui.GuiBase.openGui(new net.minecraft.client.gui.screens.ChatScreen("/printeraddon link PRINT-", false));
+                }
+                return true;
+            }
             if (key == Hotkeys.BUILD_MENU.getKeybind()) {
                 GuiBase.openGui(ConfigGui.buildMenu());
                 return true;

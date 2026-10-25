@@ -96,3 +96,11 @@
 - Smoother flying on tall builds: the movement scan only reads the layers being built.
 - A layer picked by hand keeps its cactus capped (built with the sand layer above).
 - Warns when it stops with cactus open on top (they grow while stopped).
+
+## 26.2-0.16.0
+- Link the game with Discord (J+L): your own control room on the Printer Addon Discord.
+- Live status there: progress, layer and time left.
+- Pause, resume and stop your build from Discord.
+- A message when the build is done or needs you (you choose what).
+- Replies from the developer show up in game.
+- Tells you when a new version is out.

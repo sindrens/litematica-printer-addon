@@ -44,5 +44,7 @@ public class PrinterAddon implements ClientModInitializer {
     @Override
     public void onInitializeClient() {
         InitializationHandler.getInstance().registerInitializationHandler(new AddonInit());
+        net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback.EVENT.register(
+                (dispatcher, registryAccess) -> no.sindrens.printeraddon.discord.LinkCommands.register(dispatcher));
     }
 }
