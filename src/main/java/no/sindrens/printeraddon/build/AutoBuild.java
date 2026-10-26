@@ -2199,6 +2199,7 @@ public class AutoBuild {
      * developer on the next start (see LogShare).
      */
     public void gameClosing(Minecraft mc) {
+        LogShare.gameClosing();
         if (AreaBreaker.INSTANCE.isRunning()) {
             AreaBreaker.INSTANCE.stop(mc, LogShare.GAME_CLOSED);
         }

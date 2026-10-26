@@ -127,10 +127,11 @@ def summary(msg, kind, version=None):
     embed = (msg.get("embeds") or [{}])[0]
     title = embed.get("title", "")
     desc = embed.get("description", "")
-    m = re.match(r"^v(\S+) · ", title)
+    # The version last in the title ("Log from X · Finished · v0.17.3"), first in 0.17.2 ("v0.17.2 · Finished · X")
+    m = re.search(r" · v(\S+)$", title) or re.match(r"^v(\S+) · ", title)
     if m:
         version = version or m.group(1)
-        title = title[m.end():]
+        title = (title[:m.start()] + title[m.end():]).strip()
     if not version:
         # Before 0.17.2: the log's name has the version that wrote it, the versions line the one sending it
         logs = [a["filename"] for a in msg.get("attachments", []) if ".jsonl" in a["filename"]]
@@ -138,7 +139,7 @@ def summary(msg, kind, version=None):
         old = named or re.search(r"Printer Addon (\S+)", desc)
         version = old.group(1) if old else "?"
     player = "?"
-    for pattern in (r"^Problem from (.+?)(?::|$)", r"· ([^·]+)$", r"^Log from (.+)$"):
+    for pattern in (r"^(?:Log|Problem) from ([A-Za-z0-9_]{2,16})\b", r"· ([^·]+)$", r"^Log from (.+)$"):
         m = re.search(pattern, title)
         if m:
             player = m.group(1).strip()
@@ -300,10 +301,11 @@ def add_old(hook, ref, kind=None):
     title = (msg.get("embeds") or [{}])[0].get("title", "")
     info = summary(msg, kind or "L")
     if kind is None:
-        plain = re.sub(r"^v\S+ · ", "", title)
-        kind = ("P" if plain.startswith("Problem") else "F" if plain.startswith("Finished") else "U" if plain.startswith("Stopped by the player")
-                else "S" if plain.startswith("Stopped:") else "D" if plain.startswith("Disconnected") else "C" if plain.startswith(("Crashed", "Game "))
-                else "L")
+        # "Log from X · Finished · v0.17.3", "v0.17.2 · Finished · X", "Finished · X" (before)
+        plain = re.sub(r"^v\S+ · |^Log from [A-Za-z0-9_]+(?: · )?| · v\S+$", "", title)
+        kind = ("P" if title.startswith("Problem") or plain.startswith("Problem") else "F" if plain.startswith("Finished")
+                else "U" if plain.startswith("Stopped by the player") else "S" if plain.startswith("Stopped:")
+                else "D" if plain.startswith("Disconnected") else "C" if plain.startswith(("Crashed", "Game ")) else "L")
     if any(rid == mid for rid, _, _, _ in index(hook)):
         print(f"{mid}: listed already")
         return

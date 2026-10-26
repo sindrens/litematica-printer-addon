@@ -47,8 +47,9 @@ import java.util.zip.GZIPOutputStream;
  * None get lost: each waits in the outbox (logs/printer_addon/outbox, a file each) until Discord has it. A failed send
  * is tried again (30 s, 2 min, 10 min ... for up to a week) and after a restart, and the log of a run that never ended
  * (the game crashed or was killed) goes on the next start. One thread sends them one by one, the player's own first.
- * Each report's title starts with the add-on version that wrote the log, and it's listed with its kind and version
- * for the developer's tool (see ReportIndex). With the log go a short summary and the full debug (see DebugInfo):
+ * Each report says which add-on version wrote the log (first in the line above it, last in its title, which starts
+ * "Log from <player>" for the server's bot), and it's listed with its kind and version for the developer's tool (see
+ * ReportIndex). With the log go a short summary and the full debug (see DebugInfo):
  * debug.txt, the game's own log without chat (of the game the run was in), a crash report from the last day, and the
  * screenshot the player adds. Each one sent is noted in logs/printer_addon/sent.txt.
  */
@@ -67,7 +68,7 @@ public final class LogShare {
     private static final int MAX_BYTES = 9 * 1024 * 1024 + 512 * 1024;
     private static final int DEBUG_BYTES = 512 * 1024;
     /** A bigger log is read from its end only (an hour was 19.5 MB before the logs got smaller). */
-    private static final int MAX_READ = 64 * 1024 * 1024;
+    private static final int MAX_READ = 32 * 1024 * 1024;
     /** The most the report screen takes: the player's own words, and what they were building. */
     public static final int MAX_PROBLEM = 2000;
     public static final int MAX_BUILDING = 200;
@@ -110,6 +111,7 @@ public final class LogShare {
     private static boolean loaded;
     private static boolean noticeChecked;
     private static long lastNotStarted;
+    private static volatile boolean closing;
 
     private static final int RED = 0xE74C3C;
     private static final int ORANGE = 0xF59E0B;
@@ -320,29 +322,37 @@ public final class LogShare {
      */
     public static void afterRun(Minecraft mc, String why, boolean ask) {
         try {
-            Files.deleteIfExists(outbox().resolve(RUNNING));
-        } catch (IOException | RuntimeException ignored) {
-            // left there: sent once more on the next start, as a run that never ended
-        }
-        try {
             if (channel().isEmpty()) {
-                return;
-            }
-            if (Configs.Generic.SHARE_LOGS.getBooleanValue()) {
-                if ("could-not-start".equals(why)) {
-                    long now = System.currentTimeMillis();
-                    if (now - lastNotStarted < NOT_STARTED_EVERY_MS) {
-                        return;
+                // nowhere to send it
+            } else if (Configs.Generic.SHARE_LOGS.getBooleanValue()) {
+                long now = System.currentTimeMillis();
+                if (!"could-not-start".equals(why) || now - lastNotStarted >= NOT_STARTED_EVERY_MS) {
+                    if ("could-not-start".equals(why)) {
+                        lastNotStarted = now;
                     }
-                    lastNotStarted = now;
+                    share(mc, true, null, why);
                 }
-                share(mc, true, null, why);
             } else if (ask) {
                 StopPrompt.ask(why, RunLog.describeRun().startsWith("Auto break") ? "Auto break" : "Auto build");
             }
         } catch (RuntimeException | LinkageError e) {
+            // The note stays: the log goes on the next start, as a run that didn't end well
             PrinterAddon.LOGGER.warn("[Printer Addon] Couldn't share the log", e);
+            return;
         }
+        try {
+            Files.deleteIfExists(outbox().resolve(RUNNING));
+        } catch (IOException | RuntimeException ignored) {
+            // left there: sent once more on the next start, as a run that never ended
+        }
+    }
+
+    /**
+     * The game is closing (see AutoBuild.gameClosing): what's made from now on is only saved, and goes on the next
+     * start. A send started now would be cut off by the game ending, and maybe sent twice.
+     */
+    public static void gameClosing() {
+        closing = true;
     }
 
     /**
@@ -611,9 +621,12 @@ public final class LogShare {
 
     // ---- the outbox and the sending thread
 
-    /** Into the outbox and the queue; true when others go first. */
+    /** Into the outbox and the queue; true when others go first. While the game closes: only into the outbox. */
     private static boolean add(Job job) {
         save(job);
+        if (closing) {
+            return true;
+        }
         synchronized (queue) {
             boolean after = sending || !queue.isEmpty();
             queue.add(job);
@@ -707,9 +720,15 @@ public final class LogShare {
         Minecraft mc = Minecraft.getInstance();
         while (true) {
             Job job = null;
+            List<Job> unwanted;
+            boolean done = false;
             synchronized (queue) {
                 long now = System.currentTimeMillis();
                 long wake = Long.MAX_VALUE;
+                // "Always send logs" turned off since: the logs that would go by themselves don't (the player's own do)
+                unwanted = Configs.Generic.SHARE_LOGS.getBooleanValue() ? List.of()
+                        : queue.stream().filter(waiting -> waiting.automatic).toList();
+                queue.removeAll(unwanted);
                 for (Job waiting : queue) {
                     if (waiting.nextTry <= now) {
                         job = waiting;
@@ -717,26 +736,38 @@ public final class LogShare {
                     }
                     wake = Math.min(wake, waiting.nextTry);
                 }
-                if (job == null) {
-                    if (queue.isEmpty()) {
-                        worker = null;
-                        return;
-                    }
+                if (job != null) {
+                    sending = true;
+                } else if (queue.isEmpty()) {
+                    worker = null;
+                    done = true;
+                } else if (unwanted.isEmpty()) {
                     try {
                         queue.wait(Math.max(1_000, Math.min(wake - now, 60_000)));
                     } catch (InterruptedException e) {
                         return;
                     }
-                    continue;
                 }
-                sending = true;
+            }
+            // The files outside the lock (the game's thread waits on it)
+            unwanted.forEach(LogShare::delete);
+            if (done) {
+                return;
+            }
+            if (job == null) {
+                continue;
             }
             Result result;
             try {
                 result = send(mc.gameDirectory.toPath(), job);
             } catch (RuntimeException | LinkageError e) {
+                // A bug: it would fail again the same way
                 PrinterAddon.LOGGER.warn("[Printer Addon] Couldn't send a log", e);
                 result = Result.failed(e.getClass().getSimpleName(), false, 0);
+            } catch (Throwable e) {
+                // Out of memory or the like: later, and given up after a few tries
+                PrinterAddon.LOGGER.warn("[Printer Addon] Couldn't send a log: {}", e.toString());
+                result = Result.failed(e.getClass().getSimpleName(), true, 0);
             } finally {
                 sending = false;
             }
@@ -938,17 +969,20 @@ public final class LogShare {
             }
             description.append("\n**Files:** ").append(files).append(notes.isEmpty() ? "" : " (" + String.join("; ", notes) + ")");
 
-            // The version first, for sorting by it in Discord and in the developer's index
-            String title = "v" + job.version + " · " + switch (job.kind) {
+            // "Log from <player>" / "Problem from <player>" first: the server's bot counts each player's logs by it (the
+            // Logger role); the version last, and first in the line above for sorting by it
+            String title = switch (job.kind) {
                 case 'P' -> "Problem from " + job.player + (report == null || report.picked().isEmpty() ? "" : ": " + String.join(", ", report.picked()));
-                case 'S' -> "Stopped: " + cut(ended == null ? "?" : ended, 120) + " · " + job.player;
-                case 'F' -> "Finished · " + job.player;
-                case 'U' -> "Stopped by the player · " + job.player;
-                case 'D' -> "Disconnected · " + job.player;
-                case 'C' -> (ended != null && ended.startsWith(CRASHED) ? "Crashed: " + cut(ended.substring(CRASHED.length()).replaceFirst("^: ", ""), 100)
-                        : ended != null && ended.contains(GAME_CLOSED) ? "Game closed during the run" : "Game stopped during the run") + " · " + job.player;
+                case 'S' -> "Log from " + job.player + " · Stopped: " + cut(ended == null ? "?" : ended, 120);
+                case 'F' -> "Log from " + job.player + " · Finished";
+                case 'U' -> "Log from " + job.player + " · Stopped by the player";
+                case 'D' -> "Log from " + job.player + " · Disconnected";
+                case 'C' -> "Log from " + job.player + " · " + (ended != null && ended.startsWith(CRASHED)
+                        ? "Crashed: " + cut(ended.substring(CRASHED.length()).replaceFirst("^: ", ""), 100)
+                        : ended != null && ended.contains(GAME_CLOSED) ? "Game closed during the run" : "Game stopped during the run");
                 default -> "Log from " + job.player;
             };
+            title = cut(title, 230) + " · v" + job.version;
             int color = switch (job.kind) {
                 case 'P' -> RED;
                 case 'S' -> ORANGE;
@@ -959,7 +993,7 @@ public final class LogShare {
                 default -> LIGHT_BLUE;
             };
             JsonObject embed = new JsonObject();
-            embed.addProperty("title", cut(title, 250));
+            embed.addProperty("title", title);
             embed.addProperty("description", cut(description.toString(), 4000));
             embed.addProperty("color", color);
             if (shot != null) {
@@ -1006,6 +1040,7 @@ public final class LogShare {
             HttpResponse<String> response = CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
             int status = response.statusCode();
             if (status / 100 == 2) {
+                delete(job);
                 String id = "?";
                 try {
                     id = JsonParser.parseString(response.body()).getAsJsonObject().get("id").getAsString();
