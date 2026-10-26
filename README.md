@@ -63,21 +63,23 @@ Drops: with "Auto break: put drops away" on (the default), once the inventory is
 
 Every auto build and Auto break writes a log in `logs/printer_addon/`, named by when, what and which version, so the newest sorts last: `2026-10-25 16.45.12 auto build Pumpkin_farm v0.15.1.jsonl`.
 
+With **Always send logs** (on by default) every run's log goes to the add-on's developer by itself when the run ends, however it ended: finished, stopped by you or by itself, a disconnect, or the game closed during it. You're told once in chat; the setting of the same name (J+B, Generic) turns it off, and then you're asked after each run instead. None get lost: each one waits in `logs/printer_addon/outbox/` until Discord has it, and is tried again after a failed send (30 s, 2 min, 10 min, ... for up to a week) and after a restart. The log of a run that never ended (the game crashed or was killed) goes on the next start, with the crash report. Each one sent is noted in `logs/printer_addon/sent.txt`. Every report's title starts with the version that wrote the log (`v0.17.2 · Finished · Player`).
+
 **Report / share log** in the J+B menu opens a short form: write what went wrong (or leave it empty), click what fits (skips blocks, too slow, gets stuck, shop, tilling, error...), and check what you were building (filled in from your schematic). A screenshot you took with F2 in the last 15 minutes can go with it. **Send to the developer** sends it to the add-on's developer (a Discord channel) with the run's log (the one going on, else the last one) and the full debug:
 
 - `debug.txt`: what you wrote, where you are and what's running, your hotbar and inventory, PC (OS, Java, CPU, memory, graphics card, window, fps), every mod and its version, every setting of the add-on, Litematica Printer and Litematica, the schematic placements, recent runs and learned speeds.
-- `game-log.txt`: the game's own log (`logs/latest.log`, errors from any mod) without chat lines.
+- `game-log.txt`: the game's own log (`logs/latest.log`, or that of the game the run was in when it's sent after a restart; errors from any mod) without chat lines.
 - `crash-report.txt`: a crash report from the last day, if there is one.
 
 Nothing private goes: no chat, no Log channel, no chest or vault spots, and your user folder (it has your name in it) is written `~`. The run's log has the build's coordinates, your inventory and your balance. What you wrote is kept until it's sent. **Log channel** in the settings sends them to your own Discord webhook instead.
 
-After every auto build or Auto break run (finished, stopped by you, an error, out of items; not a disconnect, which picks up again), it asks whether the run's log may go to the developer: **Send log**, **Always send logs** (from then on every run's log goes by itself; the setting of the same name turns it off), **Write what happened** (the form above, with the reason filled in) or **Not now**. Nothing is sent without one of these.
+With "Always send logs" off, it asks after every auto build or Auto break run (finished, stopped by you, an error, out of items; not a disconnect, which picks up again) whether the run's log may go to the developer: **Send log**, **Always send logs**, **Write what happened** (the form above, with the reason filled in) or **Not now**.
 
 ### Reading the reports (for the developer)
 
-Each report is a message in #player-reports, sent through its webhook. A webhook can read and edit its own messages by id but can't list them, so the add-on also writes each report's id into a small index in that channel (`ReportIndex.java`; the root message's id is in `src/main/resources/printer_addon/report-index.txt`). `tools/reports.py` reads it with the same webhook (`PLAYER_REPORTS_WEBHOOK`, or the git-ignored `log-channel.txt`):
+Each report is a message in #player-reports, sent through its webhook, with a small searchable line above it (`v0.17.2 · Finished · Auto build: farm · Player`: Discord's search doesn't look inside embeds). A webhook can read and edit its own messages by id but can't list them, so the add-on also writes each report into a small index in that channel as `<id> <kind> <version>` (`ReportIndex.java`; the root message's id is in `src/main/resources/printer_addon/report-index.txt`; a new index message is added when they're full). Kinds: P problem, S stopped by itself, F finished, U stopped by the player, L log from the menu, D disconnected, C the game closed or crashed. `tools/reports.py` reads it with the same webhook (`PLAYER_REPORTS_WEBHOOK`, or the git-ignored `log-channel.txt`):
 
-- `sync` fetches every report and its files into `reports/` (git-ignored), `list` shows the open ones first, newest first.
+- `sync` fetches every report and its files into `reports/v<version>/` (git-ignored), `list [--version V] [--kind K]` shows the open ones first, newest first, `versions` counts them per version and kind.
 - `analyze [id]` reads a report critically (`tools/analyze.py`): the add-on's errors and exceptions first, then why it stopped, missed clicks and given-up blocks, where the time went and long stalls, changed settings.
 - `trends` compares versions: blocks a minute, missed clicks, stalls, errors an hour, how runs ended.
 - `mark <id> read|fixed <version>|wontfix` puts a Status on the report in Discord (fixed ones turn gray), `dashboard` updates the overview message.

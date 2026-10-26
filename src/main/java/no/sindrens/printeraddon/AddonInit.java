@@ -39,6 +39,15 @@ public class AddonInit implements IInitializationHandler {
             }
         });
 
+        // Closing the game during a run ends it there, so its log is whole (sent on the next start, see LogShare)
+        net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents.CLIENT_STOPPING.register(mc -> {
+            try {
+                no.sindrens.printeraddon.build.AutoBuild.INSTANCE.gameClosing(mc);
+            } catch (RuntimeException | LinkageError e) {
+                PrinterAddon.LOGGER.warn("[Printer Addon] Couldn't end the run as the game closed", e);
+            }
+        });
+
         PrinterAddon.LOGGER.info("{} initialized", PrinterAddon.MOD_NAME);
     }
 }

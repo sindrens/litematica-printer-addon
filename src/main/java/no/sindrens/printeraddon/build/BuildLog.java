@@ -252,8 +252,11 @@ public final class BuildLog {
 
     private static void removeOld(Path dir) throws IOException {
         try (Stream<Path> files = Files.list(dir)) {
-            // The old names (build-<date>) and the new ones (<date> <what> v<version>), oldest first
+            // The old names (build-<date>) and the new ones (<date> <what> v<version>), oldest first; not one still
+            // waiting to go to the developer (see LogShare)
+            java.util.Set<String> waiting = LogShare.waitingLogs();
             List<Path> logs = files.filter(p -> p.getFileName().toString().endsWith(".jsonl") || p.getFileName().toString().endsWith(".log"))
+                    .filter(p -> !waiting.contains(p.getFileName().toString()))
                     .sorted(Comparator.comparingLong(p -> p.toFile().lastModified())).toList();
             for (int i = 0; i < logs.size() - (KEEP_FILES - 1); i++) {
                 Files.deleteIfExists(logs.get(i));

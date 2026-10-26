@@ -10,7 +10,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Asked after every auto build or Auto break run (see StopPrompt): may the run's log go to the add-on's developer?
+ * Asked after every auto build or Auto break run with "Always send logs" off (see StopPrompt): may the run's log go to
+ * the add-on's developer?
  * Send log, Always send logs (from now on without asking), Write what happened (the report screen, with the reason
  * filled in), or Not now.
  */

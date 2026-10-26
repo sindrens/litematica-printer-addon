@@ -22,6 +22,7 @@ import no.sindrens.printeraddon.util.ServerName;
 import javax.annotation.Nullable;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
@@ -30,6 +31,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
@@ -37,12 +39,14 @@ import java.util.Map;
 import java.util.TreeMap;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
+import java.util.zip.GZIPInputStream;
 
 /**
  * The full debug that goes with a shared log (see LogShare): what the run's log doesn't say. debug.txt has what the
  * player wrote and clicked, where they are and what's running, the PC, every mod's version, every setting of the
- * add-on, Litematica Printer and Litematica, the placements, the recent runs and the learned speeds. Next to it go the
- * game's own log (latest.log: errors from any mod) and a crash report from the last day. Nothing private goes: no chat
+ * add-on, Litematica Printer and Litematica, the placements, the recent runs, the learned speeds and the reports sent
+ * before. Next to it go the game's own log (latest.log, or that of the game the run was in: errors from any mod) and a
+ * crash report from the last day. Nothing private goes: no chat
  * lines, no log channel, no chest or vault spots, and the user folder (it has the player's name in it) is written ~.
  */
 public final class DebugInfo {
@@ -163,6 +167,8 @@ public final class DebugInfo {
         section(out, "Build report (report.txt, from the last 2 hours)", () -> lines(dir.resolve("report.txt"), 150, false, 120));
         section(out, "Learned speeds (speed.txt)", () -> lines(dir.resolve("speed.txt"), 60, false, 0));
         section(out, "Learned speeds per block (speed-blocks.txt)", () -> lines(dir.resolve("speed-blocks.txt"), 80, false, 0));
+        section(out, "Reports to the developer (sent.txt, the outbox)", () -> "Outbox: " + LogShare.outboxStatus() + "\n"
+                + lines(BuildLog.folder().resolve("sent.txt"), 15, true, 0));
         return mask(out.toString());
     }
 
@@ -308,16 +314,28 @@ public final class DebugInfo {
         return String.join("\n", some) + (all.size() > max ? "\n(" + (all.size() - max) + " more lines left out)" : "");
     }
 
-    /** latest.log without its chat lines, masked; its start and its end when it's big. Off the game's thread. */
-    static byte[] gameLog(Minecraft mc) {
-        Path file = mc.gameDirectory.toPath().resolve("logs").resolve("latest.log");
-        if (!Files.isRegularFile(file)) {
+    /**
+     * The game's own log without its chat lines, masked; its start and its end when it's big. Off the game's thread.
+     * {@code thisGame}: latest.log; else the log of the game that was running at {@code seen} (the game puts latest.log
+     * into a .log.gz when it starts again: the first one written after then).
+     */
+    static byte[] gameLog(Path gameDir, boolean thisGame, long seen) {
+        Path dir = gameDir.resolve("logs");
+        Path file = thisGame ? dir.resolve("latest.log") : rolledLog(dir, seen);
+        if (file == null || !Files.isRegularFile(file)) {
             return new byte[0];
         }
-        try (FileChannel channel = FileChannel.open(file, StandardOpenOption.READ)) {
-            long size = channel.size();
-            String text = size <= GAME_LOG_READ ? read(channel, 0, (int) size)
-                    : read(channel, 0, GAME_LOG_HEAD) + "\n" + read(channel, size - (GAME_LOG_READ - GAME_LOG_HEAD), GAME_LOG_READ - GAME_LOG_HEAD);
+        try {
+            String text;
+            if (file.getFileName().toString().endsWith(".gz")) {
+                text = "(" + file.getFileName() + ": the game's log from the game the run was in)\n" + readGz(file);
+            } else {
+                try (FileChannel channel = FileChannel.open(file, StandardOpenOption.READ)) {
+                    long size = channel.size();
+                    text = size <= GAME_LOG_READ ? read(channel, 0, (int) size)
+                            : read(channel, 0, GAME_LOG_HEAD) + "\n" + read(channel, size - (GAME_LOG_READ - GAME_LOG_HEAD), GAME_LOG_READ - GAME_LOG_HEAD);
+                }
+            }
             StringBuilder kept = new StringBuilder(text.length());
             for (String line : text.split("\r?\n")) {
                 // Chat is what other players wrote (and private messages): never sent
@@ -327,7 +345,58 @@ public final class DebugInfo {
             }
             return cutMiddle(mask(kept.toString()).getBytes(StandardCharsets.UTF_8), GAME_LOG_BYTES, GAME_LOG_HEAD);
         } catch (IOException | RuntimeException e) {
-            return ("latest.log couldn't be read: " + e).getBytes(StandardCharsets.UTF_8);
+            return (file.getFileName() + " couldn't be read: " + e).getBytes(StandardCharsets.UTF_8);
+        }
+    }
+
+    /** The rolled game log (logs/<date>-<n>.log.gz) of the game that was running at {@code seen}, or null. */
+    @Nullable
+    private static Path rolledLog(Path dir, long seen) {
+        try (Stream<Path> files = Files.list(dir)) {
+            return files.filter(p -> p.getFileName().toString().endsWith(".log.gz") && p.toFile().lastModified() >= seen)
+                    .min(Comparator.comparingLong(p -> p.toFile().lastModified())).orElse(null);
+        } catch (IOException | RuntimeException e) {
+            return null;
+        }
+    }
+
+    /** A .log.gz's start and its last part, at most GAME_LOG_READ bytes in all. */
+    private static String readGz(Path file) throws IOException {
+        try (InputStream in = new GZIPInputStream(Files.newInputStream(file), 1 << 16)) {
+            byte[] head = in.readNBytes(GAME_LOG_HEAD);
+            int keep = GAME_LOG_READ - GAME_LOG_HEAD;
+            // The last bytes, round and round in a ring
+            byte[] ring = new byte[keep];
+            byte[] buffer = new byte[1 << 16];
+            long total = 0;
+            int n;
+            while ((n = in.read(buffer)) > 0) {
+                int at = (int) (total % keep);
+                int first = Math.min(n, keep - at);
+                System.arraycopy(buffer, 0, ring, at, first);
+                System.arraycopy(buffer, first, ring, 0, n - first);
+                total += n;
+            }
+            byte[] tail;
+            if (total <= keep) {
+                tail = Arrays.copyOf(ring, (int) total);
+            } else {
+                int at = (int) (total % keep);
+                tail = new byte[keep];
+                System.arraycopy(ring, at, tail, 0, keep - at);
+                System.arraycopy(ring, 0, tail, keep - at, at);
+            }
+            return new String(head, StandardCharsets.UTF_8) + (total > keep ? "\n" : "") + new String(tail, StandardCharsets.UTF_8);
+        }
+    }
+
+    /** A crash report's "Description:" line ("Unexpected error"), or "?". */
+    static String crashDescription(Path file) {
+        try (InputStream in = Files.newInputStream(file)) {
+            java.util.regex.Matcher m = Pattern.compile("Description: (.+)").matcher(new String(in.readNBytes(16 * 1024), StandardCharsets.UTF_8));
+            return m.find() ? m.group(1).trim() : "?";
+        } catch (IOException | RuntimeException e) {
+            return "?";
         }
     }
 

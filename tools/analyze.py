@@ -50,7 +50,13 @@ def _times(text):
     return {k: _num(v) for k, v in re.findall(r"([a-z-]+)=([\d.]+)s", text or "")}
 
 
-def analyze(folder):
+def version_key(version):
+    """0.17.10 after 0.17.9; "?" first."""
+    return [int(p) if p.isdigit() else 0 for p in re.split(r"[.+-]", version or "0")]
+
+
+def analyze(folder, kind=None):
+    """kind: the report's (see reports.py), when known: C means the game closed or crashed during the run."""
     found = []
 
     def add(level, text):
@@ -96,6 +102,8 @@ def analyze(folder):
                  perMin=_num(end.get("placedPerMin")), clicks=int(_num(end.get("clicks"))), missed=int(_num(end.get("missedClicks"))),
                  wrong=int(_num(end.get("wrongBlocks"))), givenUp=int(_num(end.get("givenUp"))), trips=int(_num(end.get("trips"))),
                  purchases=int(_num(end.get("purchases"))), spent=_num(end.get("spent")), times=_times(end.get("times")))
+    elif kind == "C":
+        add("STOP", "The run never ended: the game crashed, froze or was killed during it (see crash-report.txt if there is one).")
     else:
         add("INFO", "No RUN-END: the log was sent while the run was going, or it's only the end of a big log.")
     m["layersDone"] = layers
@@ -123,10 +131,11 @@ def analyze(folder):
             "Crash report" + (" naming the add-on" if "printeraddon" in crash.lower() else "") + ": " + (head.group(1) if head else "?"))
     m["errors"] = len(errors) + sum(exceptions.values())
 
-    # STOP: why it ended
+    # STOP: why it ended (a disconnect is one too: kicked, timed out; closing the game or a stop from Discord isn't)
     why = m.get("why", "")
-    if why and why not in ("finished", "done", "stopped-by-you", "stopped", "disconnected"):
-        add("STOP", f"Stopped by itself: {why}")
+    if why and why not in ("finished", "done", "stopped-by-you", "stopped", "disconnected", "stopped from Discord", "paused from Discord",
+                           "could-not-start") and "the game was closed" not in why:
+        add("STOP", f"Disconnected: {why[len('disconnected: '):]}" if why.startswith("disconnected: ") else f"Stopped by itself: {why}")
 
     # QUALITY: clicks the server refused, blocks wrong or given up
     if end:
@@ -195,7 +204,7 @@ def trends(analyses):
     for m in analyses:
         by[m.get("version", "?")].append(m)
     rows = []
-    for version in sorted(by, key=lambda v: [int(p) if p.isdigit() else p for p in re.split(r"[.-]", v)]):
+    for version in sorted(by, key=version_key):
         runs = [m for m in by[version] if "placed" in m]
         secs = sum(m["seconds"] for m in runs) or 1
         placed = sum(m["placed"] for m in runs)

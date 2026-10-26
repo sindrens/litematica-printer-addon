@@ -121,3 +121,10 @@
 ## 26.2-0.17.1
 - Fewer trips to the vaults and the shop: a lane starts unless an item is nearly gone, and it's topped up where it runs out.
 - One more inventory slot for building blocks.
+
+## 26.2-0.17.2
+- Every run's log goes to the developer by itself (on by default, told once in chat; off: "Always send logs").
+- No log gets lost: they wait in an outbox and are sent again after a failed send or a restart.
+- Disconnects, a closed game and crashes during a run send their log too (a crash on the next start).
+- Closing the game during a build ends it properly: your printer settings come back, and it goes on next time.
+- Every report shows the version that wrote the log, and the developer sorts them by it.

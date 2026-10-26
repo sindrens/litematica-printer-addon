@@ -2044,10 +2044,10 @@ public class AutoBuild {
             } else if (resumeLater) {
                 RunLog.event("disconnect", "reason=\"" + (disconnectReason.isEmpty() ? "left the build's world" : disconnectReason) + "\"");
             }
-            // Every run's log is worth having: asked about after every stop, the player's own too. Not for a disconnect
-            // (it picks up again once back) and not when nothing could start
-            String ended = reason != null ? reason : resumeLater ? "disconnected" : stopNote != null ? stopNote
-                    : remoteStopping ? "stopped from Discord" : "stopped-by-you";
+            // Every run's log is worth having: it goes by itself (see LogShare), or the player is asked after every stop,
+            // their own too. Not asked after a disconnect (it picks up again once back) nor when nothing could start
+            String ended = reason != null ? reason : resumeLater ? (disconnectReason.isEmpty() ? "disconnected" : "disconnected: " + disconnectReason)
+                    : stopNote != null ? stopNote : remoteStopping ? "stopped from Discord" : "stopped-by-you";
             boolean fromDiscord = PAUSE_REASON.equals(reason) || remoteStopping;
             RunLog.end(mc, ended, !resumeLater && !"could-not-start".equals(stopNote) && !fromDiscord);
             disconnectReason = "";
@@ -2190,6 +2190,23 @@ public class AutoBuild {
             }
         } else if (first) {
             Chat.warn("Printer Addon error (" + e.getClass().getSimpleName() + " in " + where + "): the game log has the details.");
+        }
+    }
+
+    /**
+     * The game is closing (see AddonInit): auto build ends as for a disconnect (it goes on once back at the build, see
+     * Resume, and the printer's own settings come back), Auto break ends too, so the run's log is whole; it goes to the
+     * developer on the next start (see LogShare).
+     */
+    public void gameClosing(Minecraft mc) {
+        if (AreaBreaker.INSTANCE.isRunning()) {
+            AreaBreaker.INSTANCE.stop(mc, LogShare.GAME_CLOSED);
+        }
+        if (running) {
+            if (disconnectReason.isEmpty()) {
+                disconnectReason = LogShare.GAME_CLOSED;
+            }
+            stopForDisconnect(mc);
         }
     }
 

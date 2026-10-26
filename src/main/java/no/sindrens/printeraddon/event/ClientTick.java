@@ -19,6 +19,8 @@ public class ClientTick implements IClientTickHandler {
 
     private void tick(Minecraft mc) {
         AutoBuild.clientTicks++;
+        // Logs that didn't go last time (and of a run that never ended) go now; the note that logs go by themselves
+        no.sindrens.printeraddon.build.LogShare.tick(mc);
         no.sindrens.printeraddon.discord.DiscordLink.tick(mc);
         if (mc.player == null || mc.level == null) {
             ShopScanner.INSTANCE.cancel(null);

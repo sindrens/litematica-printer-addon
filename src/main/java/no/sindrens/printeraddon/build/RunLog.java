@@ -253,6 +253,8 @@ public final class RunLog {
         holds.clear();
         lastSettings = BuildLog.settings();
         openJson();
+        // Noted until the run ends: its log still goes when the game crashes or is killed during it (see LogShare)
+        LogShare.runStarted(json != null ? currentFile : null, version);
         emit("RUN-START", kv("run", runId, "version", version, "server", server, "player",
                 mc.player == null ? "-" : pos(mc.player.position()), "printerInterval",
                 me.aleksilassila.litematica.printer.config.Configs.PRINTING_INTERVAL.getIntegerValue(), "printerRange",
@@ -262,8 +264,8 @@ public final class RunLog {
 
     /**
      * The run is over: the report, the comparison with the last run on this server, and the record for the next.
-     * {@code ask}: not a disconnect (or a start with nothing to build): the player is asked whether its log may go to
-     * the developer (see LogShare).
+     * Its log goes to the developer by itself with "Always send logs" (see LogShare); else, when {@code ask} (not a
+     * disconnect, the game closing, a start with nothing to build or a stop from Discord), the player is asked.
      */
     public static void end(Minecraft mc, String why, boolean ask) {
         if (!active) {

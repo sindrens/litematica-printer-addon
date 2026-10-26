@@ -446,7 +446,8 @@ public final class DiscordLink {
 
     /** End of a run (from RunLog#end): totals for stats and achievements, and the alert. */
     public static void runEnded(String why, int placed, double seconds, double spent, String what) {
-        if (!enabled() || !isLinked() || "disconnected".equals(why)) {
+        // Not for a disconnect ("kicked" says it) nor when the game closes (it isn't a problem)
+        if (!enabled() || !isLinked() || why != null && (why.startsWith("disconnected") || why.equals(no.sindrens.printeraddon.build.LogShare.GAME_CLOSED))) {
             return;
         }
         String result;

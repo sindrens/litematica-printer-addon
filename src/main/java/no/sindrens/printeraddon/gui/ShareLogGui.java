@@ -18,7 +18,7 @@ import java.util.Set;
  * "Report / share log" (J+B): before the log goes to the add-on's developer, the player says what went wrong, in
  * their own words and with the buttons that fit, and what they were building. The full debug goes with it (see
  * LogShare and DebugInfo), and their screenshot when they took one (F2) just before. What's written is kept until it's
- * sent, also when the screen is closed or sending fails.
+ * sent (also when the screen is closed); once sent, it waits in the outbox until Discord has it.
  */
 public class ShareLogGui extends GuiBase {
     /** The buttons to click and what each means (its words go into the report). */
@@ -159,9 +159,7 @@ public class ShareLogGui extends GuiBase {
                 + (crashReport != null ? ", the crash report (" + crashReport.ago() + ")" : ""));
         y += 13;
 
-        ButtonGeneric send = new ButtonGeneric(x, y, 200, 20, LogShare.isSending() ? "Sending the last one..." : "§a✉ Send to the developer");
-        send.setEnabled(!LogShare.isSending());
-        this.addButton(send, (clicked, mouse) -> send());
+        this.addButton(new ButtonGeneric(x, y, 200, 20, "§a✉ Send to the developer"), (clicked, mouse) -> send());
         this.addButton(new ButtonGeneric(x + 206, y, 90, 20, "Cancel"), (clicked, mouse) -> this.closeGui(true));
     }
 

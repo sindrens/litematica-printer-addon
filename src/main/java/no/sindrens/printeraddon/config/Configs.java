@@ -21,7 +21,9 @@ import java.nio.file.Path;
 public class Configs implements IConfigHandler {
     private static final String CONFIG_FILE_NAME = PrinterAddon.MOD_ID + ".json";
     /** 2: the fastest automatic interval went from 2 to 1. */
-    private static final int CONFIG_VERSION = 6;
+    private static final int CONFIG_VERSION = 7;
+    /** The one-time note in chat that every run's log goes to the developer by itself was shown (see LogShare). */
+    public static boolean logsNoticeShown;
 
     public static class Generic {
         public static final ConfigBoolean ADDON_ENABLED = new ConfigBoolean("addonEnabled", true,
@@ -81,11 +83,11 @@ public class Configs implements IConfigHandler {
                 "Write every step (which block is broken, why it stopped...) to the game log (logs/latest.log).\n"
                         + "Useful when something doesn't work.",
                 "Debug log");
-        public static final ConfigBoolean SHARE_LOGS = new ConfigBoolean("shareLogsAutomatically", false,
-                "After every auto build or Auto break run, its log goes to the add-on's developer (a Discord channel)\n"
-                        + "without asking, with the debug: versions, mods, settings, PC, the game log without chat. The log has\n"
-                        + "the build's coordinates, your inventory and balance, the server and your name.\n"
-                        + "Off: you're asked after each run.",
+        public static final ConfigBoolean SHARE_LOGS = new ConfigBoolean("shareLogsAutomatically", true,
+                "Every auto build and Auto break run's log goes to the add-on's developer (a Discord channel) by itself\n"
+                        + "when the run ends, however it ended, to find bugs and make it faster. With it the debug: versions, mods,\n"
+                        + "settings, PC, the game log without chat. The log has the build's coordinates, your inventory and\n"
+                        + "balance, the server and your name; never chat, chest or vault spots. Off: you're asked after each run.",
                 "Always send logs");
         public static final ConfigString LOG_CHANNEL = new ConfigString("logChannel", "",
                 "Where shared logs go: a Discord webhook URL. Empty: the add-on developer's channel.",
@@ -511,6 +513,12 @@ public class Configs implements IConfigHandler {
                         Speed.AUTO_SPEED_MIN_INTERVAL.setIntegerValue(2);
                     }
                 }
+                if (version < 7) {
+                    // Every run's log goes to the developer by itself now, the default (the player is told once in chat,
+                    // with how to turn it off): the logs show what goes wrong
+                    Generic.SHARE_LOGS.setBooleanValue(true);
+                }
+                logsNoticeShown = root.has("logsNoticeShown") && root.get("logsNoticeShown").getAsBoolean();
             }
         }
 
@@ -527,6 +535,7 @@ public class Configs implements IConfigHandler {
 
         JsonObject root = new JsonObject();
         root.addProperty("configVersion", CONFIG_VERSION);
+        root.addProperty("logsNoticeShown", logsNoticeShown);
         ConfigUtils.writeConfigBase(root, "Generic", Generic.OPTIONS);
         ConfigUtils.writeConfigBase(root, "Breaking", Breaking.OPTIONS);
         ConfigUtils.writeConfigBase(root, "Layers", Layers.OPTIONS);
