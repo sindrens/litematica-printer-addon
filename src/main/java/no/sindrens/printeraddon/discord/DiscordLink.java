@@ -68,13 +68,14 @@ public final class DiscordLink {
     }
 
     /** The Printer Addon bot (through the relay on the developer's droplet). */
-    public static final String DEFAULT_API = "http://139.59.156.198:8787/api/v1";
-    /** 0.16.0 had this as its default: saved settings with it get the real address. */
-    private static final String OLD_DEFAULT = "http://localhost:8787/api/v1";
+    public static final String DEFAULT_API = "http://139.59.156.198/api/v1";
+    /** Older defaults (0.16.0: this Mac; up to 0.17.3: port 8787, blocked on some networks): saved settings with them get the real address. */
+    private static final java.util.Set<String> OLD_DEFAULTS = java.util.Set.of("http://localhost:8787/api/v1",
+            "http://139.59.156.198:8787/api/v1");
 
     private static String api() {
         String url = Configs.Generic.DISCORD_API.getStringValue().trim();
-        if (url.equals(OLD_DEFAULT)) {
+        if (OLD_DEFAULTS.contains(url)) {
             url = DEFAULT_API;
         }
         while (url.endsWith("/")) {

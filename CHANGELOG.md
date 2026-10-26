@@ -129,3 +129,6 @@
 - Closing the game during a build ends it properly: your printer settings come back, and it goes on next time.
 - Every report shows the version that wrote the log, and the developer sorts them by it.
 - Every log you send counts for the Logger role, however the run ended.
+
+## 26.2-0.17.4
+- Linking with Discord works on more networks (the bot is reached on the normal web port).
