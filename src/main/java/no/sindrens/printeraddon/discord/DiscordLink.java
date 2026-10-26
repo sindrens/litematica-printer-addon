@@ -317,7 +317,7 @@ public final class DiscordLink {
             s.addProperty("money_spent", Math.round(build.spentTotal()));
         } else if (build.isRemotelyPaused()) {
             state = "paused";
-            s.addProperty("detail", "paused from Discord");
+            s.addProperty("detail", build.pausedText());
             s.addProperty("build", AutoBuild.placementNames());
         } else {
             state = "idle";

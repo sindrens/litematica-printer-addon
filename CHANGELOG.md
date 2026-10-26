@@ -146,3 +146,7 @@
 - Waterlogged leaves get their water as the lane passes: the bucket gets its own turn and the lane holds still a moment.
 - A missed bucket is tried again after 1 second instead of 30.
 - Ordinary water buckets: as many are fetched or bought as the layer's water needs, instead of 1 at a time with 3 minutes of waiting in between.
+
+## 26.2-0.17.7
+- Works together with the new AutoSell mod: a build pauses while it sells your collectors, and goes on by itself after.
+- The Discord control room says why a build is paused.

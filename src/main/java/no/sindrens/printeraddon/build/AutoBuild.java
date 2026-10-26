@@ -1808,7 +1808,46 @@ public class AutoBuild {
     private String pausedSpending;
 
     public boolean isRemotelyPaused() {
-        return remotePaused && !running;
+        return (remotePaused || otherModPaused) && !running;
+    }
+
+    // ---- Other mods (see api.PrinterAddonApi): paused for a while (AutoSell selling collectors), then on again
+    /** Stop reasons from another mod start with this: no log question after them, like a pause from Discord. */
+    public static final String OTHER_MOD_PAUSE = "paused for ";
+    private boolean otherModPaused;
+    @javax.annotation.Nullable
+    private String otherModSpending;
+
+    /** In the middle of a trip or task that shouldn't be cut off (buying, a vault, crafting, putting away). */
+    public boolean busyWithTrip() {
+        return running && (buying || pausedByOthers()) || isManualTaskRunning() || puttingAway;
+    }
+
+    /** Pauses a running build for another mod; true if it was running. */
+    public boolean pauseForOtherMod(Minecraft mc, String why) {
+        if (!running) {
+            return false;
+        }
+        otherModSpending = spendingText();
+        stop(mc, OTHER_MOD_PAUSE + why, false);
+        otherModPaused = true;
+        return true;
+    }
+
+    /** Goes on after {@link #pauseForOtherMod} (not if the player started or stopped it by hand meanwhile). */
+    public void resumeForOtherMod(Minecraft mc) {
+        if (!otherModPaused || running) {
+            otherModPaused = false;
+            return;
+        }
+        otherModPaused = false;
+        String spending = otherModSpending;
+        otherModSpending = null;
+        Chat.info("Going on with the build.");
+        start(mc);
+        if (running && spending != null) {
+            restoreSpending(spending);
+        }
     }
 
     /** Stops for now, keeping the spending limit; nothing is put away and no log question is asked. */
@@ -1835,9 +1874,15 @@ public class AutoBuild {
         }
     }
 
+    /** What the pause was for, for the Discord control room. */
+    public String pausedText() {
+        return otherModPaused ? "paused to sell collectors" : "paused from Discord";
+    }
+
     /** Stopped from Discord: like the player's own stop, without the log question (nobody may be at the game). */
     public void stopRemote(Minecraft mc) {
         remotePaused = false;
+        otherModPaused = false;
         pausedSpending = null;
         if (!running) {
             return;
@@ -2067,7 +2112,7 @@ public class AutoBuild {
             // their own too. Not asked after a disconnect (it picks up again once back) nor when nothing could start
             String ended = reason != null ? reason : resumeLater ? (disconnectReason.isEmpty() ? "disconnected" : "disconnected: " + disconnectReason)
                     : stopNote != null ? stopNote : remoteStopping ? "stopped from Discord" : "stopped-by-you";
-            boolean fromDiscord = PAUSE_REASON.equals(reason) || remoteStopping;
+            boolean fromDiscord = PAUSE_REASON.equals(reason) || remoteStopping || reason != null && reason.startsWith(OTHER_MOD_PAUSE);
             RunLog.end(mc, ended, !resumeLater && !"could-not-start".equals(stopNote) && !fromDiscord);
             disconnectReason = "";
             logIgnored(mc);
