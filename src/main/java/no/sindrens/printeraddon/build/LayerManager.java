@@ -242,6 +242,12 @@ public class LayerManager {
             }
         }
         int fromSave = doneLayers.size();
+        // Blocks the build gave up on before (left for the end, or skipped): only those let a layer be gone past
+        java.util.Set<BlockPos> gaveUpBefore = new java.util.HashSet<>();
+        if (saved != null) {
+            gaveUpBefore.addAll(saved.deferred());
+            gaveUpBefore.addAll(saved.skipped());
+        }
         int passed = 0;
         int leftovers = 0;
         layer = minY;
@@ -256,9 +262,12 @@ public class LayerManager {
                 doneLayers.add(layer++);
                 continue;
             }
-            // A few left (or a part that isn't loaded) on a layer the build already went past (blocks it left out
-            // before a restart): they wait until the end, the build goes on where it was
-            if (layer < maxY && here.unfinished <= Math.max(PASSED_LEFTOVERS, here.blocks / 100)) {
+            // A few left on a layer the build already went past (blocks it gave up on before a restart): they wait
+            // until the end, the build goes on where it was. Only blocks it really gave up on: a layer stopped
+            // half way (the player stopping it, a trip for items) is finished first. 40 observers and pistons left
+            // on a layer stopped for a trip were put off to the end, and the build went on a layer higher.
+            if (layer < maxY && here.unfinished <= Math.max(PASSED_LEFTOVERS, here.blocks / 100)
+                    && here.unfinished == here.positions.size() && gaveUpBefore.containsAll(here.positions)) {
                 LayerScan above = scans.computeIfAbsent(layer + 1, y -> LayerScan.of(mc.level, schematic, areas, y, 20000));
                 if (above.placed >= Math.max(16, above.blocks / 100)) {
                     AutoBuild.INSTANCE.deferred.addAll(here.positions);
@@ -319,6 +328,11 @@ public class LayerManager {
 
     public int tillingLeft() {
         return active ? tillingLeft : 0;
+    }
+
+    /** The water still to go in on the current layers (waterlogged blocks and sources), 0 before the first check. */
+    public int waterLeft() {
+        return active ? Math.max(0, waterPending) : 0;
     }
 
     /** -1 until the layer was checked once; else the unfinished water blocks of the layer. */

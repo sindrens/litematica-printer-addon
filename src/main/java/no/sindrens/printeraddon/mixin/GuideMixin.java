@@ -41,7 +41,7 @@ public class GuideMixin {
             if (property == BlockStateProperties.WATERLOGGED && !(state1.getBlock() instanceof CoralPlantBlock)) {
                 continue;
             }
-            if (StateRules.changesByItself(property)) {
+            if (StateRules.changesByItself(state1.getBlock(), property)) {
                 continue;
             }
             for (Property<?> ignored : propertiesToIgnore) {

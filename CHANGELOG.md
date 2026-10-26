@@ -139,3 +139,10 @@
 - A clear message when the Discord link is lost, and what to do.
 - Schematic library: stars, the cost at your server's shop prices, and how to build a downloaded schematic.
 - Your shop prices (from J+S) go to Discord, so the library can show what a build costs.
+
+## 26.2-0.17.6
+- Observers saved "powered" in the schematic are placed (the printer skipped them, so layers were left with observers missing).
+- After a restart, a layer that was stopped half way is finished before the next one.
+- Waterlogged leaves get their water as the lane passes: the bucket gets its own turn and the lane holds still a moment.
+- A missed bucket is tried again after 1 second instead of 30.
+- Ordinary water buckets: as many are fetched or bought as the layer's water needs, instead of 1 at a time with 3 minutes of waiting in between.

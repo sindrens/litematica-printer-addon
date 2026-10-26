@@ -27,6 +27,32 @@ public final class StateRules {
     }
 
     /**
+     * Like {@link #changesByItself(Property)}, for this block. Redstone sets some properties as it runs: an observer
+     * saved while it pulsed is "powered" in the schematic, and no click places a powered observer, so the printer
+     * never placed it (65 observers in the inventory, "Guesser=no", the layer left with them missing). A lever's
+     * "powered" is how the player set it, so that one still counts.
+     */
+    public static boolean changesByItself(Block block, Property<?> property) {
+        if (changesByItself(property)) {
+            return true;
+        }
+        String name = property.getName();
+        if (name.equals("powered")) {
+            return !(block instanceof net.minecraft.world.level.block.LeverBlock);
+        }
+        if (name.equals("locked")) {
+            return block instanceof net.minecraft.world.level.block.RepeaterBlock;
+        }
+        if (name.equals("lit")) {
+            return block instanceof net.minecraft.world.level.block.RedstoneLampBlock
+                    || block instanceof net.minecraft.world.level.block.RedstoneTorchBlock
+                    || block instanceof net.minecraft.world.level.block.RedStoneOreBlock
+                    || block instanceof net.minecraft.world.level.block.AbstractFurnaceBlock;
+        }
+        return false;
+    }
+
+    /**
      * A filled cauldron (lava, water, powder snow) is placed as an empty cauldron and filled by hand: placing the
      * empty one is right.
      */

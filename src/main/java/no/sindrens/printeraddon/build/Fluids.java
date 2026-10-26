@@ -40,8 +40,26 @@ public class Fluids {
     private int usedSlot = -1;
     private long usedAt;
     private static final int SKIP_TICKS = 20 * 30;
+    /**
+     * A bucket that missed is tried again this soon (it was 30 s: a leaf the bucket missed once while the lane flew
+     * past waited half a minute, then the stems on it waited for its water, and the layer's end took over a minute).
+     */
+    private static final int RETRY_TICKS = 20;
+    /** Bucket uses at one spot before it waits the long while (SKIP_TICKS). */
+    private static final int QUICK_TRIES = 6;
+    /** A bucket here filled itself again after a use (an infinite water bucket from a plugin). */
+    private static boolean infiniteSeen;
+    /** wantsTurn: last asked, the answer, and since when it's been wanted without a use. */
+    private long wantAskedAt = -1;
+    private boolean wantAnswer;
+    private long wantedSince = -1;
+    private long wantRestUntil = -1;
+    /** Ticks the printer is held for the bucket at most, then it gets its turns again for a while. */
+    private static final int WANT_LIMIT = 40;
+    private static final int WANT_REST = 60;
 
-    private int cooldown;
+    /** No bucket use before this client tick (counted in real ticks: it only counted down while the printer was idle). */
+    private long readyAt;
     private long tick;
     /** Spot being worked on: first the bucket is put in hand, the next tick it's used. */
     @Nullable
@@ -57,6 +75,44 @@ public class Fluids {
 
     public boolean isBusy() {
         return pending != null;
+    }
+
+    /** True once a bucket here filled itself again after a use (an infinite water bucket from a plugin). */
+    public static boolean infiniteBucketSeen() {
+        return infiniteSeen;
+    }
+
+    /**
+     * True when a bucket can be used now on a spot in reach: the printer then leaves its next free turn to the bucket
+     * and the lane holds still a moment. The bucket only ever got a turn while the printer had nothing at all to
+     * place, so on a busy lane the leaves flew by without their water (8 water to go in, 4 of them for 80 s).
+     * Never for long: after WANT_LIMIT ticks without a use the printer gets its turns back for a while.
+     */
+    public boolean wantsTurn(Minecraft mc) {
+        tick = AutoBuild.clientTicks;
+        if (pending != null || tick < readyAt || tick < wantRestUntil || mc.player == null || mc.level == null) {
+            wantedSince = -1;
+            return false;
+        }
+        // Looked for every few ticks (a cube of blocks around the player), the answer kept in between
+        if (tick - wantAskedAt >= 4 || tick < wantAskedAt) {
+            wantAskedAt = tick;
+            WorldSchematic schematic = SchematicHelper.world();
+            wantAnswer = schematic != null && findNext(mc, mc.player, schematic) != null;
+        }
+        if (!wantAnswer) {
+            wantedSince = -1;
+            return false;
+        }
+        if (wantedSince < 0) {
+            wantedSince = tick;
+        } else if (tick - wantedSince > WANT_LIMIT) {
+            wantedSince = -1;
+            wantRestUntil = tick + WANT_REST;
+            PrinterAddon.debug("The bucket waited {} ticks for a turn without getting one: the printer goes on for a while", WANT_LIMIT);
+            return false;
+        }
+        return true;
     }
 
     public static boolean isBucket(Item item) {
@@ -115,7 +171,7 @@ public class Fluids {
 
     /** Returns true if it did something this tick. */
     public boolean tick(Minecraft mc) {
-        tick++;
+        tick = AutoBuild.clientTicks;
         skipped.values().removeIf(until -> until < tick);
         LocalPlayer player = mc.player;
         WorldSchematic schematic = SchematicHelper.world();
@@ -126,19 +182,27 @@ public class Fluids {
         if (pending != null) {
             BlockPos pos = pending;
             pending = null;
-            usedSlot = player.getInventory().getSelectedSlot();
-            usedAt = tick;
-            resyncedAt = -1;
-            use(mc, player, schematic, pos);
-            cooldown = Math.max(COOLDOWN, 10 + 2 * ServerLag.pingTicks(mc));
+            int slotUsed = player.getInventory().getSelectedSlot();
+            wantAskedAt = -1000;
+            if (use(mc, player, schematic, pos)) {
+                // Only a bucket really used is checked afterwards (a missed aim left a full bucket in that slot,
+                // which would look like one that filled itself again)
+                usedSlot = slotUsed;
+                usedAt = tick;
+                resyncedAt = -1;
+            }
+            wantedSince = -1;
+            // Another water bucket in another slot needs no answer about this one first: ordinary buckets go one
+            // after the other (8 leaves a layer); one infinite bucket waits for the server to fill it again
+            boolean another = !infiniteSeen && player.getInventory().countItem(Items.WATER_BUCKET) > 0;
+            readyAt = tick + (another ? 4 + 2 * ServerLag.pingTicks(mc) : Math.max(COOLDOWN, 10 + 2 * ServerLag.pingTicks(mc)));
             AutoBuild.INSTANCE.inventory.moved();
             AutoBuild.INSTANCE.layers.checkSoon();
             return true;
         }
         checkBucket(mc, player);
 
-        if (cooldown > 0) {
-            cooldown--;
+        if (tick < readyAt) {
             return false;
         }
 
@@ -178,6 +242,10 @@ public class Fluids {
         int slot = usedSlot;
         Inventory inventory = player.getInventory();
         if (!inventory.getItem(slot).is(Items.BUCKET)) {
+            if (inventory.getItem(slot).is(Items.WATER_BUCKET) && !infiniteSeen) {
+                infiniteSeen = true;
+                BuildLog.line("INFO", "the water bucket filled itself again after a use: an infinite bucket, empty buckets are waited for");
+            }
             usedSlot = -1;
             return;
         }
@@ -263,7 +331,7 @@ public class Fluids {
             lookAt(player, point);
             mc.gameMode.useItem(player, InteractionHand.MAIN_HAND);
             Clicks.restoreView(player, oldYaw, oldPitch);
-            cooldown = COOLDOWN;
+            readyAt = tick + COOLDOWN;
             PrinterAddon.debug("Filled a bucket at {}", pos.toShortString());
             return true;
         }
@@ -292,7 +360,7 @@ public class Fluids {
 
         for (BlockPos pos : BlockPos.betweenClosed(center.offset(-r, -r, -r), center.offset(r, r, r))) {
             double distance = eye.distanceToSqr(Vec3.atCenterOf(pos));
-            if (distance > reach * reach || distance >= bestDistance || skipped.containsKey(pos)) {
+            if (distance > reach * reach || distance >= bestDistance || skipped.getOrDefault(pos, Long.MIN_VALUE) >= tick) {
                 continue;
             }
             boolean deferred = AutoBuild.INSTANCE.deferred.contains(pos);
@@ -315,21 +383,23 @@ public class Fluids {
         return best;
     }
 
-    private void use(Minecraft mc, LocalPlayer player, WorldSchematic schematic, BlockPos pos) {
+    /** Returns true if the bucket was used. */
+    private boolean use(Minecraft mc, LocalPlayer player, WorldSchematic schematic, BlockPos pos) {
         PrinterBridge.releaseLook();
         float oldYaw = player.getYRot();
         float oldPitch = player.getXRot();
-        useBucket(mc, player, schematic, pos);
+        boolean used = useBucket(mc, player, schematic, pos);
         // Turn back, so the printer's next block doesn't use the bucket's direction
         Clicks.restoreView(player, oldYaw, oldPitch);
+        return used;
     }
 
-    private void useBucket(Minecraft mc, LocalPlayer player, WorldSchematic schematic, BlockPos pos) {
+    private boolean useBucket(Minecraft mc, LocalPlayer player, WorldSchematic schematic, BlockPos pos) {
         BlockState target = schematic.getBlockState(pos);
         BlockState current = mc.level.getBlockState(pos);
         Item bucket = bucketFor(target);
         if (bucket == null || !player.getMainHandItem().is(bucket)) {
-            return;
+            return false;
         }
 
         boolean done;
@@ -351,10 +421,15 @@ public class Fluids {
             }
         }
 
-        if (!done || tries.merge(pos, 1, Integer::sum) > 3) {
-            skipped.put(pos, tick + SKIP_TICKS);
-            PrinterAddon.debug("Couldn't use a bucket at {} from here, trying later", pos.toShortString());
+        int tried = tries.merge(pos, 1, Integer::sum);
+        if (!done || tried > 3) {
+            // Soon again (the player has moved on a bit, or the server just wasn't ready), the long wait only after
+            // many tries
+            skipped.put(pos, tick + (tried <= QUICK_TRIES ? RETRY_TICKS : SKIP_TICKS));
+            PrinterAddon.debug("Couldn't use a bucket at {} from here (try {}), trying again in {} ticks", pos.toShortString(), tried,
+                    tried <= QUICK_TRIES ? RETRY_TICKS : SKIP_TICKS);
         }
+        return done;
     }
 
     /** A bucket places its fluid next to the block face it hits: aim at a neighbour's face that points at the spot. */

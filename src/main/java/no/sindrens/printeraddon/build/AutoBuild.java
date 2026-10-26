@@ -487,6 +487,9 @@ public class AutoBuild {
     /** Why the printer was last paused (for the stats). */
     public String pauseReason = "-";
 
+    /** Water buckets got on one trip at most (each takes a slot of its own). */
+    private static final int MAX_WATER_BUCKETS = 12;
+
     public boolean shouldPausePrinter() {
         String why = pauseReasonNow();
         if (why != null) {
@@ -575,6 +578,12 @@ public class AutoBuild {
             return "eating";
         }
         if (fluids.isBusy()) {
+            return "bucket";
+        }
+        // Water to go in within reach: the printer's next free turn is the bucket's (with nothing queued, so the
+        // printer's own clicks aren't cut off); it only got one when the printer had nothing at all to place
+        if (running && !breaker.isBusy() && !airPlace.isActive() && !rails.isBusy() && PrinterBridge.isIdle()
+                && Minecraft.getInstance().player != null && fluids.wantsTurn(Minecraft.getInstance())) {
             return "bucket";
         }
         if (tiller.isBusy()) {
@@ -1331,11 +1340,15 @@ public class AutoBuild {
         } else if (emptyBucketsSince < 0) {
             emptyBucketsSince = clientTicks;
         }
+        // Empty buckets are waited for only when a bucket here is known to fill itself again (an infinite water
+        // bucket from a plugin) or there's water nearby to fill them: an ordinary bucket bought in the shop is empty
+        // for good once used, and the build waited 3 minutes for each of the 8 waterlogged leaves of a layer
+        int emptyWait = Fluids.infiniteBucketSeen() ? 20 * 60 * 3 : 20 * 10;
         boolean noBucket = layerNeeds.containsKey(net.minecraft.world.item.Items.WATER_BUCKET) && waterBuckets == 0
-                && (emptyBuckets == 0 || emptyBucketsSince >= 0 && clientTicks - emptyBucketsSince > 20 * 60 * 3);
+                && (emptyBuckets == 0 || emptyBucketsSince >= 0 && clientTicks - emptyBucketsSince > emptyWait);
         boolean canBuyBucket = autoBuy && no.sindrens.printeraddon.shop.ShopBuyer.sells(mc, net.minecraft.world.item.Items.WATER_BUCKET)
                 && !cantGet(net.minecraft.world.item.Items.WATER_BUCKET);
-        if (noBucket && (storage || canBuyBucket) && clientTicks - bucketLookedFor > 20 * 60) {
+        if (noBucket && (storage || canBuyBucket) && clientTicks - bucketLookedFor > (Fluids.infiniteBucketSeen() ? 20 * 60 : 20 * 5)) {
             bucketLookedFor = clientTicks;
             due = true;
         }
@@ -1412,9 +1425,15 @@ public class AutoBuild {
         if (tilling > hoeUses && hoeUses < 150 && !wants.containsKey(Tools.HOE)) {
             wants.put(Tools.HOE, Tools.hoesFor(tilling - hoeUses, inventory));
         }
-        // Only empty buckets for minutes: a water bucket is got as if there were none
+        // No water bucket (only empty ones, see emptyWait): water buckets are got as if there were none
+        // As many as the layer's water takes (an ordinary bucket does one block): 8 waterlogged leaves on a farm
+        // layer were 8 trips for 1 bucket each. Not more than a few slots' worth (a bucket takes a slot each)
         if (noBucket && !wants.containsKey(net.minecraft.world.item.Items.WATER_BUCKET)) {
-            wants.put(net.minecraft.world.item.Items.WATER_BUCKET, 1);
+            int buckets = Fluids.infiniteBucketSeen() ? 1 : Math.max(1, Math.min(layers.waterLeft(), MAX_WATER_BUCKETS));
+            wants.put(net.minecraft.world.item.Items.WATER_BUCKET, buckets);
+        } else if (noBucket) {
+            wants.put(net.minecraft.world.item.Items.WATER_BUCKET, Math.max(wants.get(net.minecraft.world.item.Items.WATER_BUCKET),
+                    Fluids.infiniteBucketSeen() ? 1 : Math.min(layers.waterLeft(), MAX_WATER_BUCKETS)));
         }
         java.util.Map<net.minecraft.world.item.Item, Integer> list = InventoryBudget.fitNow(inventory, wants);
         addNextLayer(mc, inventory, layerNeeds, list);

@@ -40,7 +40,7 @@ public class PropertySpecificGuesserGuideMixin {
         java.util.List<Property<?>> ignored = java.util.Arrays.asList(ignoredProperties);
         for (Property<?> property : target.getProperties()) {
             if (ignored.contains(property) || printer_addon$setAfterPlacing.contains(property)
-                    || no.sindrens.printeraddon.build.StateRules.changesByItself(property)) {
+                    || no.sindrens.printeraddon.build.StateRules.changesByItself(target.getBlock(), property)) {
                 continue;
             }
             if (!result.hasProperty(property) || !Objects.equals(result.getValue(property), target.getValue(property))) {

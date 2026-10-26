@@ -432,7 +432,8 @@ public class Mover {
 
     private double glideSpeedFor(LocalPlayer player, List<BlockPos> inReach, double reach) {
         // Breaking a block or using the bucket: that block has to stay in reach, hold still
-        if (AutoBuild.INSTANCE.breaker.isBusy() || AutoBuild.INSTANCE.fluids.isBusy()) {
+        if (AutoBuild.INSTANCE.breaker.isBusy() || AutoBuild.INSTANCE.fluids.isBusy()
+                || AutoBuild.INSTANCE.fluids.wantsTurn(Minecraft.getInstance())) {
             return 0;
         }
         // Only waited for while the printer gets on with it: nothing placed for a while, glide on (what it can't
@@ -1729,7 +1730,9 @@ public class Mover {
      * left to the edge of the reach over those turns. Nothing to place in reach: on at travel speed.
      */
     private double sweepSpeed(Minecraft mc, LocalPlayer player, List<BlockPos> inReach, double reach) {
-        if (AutoBuild.INSTANCE.breaker.isBusy() || AutoBuild.INSTANCE.fluids.isBusy() || flyTarget == null) {
+        // Water to go in within reach (a waterlogged leaf): hold still for the bucket's turn, the lane flew past them
+        if (AutoBuild.INSTANCE.breaker.isBusy() || AutoBuild.INSTANCE.fluids.isBusy() || flyTarget == null
+                || AutoBuild.INSTANCE.fluids.wantsTurn(mc)) {
             return 0;
         }
         Vec3 eye = player.getEyePosition();
