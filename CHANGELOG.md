@@ -150,3 +150,8 @@
 ## 26.2-0.17.7
 - Works together with the new AutoSell mod: a build pauses while it sells your collectors, and goes on by itself after.
 - The Discord control room says why a build is paused.
+
+## 26.2-0.17.8
+- A layer no longer stands still when nothing left on it can be placed ("can't place them from where it can stand"): those blocks wait until the end and the build goes on.
+- After a restart, a few blocks left far below where the build is (one column of a cactus tower) no longer pull the build all the way back down; a layer that was stopped half way is still finished first.
+- Buys the cheapest way: seeds or pumpkins, ingots or blocks (or blocks and the rest as ingots), dust or blocks, diamonds or blocks, rails or what they're made of, sticks or logs. The choice is in the build log (PRICE).

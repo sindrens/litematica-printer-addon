@@ -262,12 +262,14 @@ public class LayerManager {
                 doneLayers.add(layer++);
                 continue;
             }
-            // A few left on a layer the build already went past (blocks it gave up on before a restart): they wait
-            // until the end, the build goes on where it was. Only blocks it really gave up on: a layer stopped
-            // half way (the player stopping it, a trip for items) is finished first. 40 observers and pistons left
-            // on a layer stopped for a trip were put off to the end, and the build went on a layer higher.
+            // A few left on a layer the build already went past: they wait until the end, the build goes on where it
+            // was. Not the layer it was stopped on (40 observers and pistons left on a layer stopped for a trip were
+            // put off, and it went on a layer higher): only blocks it gave up on before, or a layer well below where
+            // the build is (3 layers up are built too). Going back for those cost a cactus tower 5 minutes for 5
+            // blocks: one block a layer in a column, up from Y 86, flying back and forth.
             if (layer < maxY && here.unfinished <= Math.max(PASSED_LEFTOVERS, here.blocks / 100)
-                    && here.unfinished == here.positions.size() && gaveUpBefore.containsAll(here.positions)) {
+                    && (here.unfinished == here.positions.size() && gaveUpBefore.containsAll(here.positions)
+                        || farBelowFront(mc.level, schematic, areas, scans, layer))) {
                 LayerScan above = scans.computeIfAbsent(layer + 1, y -> LayerScan.of(mc.level, schematic, areas, y, 20000));
                 if (above.placed >= Math.max(16, above.blocks / 100)) {
                     AutoBuild.INSTANCE.deferred.addAll(here.positions);
@@ -736,8 +738,13 @@ public class LayerManager {
         // the mover can go to, nothing being bought or fetched) do the last ones wait until the end, so the build
         // never stands still or flies around for good.
         int giveUpAfter = Math.max(20 * 30, Configs.Layers.SKIP_STUCK_SECONDS.getIntegerValue() * 20 * 3);
+        // The mover still having them on its list doesn't hold the layer for good: none of them doable ("the printer
+        // can't place them from where it can stand"), or twice as long gone by, they wait too. One sand over a column
+        // given up below it held a cactus tower's layer for 3 minutes and more, nothing placed
         if (ticksWithoutProgress >= giveUpAfter && remaining <= Math.max(PASSED_LEFTOVERS, 1)
-                && AutoBuild.INSTANCE.mover.nothingToDo() && !AutoBuild.INSTANCE.isManualTaskRunning()) {
+                && (AutoBuild.INSTANCE.mover.nothingToDo() || AutoBuild.INSTANCE.mover.nothingDoable(mc)
+                    || ticksWithoutProgress >= giveUpAfter * 2)
+                && !AutoBuild.INSTANCE.isManualTaskRunning()) {
             List<BlockPos> all = new ArrayList<>();
             for (int y = layer; y <= layerTop; y++) {
                 collectUnfinished(mc.level, schematic, areas, y, all);
@@ -1580,6 +1587,16 @@ public class LayerManager {
         }
 
         return remaining;
+    }
+
+    /** The layer 3 above this one is built (in good part): this one is well below where the build is. */
+    private boolean farBelowFront(Level level, WorldSchematic schematic, List<SchematicHelper.Area> areas,
+                                  java.util.Map<Integer, LayerScan> scans, int y) {
+        if (y + 3 > maxY) {
+            return false;
+        }
+        LayerScan up = scans.computeIfAbsent(y + 3, l -> LayerScan.of(level, schematic, areas, l, 20000));
+        return up.placed >= Math.max(16, up.blocks / 10);
     }
 
     /** One layer read for the start: what's left (in the parts that are loaded), not loaded, placed. */

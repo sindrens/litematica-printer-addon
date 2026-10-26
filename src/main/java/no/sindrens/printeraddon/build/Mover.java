@@ -279,6 +279,33 @@ public class Mover {
                 && unloaded.stream().allMatch(p -> skipped.containsKey(p) || areaUnreachable(areaKey(p)));
     }
 
+    /**
+     * Nothing on the mover's list can be done now (all of it waits: "the printer can't place them from where it can
+     * stand", a sand over a missing block, a string that can't be reached). Checks the nearest ones only.
+     */
+    public boolean nothingDoable(Minecraft mc) {
+        if (work.isEmpty()) {
+            return true;
+        }
+        WorldSchematic schematic = SchematicHelper.world();
+        if (schematic == null || mc.level == null || mc.player == null) {
+            return false;
+        }
+        Vec3 from = mc.player.position();
+        List<BlockPos> sorted = new ArrayList<>(work);
+        sorted.sort(java.util.Comparator.comparingDouble(p -> from.distanceToSqr(Vec3.atCenterOf(p))));
+        int checked = 0;
+        for (BlockPos pos : sorted) {
+            if (checked++ >= 64) {
+                return false;
+            }
+            if (canDoNow(mc, schematic, pos)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     /** True for a block the printer was given time for in reach, but nothing happened. */
     public boolean wasSkipped(BlockPos pos) {
         return skipped.containsKey(pos);

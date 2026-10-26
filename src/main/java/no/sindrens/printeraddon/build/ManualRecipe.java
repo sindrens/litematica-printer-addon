@@ -93,6 +93,12 @@ public record ManualRecipe(Item result, int count, int width, int height, String
             return new ManualRecipe(item, 6, 3, 3, new String[]{"G G", "GSG", "GRG"},
                     Map.of('G', s -> s.is(Items.GOLD_INGOT), 'S', stick, 'R', s -> s.is(Items.REDSTONE)));
         }
+        // Any bigger item the add-on takes apart (blocks of emerald, coal, lapis; hay; nuggets from ingots)
+        CraftPlan.Pack pack = CraftPlan.PACKS.get(item);
+        if (pack != null) {
+            Item big = pack.big();
+            return new ManualRecipe(item, pack.per(), 1, 1, new String[]{"B"}, Map.of('B', s -> s.is(big)));
+        }
         return null;
     }
 
