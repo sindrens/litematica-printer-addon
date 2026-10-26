@@ -1,0 +1,69 @@
+# A new version (mod_version in gradle.properties, with its "## <minecraft>-<version>" section in CHANGELOG.md) is built
+# here and published as a GitHub release with its jar and changelog. The Printer Addon Discord bot picks the release up
+# from there and posts it (card, changelog, jar, ping). The developer's log channel is never in git: the bot adds it to
+# the jar it posts, so this jar (like any built from the repository) can't send logs by itself.
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths: [gradle.properties, CHANGELOG.md, .github/workflows/release.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version and changelog
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(sed -n 's/^mod_version *= *//p' gradle.properties | tr -d '\r ')
+          mc=$(sed -n 's/^minecraft_version *= *//p' gradle.properties | tr -d '\r ')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "mc=$mc" >> "$GITHUB_OUTPUT"
+          if gh release view "v$version" > /dev/null 2>&1; then
+            echo "v$version is out already"
+            echo "skip=yes" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          awk -v head="## $mc-$version" '{ line = $0; sub(/[ \t\r]+$/, "", line) } line == head { on = 1; next } /^## / { on = 0 } on' CHANGELOG.md > notes.md
+          if ! grep -q '^- ' notes.md; then
+            echo "No \"## $mc-$version\" section with lines in CHANGELOG.md yet: not released"
+            echo "skip=yes" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          printf '\nPlayers: get it in the Printer Addon Discord (#downloads), that jar sends its logs to the developer.\n' >> notes.md
+          cat notes.md
+
+      - uses: actions/setup-java@v4
+        if: steps.version.outputs.skip != 'yes'
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - uses: gradle/actions/setup-gradle@v4
+        if: steps.version.outputs.skip != 'yes'
+
+      - name: Build
+        if: steps.version.outputs.skip != 'yes'
+        run: ./gradlew build -x test --no-daemon
+
+      - name: Publish
+        if: steps.version.outputs.skip != 'yes'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          jar="build/libs/printer_addon-${{ steps.version.outputs.mc }}-${{ steps.version.outputs.version }}.jar"
+          gh release create "v${{ steps.version.outputs.version }}" "$jar" --target "$GITHUB_SHA" \
+            --title "Printer Addon ${{ steps.version.outputs.version }}" --notes-file notes.md
