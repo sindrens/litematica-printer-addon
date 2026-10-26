@@ -183,7 +183,8 @@ public final class DiscordLink {
         token = "";
         discordName = "";
         save();
-        Chat.warn("The Discord link isn't valid any more. Type /link on Discord and link again (J+L).");
+        Chat.warn("The Discord link isn't valid any more (linked from another game, or unlinked). Type /link on Discord and press J+L here to link again.");
+        Chat.announce("Discord link lost", "type /link on Discord, then J+L", false);
     }
 
     // ------------------------------------------------------------------ linking
@@ -260,6 +261,30 @@ public final class DiscordLink {
         if (ticks % POLL_EVERY_TICKS == 0 && !busyPoll) {
             poll(mc);
         }
+        if (ticks % 1200 == 40 && mc.player != null) {
+            sendPrices(mc);
+        }
+    }
+
+    /** When the shop prices were last sent (the scan file's time): sent again after a new scan. */
+    private static long pricesSentFor;
+
+    /** The shop's prices (from J+S), so the schematic library on Discord can say what a build costs on this server. */
+    private static void sendPrices(Minecraft mc) {
+        long scanned = no.sindrens.printeraddon.build.CostEstimate.scanTime(mc);
+        if (scanned == 0 || scanned == pricesSentFor || mc.getCurrentServer() == null) {
+            return;
+        }
+        java.util.Map<String, Double> prices = no.sindrens.printeraddon.build.CostEstimate.unitPrices(mc);
+        if (prices.isEmpty()) {
+            return;
+        }
+        JsonObject o = new JsonObject();
+        o.addProperty("server", mc.getCurrentServer().ip.toLowerCase(Locale.ROOT));
+        JsonObject p = new JsonObject();
+        prices.forEach(p::addProperty);
+        o.add("prices", p);
+        call("POST", "/prices", o, true, r -> pricesSentFor = scanned, null);
     }
 
     private static void sendStatus(Minecraft mc) {
@@ -538,7 +563,9 @@ public final class DiscordLink {
             return;
         }
         String q = java.net.URLEncoder.encode(search == null ? "" : search, StandardCharsets.UTF_8);
-        call("GET", "/schematics?q=" + q, null, false, r -> {
+        Minecraft mc0 = Minecraft.getInstance();
+        String server = mc0.getCurrentServer() == null ? "" : java.net.URLEncoder.encode(mc0.getCurrentServer().ip.toLowerCase(Locale.ROOT), StandardCharsets.UTF_8);
+        call("GET", "/schematics?q=" + q + "&server=" + server, null, false, r -> {
             JsonObject o = json(r);
             JsonArray list = o.has("schematics") ? o.getAsJsonArray("schematics") : new JsonArray();
             if (list.isEmpty()) {
@@ -554,9 +581,11 @@ public final class DiscordLink {
                 }
                 JsonObject s = el.getAsJsonObject();
                 JsonArray size = s.getAsJsonArray("size");
-                Chat.info("§b" + s.get("id").getAsString() + "§r " + s.get("name").getAsString() + " §7" + size.get(0).getAsInt() + "×"
+                String stars = s.has("stars") && s.get("stars").getAsInt() > 0 ? " §e★" + s.get("stars").getAsInt() : "";
+                String cost = s.has("cost") && !s.get("cost").isJsonNull() ? " §a~$" + String.format(Locale.ROOT, "%,d", s.get("cost").getAsLong()) : "";
+                Chat.info("§b" + s.get("id").getAsString() + "§r " + s.get("name").getAsString() + stars + " §7" + size.get(0).getAsInt() + "×"
                         + size.get(1).getAsInt() + "×" + size.get(2).getAsInt() + ", " + s.get("blocks").getAsInt() + " blocks, by "
-                        + s.get("by").getAsString());
+                        + s.get("by").getAsString() + cost);
             }
         }, e -> Chat.warn("Couldn't reach the Discord bot: " + shortError(e)));
     }
@@ -581,7 +610,9 @@ public final class DiscordLink {
             try {
                 Files.createDirectories(dir);
                 Files.write(dir.resolve(name), r.body());
-                Chat.info("§aSaved§r schematics/PrinterAddon/" + name + ". Load it in Litematica (M, Load schematics).");
+                Chat.info("§aSaved§r schematics/PrinterAddon/" + name + ". To build it: Litematica (M) → Load schematics → PrinterAddon → "
+                        + name + " → Load, place it where you want it, then J+B → START.");
+                Chat.announce("Schematic downloaded", name, true);
             } catch (Exception ex) {
                 Chat.warn("Couldn't save it: " + ex.getMessage());
             }

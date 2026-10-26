@@ -132,3 +132,10 @@
 
 ## 26.2-0.17.4
 - Linking with Discord works on more networks (the bot is reached on the normal web port).
+
+## 26.2-0.17.5
+- Auto break walks on the ground wherever it can (blocks break 5 times faster than in the air), also with movement set to "Fly only".
+- Auto break never stops as "done" while blocks are left: it goes over the whole area again.
+- A clear message when the Discord link is lost, and what to do.
+- Schematic library: stars, the cost at your server's shop prices, and how to build a downloaded schematic.
+- Your shop prices (from J+S) go to Discord, so the library can show what a build costs.

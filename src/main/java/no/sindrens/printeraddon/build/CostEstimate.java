@@ -271,6 +271,34 @@ public final class CostEstimate {
         return best;
     }
 
+    /** Every item the scanned shop sells, with its cheapest price for one (for the schematic library on Discord). */
+    public static java.util.Map<String, Double> unitPrices(Minecraft mc) {
+        java.util.Map<String, Double> out = new java.util.TreeMap<>();
+        ShopScanResult shop = loadShop(mc);
+        if (shop == null) {
+            return out;
+        }
+        shop.items.forEach((id, locations) -> {
+            for (ShopScanResult.Location location : locations) {
+                if (location.buyPrice != null && location.buyable() && location.amountShown > 0) {
+                    double each = location.buyPrice / Math.max(1, location.amountShown);
+                    out.merge(id, each, Math::min);
+                }
+            }
+        });
+        return out;
+    }
+
+    /** When the saved shop scan last changed (0: none). */
+    public static long scanTime(Minecraft mc) {
+        Path file = ShopBuyer.scanFile(mc);
+        try {
+            return file == null ? 0 : java.nio.file.Files.getLastModifiedTime(file).toMillis();
+        } catch (java.io.IOException e) {
+            return 0;
+        }
+    }
+
     @Nullable
     static Double buyPrice(ShopScanResult shop, Item item) {
         List<ShopScanResult.Location> locations = shop.items.get(BuiltInRegistries.ITEM.getKey(item).toString());

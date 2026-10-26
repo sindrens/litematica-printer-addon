@@ -266,7 +266,7 @@ public final class AreaBreaker {
             return false;
         }
         BlockState state = level.getBlockState(pos);
-        return breakable(level, pos, state) && !dropsWithBelow(level, pos);
+        return breakable(level, pos, state) && (finalPass || !dropsWithBelow(level, pos));
     }
 
     private boolean breakable(Level level, BlockPos pos, BlockState state) {
@@ -482,6 +482,8 @@ public final class AreaBreaker {
             return false;
         }
         running = true;
+        finalPasses = 0;
+        finalPass = false;
         leftOut.clear();
         layerLeft.clear();
         layerUnloaded.clear();
@@ -578,8 +580,19 @@ public final class AreaBreaker {
         // This level done (as far as it's loaded): down to the next one with something to break
         while (layerLeft.isEmpty() && layerUnloaded.isEmpty()) {
             if (layer <= bottom) {
-                stop(mc, "done");
-                return;
+                // Before "done": the whole area once more, top to bottom. Anything still there (grown since, a plant
+                // that was to drop with its base but didn't, a block left out for a while) gets another pass
+                int again = finalCheck(mc);
+                if (again == Integer.MIN_VALUE) {
+                    stop(mc, "done");
+                    return;
+                }
+                layer = again;
+                layerStartedAt = AutoBuild.clientTicks;
+                layerBrokenAtStart = breaker.getBrokenCount();
+                layLanes(player.position());
+                scanLayer(mc);
+                continue;
             }
             int layerBroken = breaker.getBrokenCount() - layerBrokenAtStart;
             if (layerBroken > 0) {
@@ -658,7 +671,8 @@ public final class AreaBreaker {
                 return;
             }
         }
-        mover.goTo(goal, goalSpot);
+        // On foot when there's a way on the ground (5 times faster breaking than from the air), else flying there
+        mover.goTo(goal, goalSpot, true);
         mover.tick(mc);
     }
 
@@ -707,6 +721,53 @@ public final class AreaBreaker {
             }
         }
         return best;
+    }
+
+    /** Passes over the whole area after the bottom was reached (each finds what the one before left). */
+    private int finalPasses;
+    private static final int MAX_FINAL_PASSES = 5;
+    /** In the final passes: plants are broken themselves (their base stays, or it's gone already). */
+    private boolean finalPass;
+
+    /**
+     * After the bottom level: the highest level of the area that still has something to break, or Integer.MIN_VALUE
+     * when nothing is left (or the passes are used up: then what's left is listed in the build log).
+     */
+    private int finalCheck(Minecraft mc) {
+        int top = Integer.MIN_VALUE;
+        int count = 0;
+        leftOut.clear();
+        finalPass = true;
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        StringBuilder sample = new StringBuilder();
+        for (int[] b : boxes) {
+            for (int y = b[4]; y >= b[1]; y--) {
+                for (int x = b[0]; x <= b[3]; x++) {
+                    for (int z = b[2]; z <= b[5]; z++) {
+                        pos.set(x, y, z);
+                        if (mc.level.isLoaded(pos) && wants(mc.level, pos)) {
+                            count++;
+                            top = Math.max(top, y);
+                            if (count <= 5) {
+                                sample.append(pos.toShortString().replace(" ", "")).append(' ')
+                                        .append(LayerManager.blockName(mc.level.getBlockState(pos))).append(", ");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if (count == 0) {
+            return Integer.MIN_VALUE;
+        }
+        if (++finalPasses > MAX_FINAL_PASSES) {
+            BuildLog.line("AREA", "final check: " + count + " blocks still there after " + MAX_FINAL_PASSES + " more passes, e.g. " + sample);
+            Chat.warn("Auto break: " + count + " blocks couldn't be broken (see the build log).");
+            return Integer.MIN_VALUE;
+        }
+        BuildLog.line("AREA", "final check " + finalPasses + ": " + count + " blocks still there (e.g. " + sample + "), going again from Y " + top);
+        Chat.info("Auto break: " + count + " blocks left, going over the area again.");
+        return top;
     }
 
     /** The current level's blocks to break where it's loaded, and one spot per part of it not loaded yet. */

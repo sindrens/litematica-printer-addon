@@ -171,6 +171,21 @@ public class Mover {
 
     /** As goTo, flying to this point to get within reach (null: just above the spot). */
     public boolean goTo(@Nullable BlockPos pos, @Nullable Vec3 spot) {
+        return goTo(pos, spot, false);
+    }
+
+    /**
+     * The errand walks there when it can (Auto break: breaking from the ground is 5 times faster than from the air),
+     * also with movement set to "Fly only": that's for building, breaking always goes on foot where there's ground.
+     */
+    private boolean errandWalk;
+
+    /**
+     * As goTo; {@code walk}: on foot when there's a way on the ground to a spot within reach (landing first when there's
+     * ground right below), flying only when there isn't.
+     */
+    public boolean goTo(@Nullable BlockPos pos, @Nullable Vec3 spot, boolean walk) {
+        errandWalk = walk;
         if (pos == null || !pos.equals(errand) || !java.util.Objects.equals(spot, errandSpot)) {
             errand = pos == null ? null : pos.immutable();
             errandSpot = pos == null ? null : spot;
@@ -627,6 +642,10 @@ public class Mover {
                 path = null;
                 stuckTicks = 0;
                 lastDistance = Double.MAX_VALUE;
+                if (errandWalk && mode != no.sindrens.printeraddon.config.MoveMode.OFF && walkToErrand(mc, player, reach)) {
+                    move(mc, player, mode);
+                    return;
+                }
                 if (ensureFlying(player)) {
                     flyTarget = errandSpot != null ? errandSpot : new Vec3(errand.getX() + 0.5, errand.getY() + 1.2, errand.getZ() + 0.5);
                     state = State.FLYING;
@@ -2621,6 +2640,34 @@ public class Mover {
         skip(goalBlock, "no way to get to it");
         dropWork(goalBlock);
         state = State.IDLE;
+    }
+
+    /**
+     * The errand on foot: a route on the ground to a spot within reach of it, from where the player stands, or from
+     * the ground right below when flying (it lands first). False when there's no way on foot.
+     */
+    private boolean walkToErrand(Minecraft mc, LocalPlayer player, double reach) {
+        if ((player.onGround() || player.isInWater()) && !flying(player)) {
+            List<BlockPos> route = findWalk(mc, player.blockPosition(), errand, reach);
+            if (route != null) {
+                path = route;
+                pathIndex = 0;
+                state = State.WALKING;
+                PrinterAddon.debug("Walking to {} ({} steps)", errand.toShortString(), route.size());
+                return true;
+            }
+            return false;
+        }
+        if (flying(player)) {
+            BlockPos landing = landingSpot(mc, player.blockPosition());
+            if (landing != null && findWalk(mc, landing, errand, reach) != null) {
+                PrinterAddon.debug("Landing at {} to walk to {}", landing.toShortString(), errand.toShortString());
+                setFlying(player, false);
+                state = State.IDLE;
+                return true;
+            }
+        }
+        return false;
     }
 
     @Nullable
