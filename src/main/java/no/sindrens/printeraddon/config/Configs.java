@@ -260,6 +260,9 @@ public class Configs implements IConfigHandler {
         public static final ConfigInteger NEAR_PLAYER_DISTANCE = new ConfigInteger("nearPlayerDistance", 16, 2, 128,
                 "Distance in blocks for 'Stop near other players'.",
                 "Near player distance");
+        public static final ConfigString TRUSTED_PLAYERS = new ConfigString("trustedPlayers", "",
+                "Players who don't stop the build when they come close (friends, island members), comma separated: Pouched, Vanzu_",
+                "Players who don't stop it");
 
         public static final ConfigBoolean AUTO_EAT = new ConfigBoolean("autoEat", true,
                 "During auto build, eat when the food bar gets low (starving hurts, and damage stops auto build).\n"
@@ -278,7 +281,7 @@ public class Configs implements IConfigHandler {
                 "Feed command");
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                STOP_ON_DAMAGE, STOP_NEAR_PLAYERS, NEAR_PLAYER_DISTANCE, AUTO_EAT, EAT_BELOW, USE_FEED_COMMAND, FEED_COMMAND);
+                STOP_ON_DAMAGE, STOP_NEAR_PLAYERS, NEAR_PLAYER_DISTANCE, TRUSTED_PLAYERS, AUTO_EAT, EAT_BELOW, USE_FEED_COMMAND, FEED_COMMAND);
     }
 
     public static class Shop {
@@ -343,9 +346,9 @@ public class Configs implements IConfigHandler {
                 "Shop menu timeout (ticks)");
 
         public static final ConfigBoolean PREFER_BLOCKS = new ConfigBoolean("craftFromBlocks", false,
-                "Buy items as their blocks and craft them back (a redstone block makes 9 redstone dust): 9 times fewer\n"
-                        + "purchases, but the blocks can cost more. Off: whatever is cheapest per item in the shop scan; the blocks\n"
-                        + "are always bought when the item itself can't be (not sold, or the shop didn't deliver it).",
+                "The add-on always buys the cheapest way by the shop scan (seeds or pumpkins, ingots or blocks, dust or\n"
+                        + "blocks). On: when the prices aren't known, or cost the same, blocks are bought and crafted back (fewer\n"
+                        + "purchases). The blocks are always bought when the item itself can't be (not sold, or not delivered).",
                 "Buy blocks and craft them back");
         public static final ConfigBoolean USE_CRAFT_COMMAND = new ConfigBoolean("useCraftCommand", true,
                 "Open a crafting table with the server's craft command when a recipe needs one (rails, hoes), instead of\n"
@@ -367,7 +370,7 @@ public class Configs implements IConfigHandler {
                 Shop.VAULTS, Shop.FETCH_FROM_CHESTS, Shop.PUT_AWAY_ON_STOP, Shop.AUTO_BUY, Shop.SELL_LEFTOVERS, Shop.PREFER_BLOCKS,
                 Shop.USE_CRAFT_COMMAND, Safety.USE_FEED_COMMAND, Safety.AUTO_EAT,
                 Movement.MOVE_MODE,
-                Safety.STOP_ON_DAMAGE, Safety.STOP_NEAR_PLAYERS,
+                Safety.STOP_ON_DAMAGE, Safety.STOP_NEAR_PLAYERS, Safety.TRUSTED_PLAYERS,
                 Generic.RESUME_AFTER_REJOIN, Generic.RECONNECT, Generic.BACK_COMMANDS, Generic.SHOW_HUD, Generic.CHAT_MESSAGES,
                 Shop.SHOP_COMMAND, Shop.VAULT_COMMAND, Shop.CRAFT_COMMAND, Safety.FEED_COMMAND, Movement.FLY_COMMAND);
     }

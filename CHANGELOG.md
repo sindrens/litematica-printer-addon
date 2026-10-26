@@ -159,3 +159,8 @@
 ## 26.2-0.17.9
 - No more creeping through a part of the build that never loads (one block at a time, nothing placed): after 5 seconds right there that part is left alone.
 - Starting again without saved progress no longer flies down to the bottom of a tall build that's already standing.
+
+## 26.2-0.17.10
+- Players who don't stop it: friends and island members can come close without stopping the build.
+- A normal game close is no longer sent as a crash with reports.
+- Clearer text for the cheapest-buying setting.

@@ -89,7 +89,19 @@ public final class DebugInfo {
     /** The newest crash report from the last day, or null. */
     @Nullable
     public static Recent recentCrashReport(Minecraft mc) {
-        return newest(mc.gameDirectory.toPath().resolve("crash-reports"), ".txt", CRASH_MINUTES);
+        Recent recent = newest(mc.gameDirectory.toPath().resolve("crash-reports"), ".txt", CRASH_MINUTES);
+        // "Client shutdown from post-main" is the game taking long to close, not a crash: the same one went with 16
+        // reports in a row
+        return recent == null || closingNotCrash(recent.file()) ? null : recent;
+    }
+
+    private static boolean closingNotCrash(Path file) {
+        try (java.io.InputStream in = Files.newInputStream(file)) {
+            String head = new String(in.readNBytes(2048), StandardCharsets.UTF_8);
+            return head.contains("Client shutdown from post-main") || head.contains("Watchdog (Client shutdown");
+        } catch (IOException | RuntimeException e) {
+            return false;
+        }
     }
 
     /**

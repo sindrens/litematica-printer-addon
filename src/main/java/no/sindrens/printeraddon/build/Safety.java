@@ -65,12 +65,23 @@ public class Safety {
         if (Configs.Safety.STOP_NEAR_PLAYERS.getBooleanValue()) {
             double distance = Configs.Safety.NEAR_PLAYER_DISTANCE.getIntegerValue();
             for (Player other : mc.level.players()) {
-                if (other != player && !other.isSpectator() && other.distanceToSqr(player) <= distance * distance) {
+                if (other != player && !other.isSpectator() && other.distanceToSqr(player) <= distance * distance
+                        && !trusted(other.getName().getString())) {
                     return other.getName().getString() + " is nearby";
                 }
             }
         }
 
         return null;
+    }
+
+    /** A player on the "Players who don't stop it" list (names, any case, comma or space separated). */
+    private static boolean trusted(String name) {
+        for (String n : Configs.Safety.TRUSTED_PLAYERS.getStringValue().split("[,;\\s]+")) {
+            if (!n.isBlank() && n.trim().equalsIgnoreCase(name)) {
+                return true;
+            }
+        }
+        return false;
     }
 }
