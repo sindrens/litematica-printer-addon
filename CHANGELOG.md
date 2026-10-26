@@ -155,3 +155,7 @@
 - A layer no longer stands still when nothing left on it can be placed ("can't place them from where it can stand"): those blocks wait until the end and the build goes on.
 - After a restart, a few blocks left far below where the build is (one column of a cactus tower) no longer pull the build all the way back down; a layer that was stopped half way is still finished first.
 - Buys the cheapest way: seeds or pumpkins, ingots or blocks (or blocks and the rest as ingots), dust or blocks, diamonds or blocks, rails or what they're made of, sticks or logs. The choice is in the build log (PRICE).
+
+## 26.2-0.17.9
+- No more creeping through a part of the build that never loads (one block at a time, nothing placed): after 5 seconds right there that part is left alone.
+- Starting again without saved progress no longer flies down to the bottom of a tall build that's already standing.

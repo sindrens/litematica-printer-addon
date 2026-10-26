@@ -271,7 +271,7 @@ public class LayerManager {
                     && (here.unfinished == here.positions.size() && gaveUpBefore.containsAll(here.positions)
                         || farBelowFront(mc.level, schematic, areas, scans, layer))) {
                 LayerScan above = scans.computeIfAbsent(layer + 1, y -> LayerScan.of(mc.level, schematic, areas, y, 20000));
-                if (above.placed >= Math.max(16, above.blocks / 100)) {
+                if (above.placed >= Math.max(16, above.blocks / 100) || farBelowFront(mc.level, schematic, areas, scans, layer)) {
                     AutoBuild.INSTANCE.deferred.addAll(here.positions);
                     leftovers += here.unfinished;
                     passed++;
@@ -1589,14 +1589,20 @@ public class LayerManager {
         return remaining;
     }
 
-    /** The layer 3 above this one is built (in good part): this one is well below where the build is. */
+    /**
+     * A layer 3 or more above this one is built (in the parts that are loaded): this one is well below where the
+     * build is. Looked for up to 40 layers up: near the ground most of a tall build isn't loaded, and the build then
+     * went back down to its bottom layer after its saved progress was gone.
+     */
     private boolean farBelowFront(Level level, WorldSchematic schematic, List<SchematicHelper.Area> areas,
                                   java.util.Map<Integer, LayerScan> scans, int y) {
-        if (y + 3 > maxY) {
-            return false;
+        for (int l = y + 3; l <= Math.min(maxY, y + 40); l++) {
+            LayerScan up = scans.computeIfAbsent(l, k -> LayerScan.of(level, schematic, areas, k, 20000));
+            if (up.placed >= Math.max(16, up.blocks / 10)) {
+                return true;
+            }
         }
-        LayerScan up = scans.computeIfAbsent(y + 3, l -> LayerScan.of(level, schematic, areas, l, 20000));
-        return up.placed >= Math.max(16, up.blocks / 10);
+        return false;
     }
 
     /** One layer read for the start: what's left (in the parts that are loaded), not loaded, placed. */

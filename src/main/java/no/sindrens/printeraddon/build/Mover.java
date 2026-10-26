@@ -276,7 +276,7 @@ public class Mover {
     /** Nothing on the current layers to go to (as of the last look): no block to place or break, no part to load. */
     public boolean nothingToDo() {
         return work.isEmpty() && waitingForItems == 0
-                && unloaded.stream().allMatch(p -> skipped.containsKey(p) || areaUnreachable(areaKey(p)));
+                && unloaded.stream().allMatch(p -> skipped.containsKey(p) || areaUnreachable(areaKey(p)) || unloadable.contains(areaKey(p)));
     }
 
     /**
@@ -854,7 +854,7 @@ public class Mover {
             // The rest of the layer is too far away to be loaded: go there so it loads (not to parts no flight could
             // get to a moment ago)
             List<BlockPos> notSkipped = unloaded.stream()
-                    .filter(p -> !skipped.containsKey(p) && !areaUnreachable(areaKey(p))).toList();
+                    .filter(p -> !skipped.containsKey(p) && !areaUnreachable(areaKey(p)) && !unloadable.contains(areaKey(p))).toList();
             if (notSkipped.isEmpty()) {
                 halt(player);
                 state = State.IDLE;
@@ -862,6 +862,20 @@ public class Mover {
                 return;
             }
             BlockPos far = nearest(player, notSkipped);
+            // Right there and it still doesn't load (the schematic's part there isn't loaded): that part is left alone.
+            // It went to the next block of it, a block further, 386 times in a minute and a half, nothing placed
+            if (Vec3.atCenterOf(far).distanceToSqr(player.position()) < 8 * 8) {
+                if (nearUnloadedSince < 0) {
+                    nearUnloadedSince = tick;
+                } else if (tick - nearUnloadedSince > 20 * 5) {
+                    unloadable.add(areaKey(far));
+                    nearUnloadedSince = -1;
+                    BuildLog.line("SKIP", "area " + areaName(areaKey(far)) + " stays not loaded with the player right there: left alone");
+                    return;
+                }
+            } else {
+                nearUnloadedSince = -1;
+            }
             if (target == null || !target.equals(far) || (state != State.WALKING && state != State.FLYING)) {
                 target = far;
                 spotFor = null;
