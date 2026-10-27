@@ -532,6 +532,16 @@ public class LayerManager {
         previousMode = null;
     }
 
+    /** Set when a layer was finished and the build went on to the next one (for "stop after this layer"). */
+    private boolean layerJustDone;
+
+    /** True once after a layer was finished and the next one started. */
+    public boolean takeLayerDone() {
+        boolean done = layerJustDone;
+        layerJustDone = false;
+        return done;
+    }
+
     /** Runs one tick. Returns false when the whole build is finished. */
     public boolean tick(Minecraft mc) {
         if (!active || mc.level == null) {
@@ -756,6 +766,7 @@ public class LayerManager {
             layerTop = topFor(mc.level, schematic, areas, layer);
             applyLayer();
             resetProgress();
+            layerJustDone = true;
             return true;
         }
 

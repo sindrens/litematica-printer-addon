@@ -16,6 +16,15 @@ public class Hotkeys {
             "Build menu");
     public static final ConfigHotkey TOGGLE_AUTO_BUILD = new ConfigHotkey("startStopAutoBuild", "J,G",
             "Start / stop auto build right away, without the menu.", "Start / stop auto build");
+    public static final ConfigHotkey START_AUTO_BUILD = new ConfigHotkey("startAutoBuild", "",
+            "Start auto build (or go on with a paused one). Does nothing while it's running.\nNo key by default: set one here.",
+            "Start auto build");
+    public static final ConfigHotkey STOP_AUTO_BUILD = new ConfigHotkey("stopAutoBuild", "",
+            "Stop auto build. Does nothing when it isn't running.\nNo key by default: set one here.",
+            "Stop auto build");
+    public static final ConfigHotkey STOP_AFTER_LAYER = new ConfigHotkey("stopAfterLayer", "J,N",
+            "Stop auto build when the layer it's building now is done (press again to keep going).",
+            "Stop after this layer");
     public static final ConfigHotkey PAUSE_AUTO_BUILD = new ConfigHotkey("pauseAutoBuild", "J,Z",
             "Pause auto build (it keeps its place and spending limit), and go on with it when pressed again.", "Pause / go on");
     public static final ConfigHotkey FIX_WRONG_NOW = new ConfigHotkey("fixWrongNow", "J,F",
@@ -47,7 +56,13 @@ public class Hotkeys {
             "Link the game with the Printer Addon Discord: type /link on Discord, then enter the code here.",
             "Link with Discord");
 
+    /** The keys that control a running build: shown with the buttons on the Controls tab. */
+    public static final ImmutableList<ConfigHotkey> CONTROL_LIST = ImmutableList.of(
+            TOGGLE_AUTO_BUILD, START_AUTO_BUILD, STOP_AUTO_BUILD, PAUSE_AUTO_BUILD, STOP_AFTER_LAYER, STOP_ALL,
+            NEXT_LAYER, PREVIOUS_LAYER, BUILD_MENU);
+
     public static final ImmutableList<ConfigHotkey> HOTKEY_LIST = ImmutableList.of(
-            OPEN_SETTINGS, LINK_DISCORD, BUILD_MENU, TOGGLE_ADDON, TOGGLE_AUTO_BUILD, PAUSE_AUTO_BUILD, FIX_WRONG_NOW, CLEAR_EXTRA_BLOCKS, NEXT_LAYER, PREVIOUS_LAYER,
+            OPEN_SETTINGS, LINK_DISCORD, BUILD_MENU, TOGGLE_ADDON, TOGGLE_AUTO_BUILD, START_AUTO_BUILD, STOP_AUTO_BUILD,
+            PAUSE_AUTO_BUILD, STOP_AFTER_LAYER, FIX_WRONG_NOW, CLEAR_EXTRA_BLOCKS, NEXT_LAYER, PREVIOUS_LAYER,
             SHOW_COST, BUILD_REPORT, SCAN_SHOP, STOP_ALL);
 }

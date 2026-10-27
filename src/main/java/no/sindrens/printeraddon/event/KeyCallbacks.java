@@ -62,6 +62,12 @@ public class KeyCallbacks {
                 no.sindrens.printeraddon.build.CostEstimate.show(mc);
             } else if (key == Hotkeys.TOGGLE_AUTO_BUILD.getKeybind()) {
                 build.toggle(mc);
+            } else if (key == Hotkeys.START_AUTO_BUILD.getKeybind()) {
+                build.startOnly(mc);
+            } else if (key == Hotkeys.STOP_AUTO_BUILD.getKeybind()) {
+                build.stopOnly(mc);
+            } else if (key == Hotkeys.STOP_AFTER_LAYER.getKeybind()) {
+                build.toggleStopAfterLayer(mc);
             } else if (key == Hotkeys.PAUSE_AUTO_BUILD.getKeybind()) {
                 build.togglePause(mc);
             } else if (key == Hotkeys.FIX_WRONG_NOW.getKeybind()) {

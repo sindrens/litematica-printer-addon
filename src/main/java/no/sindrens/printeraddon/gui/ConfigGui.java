@@ -32,6 +32,26 @@ public class ConfigGui extends GuiConfigsBase {
 
     public ConfigGui() {
         super(10, 50, PrinterAddon.MOD_ID, null, "Printer Addon");
+        this.setListPosition(10, listY(tab));
+    }
+
+    /** Where the list of settings starts: below the buttons on the Controls tab. */
+    private static int listY(Tab tab) {
+        return tab == Tab.CONTROLS ? CONTROLS_LIST_Y : 50;
+    }
+
+    /** The first one's key, else the second's (start / stop show the start/stop key while they have none of their own). */
+    private static String keyOr(fi.dy.masa.malilib.config.options.ConfigHotkey first, fi.dy.masa.malilib.config.options.ConfigHotkey second) {
+        String own = key(first);
+        return own.isEmpty() ? key(second) : own;
+    }
+
+    private static final int CONTROLS_LIST_Y = 52 + 24 * 4 + 22;
+
+    /** J+key text for a button, empty when no key is set. */
+    private static String key(fi.dy.masa.malilib.config.options.ConfigHotkey hotkey) {
+        String keys = hotkey.getKeybind().getKeysDisplayString();
+        return keys == null || keys.isBlank() ? "" : " \u00a77(" + keys + ")";
     }
 
     @Override
@@ -49,7 +69,9 @@ public class ConfigGui extends GuiConfigsBase {
             x += button.getWidth() + 2;
         }
 
-        if (tab == Tab.BUILD) {
+        if (tab == Tab.CONTROLS) {
+            addControlsTab(10, 52);
+        } else if (tab == Tab.BUILD) {
             addBuildTab(10, 52);
         } else if (tab == Tab.BREAK_AREA) {
             addBreakTab(10, 52);
@@ -61,6 +83,74 @@ public class ConfigGui extends GuiConfigsBase {
                     ? "Search every setting: the magnifier at the top left"
                     : "Hover a setting for what it does. Search: 'All settings'");
         }
+    }
+
+    /**
+     * Controls: start, stop, pause, stop after this layer, stop everything and the layer up / down, as buttons, with
+     * their keys listed below to change right here.
+     */
+    private void addControlsTab(int x, int y) {
+        Minecraft mc = Minecraft.getInstance();
+        AutoBuild build = AutoBuild.INSTANCE;
+        boolean running = build.isRunning();
+        boolean paused = build.isRemotelyPaused();
+        if (!Configs.enabled()) {
+            this.addLabel(x, y + 5, 400, 10, 0xFFFF5555, "The add-on is off: switch it on in the Build tab (or J+A).");
+            return;
+        }
+        int w = 180;
+        ButtonGeneric start = new ButtonGeneric(x, y, w, 20, (paused ? "\u00a7a\u25b6 Go on" : "\u00a7a\u25b6 Start") + keyOr(Hotkeys.START_AUTO_BUILD, Hotkeys.TOGGLE_AUTO_BUILD));
+        start.setEnabled(!running);
+        this.addButton(start, (button, mouse) -> {
+            GuiBase.openGui(null);
+            build.startOnly(mc);
+        });
+        ButtonGeneric stop = new ButtonGeneric(x + w + 4, y, w, 20, "\u00a7c\u25a0 Stop" + keyOr(Hotkeys.STOP_AUTO_BUILD, Hotkeys.TOGGLE_AUTO_BUILD));
+        stop.setEnabled(running || paused);
+        this.addButton(stop, (button, mouse) -> {
+            build.stopOnly(mc);
+            this.initGui();
+        });
+        ButtonGeneric pause = new ButtonGeneric(x + (w + 4) * 2, y, w, 20, (paused ? "\u25b6 Go on" : "\u23f8 Pause") + key(Hotkeys.PAUSE_AUTO_BUILD));
+        pause.setEnabled(running || paused);
+        this.addButton(pause, (button, mouse) -> {
+            build.togglePause(mc);
+            this.initGui();
+        });
+        y += 24;
+        boolean afterLayer = build.isStopAfterLayer();
+        ButtonGeneric layerStop = new ButtonGeneric(x, y, w * 2 + 4, 20, "Stop after this layer: "
+                + (afterLayer ? "\u00a7aON" : "\u00a7cOFF") + key(Hotkeys.STOP_AFTER_LAYER));
+        layerStop.setEnabled(running || paused);
+        this.addButton(layerStop, (button, mouse) -> {
+            build.toggleStopAfterLayer(mc);
+            this.initGui();
+        });
+        this.addButton(new ButtonGeneric(x + (w + 4) * 2, y, w, 20, "\u00a7cStop everything" + key(Hotkeys.STOP_ALL)), (button, mouse) -> {
+            no.sindrens.printeraddon.shop.ShopScanner.INSTANCE.cancel("stopped");
+            no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.cancel("stopped");
+            build.stopEverything(mc);
+            build.cancelPutAway();
+            no.sindrens.printeraddon.build.Resume.cancel();
+            no.sindrens.printeraddon.build.Reconnect.cancel();
+            this.initGui();
+        });
+        y += 24;
+        this.addButton(new ButtonGeneric(x, y, w, 20, "\u25bc Previous layer" + key(Hotkeys.PREVIOUS_LAYER)), (button, mouse) -> {
+            build.layers.moveLayer(-1);
+            this.initGui();
+        });
+        this.addButton(new ButtonGeneric(x + w + 4, y, w, 20, "\u25b2 Next layer" + key(Hotkeys.NEXT_LAYER)), (button, mouse) -> {
+            build.layers.moveLayer(1);
+            this.initGui();
+        });
+        y += 28;
+        String state = running ? "\u00a7aRunning\u00a7r: " + build.layers.status() + (afterLayer ? " \u00a7e(stops when this layer is done)" : "")
+                : paused ? "\u00a7ePaused\u00a7r" + (afterLayer ? " \u00a7e(stops after the layer when it goes on)" : "")
+                : "\u00a77Not running";
+        this.addLabel(x, y, 600, 10, 0xFFFFFFFF, state);
+        y += 14;
+        this.addLabel(x, y, 600, 10, 0xFFAAAAAA, "Keys: click a key to change it, the arrow resets it. Keys left empty do nothing.");
     }
 
     private void addBuildTab(int x, int y) {
@@ -287,7 +377,7 @@ public class ConfigGui extends GuiConfigsBase {
 
     @Override
     protected int getConfigWidth() {
-        return tab == Tab.HOTKEYS ? super.getConfigWidth() : 160;
+        return tab == Tab.HOTKEYS || tab == Tab.CONTROLS ? super.getConfigWidth() : 160;
     }
 
     @Override
@@ -304,11 +394,13 @@ public class ConfigGui extends GuiConfigsBase {
             case SHOP -> Configs.Shop.OPTIONS;
             case SPEED -> Configs.Speed.OPTIONS;
             case HOTKEYS -> Hotkeys.HOTKEY_LIST;
+            case CONTROLS -> Hotkeys.CONTROL_LIST;
         };
         return ConfigOptionWrapper.createFor(configs);
     }
 
     private enum Tab {
+        CONTROLS("Controls"),
         BUILD("Build"),
         BREAK_AREA("Auto break"),
         DISCORD("Discord"),
@@ -334,6 +426,7 @@ public class ConfigGui extends GuiConfigsBase {
         @Override
         public void actionPerformedWithButton(ButtonBase button, int mouseButton) {
             ConfigGui.tab = this.tab;
+            this.parent.setListPosition(10, listY(this.tab));
             this.parent.reCreateListWidget();
             Objects.requireNonNull(this.parent.getListWidget()).resetScrollbarPosition();
             this.parent.initGui();

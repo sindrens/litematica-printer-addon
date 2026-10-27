@@ -1969,6 +1969,50 @@ public class AutoBuild {
         }
     }
 
+    /** Stop when the layer being built now is done (the key or the Controls tab); off again with a second press. */
+    private boolean stopAfterLayer;
+
+    public boolean isStopAfterLayer() {
+        return stopAfterLayer;
+    }
+
+    public void toggleStopAfterLayer(Minecraft mc) {
+        if (!running && !remotePaused) {
+            Chat.info("Auto build isn't running (start it with " + no.sindrens.printeraddon.config.Hotkeys.TOGGLE_AUTO_BUILD.getKeybind().getKeysDisplayString() + ").");
+            return;
+        }
+        stopAfterLayer = !stopAfterLayer;
+        Chat.info(stopAfterLayer
+                ? "Stopping when " + layers.describeLayers() + " is done. Press again ("
+                        + no.sindrens.printeraddon.config.Hotkeys.STOP_AFTER_LAYER.getKeybind().getKeysDisplayString() + ") to keep going."
+                : "Keeps going after this layer.");
+    }
+
+    /** Start only (a running build is left as it is; a paused one goes on). */
+    public void startOnly(Minecraft mc) {
+        if (running) {
+            Chat.info("Auto build is already running.");
+        } else if (remotePaused) {
+            resumeRemote(mc);
+        } else {
+            askAndStart(mc);
+        }
+    }
+
+    /** Stop only (nothing happens when it isn't running; a paused build is stopped for good). */
+    public void stopOnly(Minecraft mc) {
+        if (running) {
+            stop(mc, null);
+        } else if (remotePaused) {
+            remotePaused = false;
+            pausedSpending = null;
+            stopAfterLayer = false;
+            Chat.info("Auto build §cstopped§r (it was paused).");
+        } else {
+            Chat.info("Auto build isn't running.");
+        }
+    }
+
     /** The pause key: a running build pauses (as from Discord), a paused one goes on. */
     public void togglePause(Minecraft mc) {
         if (running) {
@@ -2406,6 +2450,10 @@ public class AutoBuild {
             }
         }
         stopNote = null;
+        // A pause or a lost connection keeps "stop after this layer"; any other stop ends it
+        if (!resumeLater && !PAUSE_REASON.equals(reason) && (reason == null || !reason.startsWith(OTHER_MOD_PAUSE))) {
+            stopAfterLayer = false;
+        }
         BuildLog.close();
         // Stopped by the player or done (not a disconnect, an error or a safety stop): the building items go into
         // storage; the next start takes what it needs again
@@ -3004,6 +3052,13 @@ public class AutoBuild {
         Perf.end("layer check", layersStarted);
         if (!layersGoOn) {
             stopNote = "finished";
+            stop(mc, null);
+            return;
+        }
+        if (layers.takeLayerDone() && stopAfterLayer) {
+            stopAfterLayer = false;
+            Chat.info("Layer done: stopping as asked (\"Stop after this layer\"). Start again to build the next one.");
+            BuildLog.line("LAYER", "stop after layer: stopping, next is " + layers.describeLayers());
             stop(mc, null);
             return;
         }

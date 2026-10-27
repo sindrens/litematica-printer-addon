@@ -262,3 +262,8 @@
 - Never flies or steps into a nether portal, end portal or end gateway.
 - Auto break flies between spots instead of walking on the layers it breaks (it went a block every 2 seconds and fell through its own holes).
 - "Can't fly here" is said once, not many times a second.
+
+## 26.2-0.17.28
+- New "Controls" tab in the settings: Start, Stop, Pause / Go on, Stop after this layer, Stop everything, and layer up / down as buttons, with the build's state, and their keys listed below to change right there.
+- "Stop after this layer" (J+N): auto build stops by itself when the layer it's building is done (press again to keep going). Kept through a pause or a lost connection.
+- Separate keys for Start only and Stop only (no key by default, set them in Controls or Hotkeys); the old start/stop key (J+G) still toggles.
