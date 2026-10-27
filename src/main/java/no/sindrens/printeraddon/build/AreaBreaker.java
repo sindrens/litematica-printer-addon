@@ -570,8 +570,17 @@ public final class AreaBreaker {
         }
         mover.keepClear(mc);
         if (breaker.isBusy()) {
-            holdStill(player);
+            // A block that goes with one hit (string): on along the way meanwhile. Holding still for each one made a
+            // string layer stop and go, 160 a minute
+            boolean quick = breaker.quickTarget();
+            if (!quick) {
+                holdStill(player);
+            }
             breaker.tick(mc, BlockBreaker.Mode.AREA);
+            if (quick && goal != null && goalSpot != null) {
+                mover.goTo(goal, goalSpot, true);
+                mover.tick(mc);
+            }
             return;
         }
         if (AutoBuild.clientTicks - layerScannedAt >= 20) {
@@ -608,7 +617,7 @@ public final class AreaBreaker {
         }
         // What's in reach first
         breaker.tick(mc, BlockBreaker.Mode.AREA);
-        if (breaker.isBusy()) {
+        if (breaker.isBusy() && !breaker.quickTarget()) {
             goal = null;
             mover.goTo(null);
             holdStill(player);

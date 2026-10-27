@@ -219,6 +219,12 @@ public final class StockUp {
             if (keepStacks > 0 && inventory.countItem(item) % Math.max(1, item.getDefaultMaxStackSize()) != 0) {
                 keepStacks++;
             }
+            // The blocks the build doesn't use go into the vault on this same visit when the inventory is that full
+            // (see ChestFetcher): their slots are the bought item's too. It put 3 stacks of sand away, then took them
+            // straight back out with the next look in the vaults
+            if (InventoryCleaner.freeSlots(inventory) < 18) {
+                keepStacks += build.cleaner.strayStacks(inventory);
+            }
             Map<Item, Integer> keep = Map.of(item, keepStacks);
             boolean last = toStock.values().stream().noneMatch(count -> count > 0);
             Map<Item, Integer> take = new LinkedHashMap<>();

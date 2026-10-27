@@ -853,6 +853,12 @@ public class Mover {
         if (work.isEmpty() && !unloaded.isEmpty() && waitingForItems == 0) {
             // The rest of the layer is too far away to be loaded: go there so it loads (not to parts no flight could
             // get to a moment ago)
+            // Outside the world border (the island's edge): nothing there can be got to, left alone at once
+            for (BlockPos p : unloaded) {
+                if (!PathFinder.insideBorder(mc.level, p) && unloadable.add(areaKey(p))) {
+                    BuildLog.line("SKIP", "area " + areaName(areaKey(p)) + " is outside the world border (" + p.toShortString() + "): left alone");
+                }
+            }
             List<BlockPos> notSkipped = unloaded.stream()
                     .filter(p -> !skipped.containsKey(p) && !areaUnreachable(areaKey(p)) && !unloadable.contains(areaKey(p))).toList();
             if (notSkipped.isEmpty()) {
@@ -2100,6 +2106,7 @@ public class Mover {
             keys.addAll(unloadedAreas.keySet());
             keys.removeAll(unloadable);
             keys.removeIf(this::areaUnreachable);
+            keys.removeIf(key -> unloadedAreas.get(key) != null && !PathFinder.insideBorder(mc.level, unloadedAreas.get(key)));
             // The nearest area with something placeable (by how far its square is), with a small extra cost for areas
             // behind in the usual order (north-west to south-east, snaking), so it doesn't hop back and forth.
             // Areas that aren't loaded yet come when nothing loaded is left, nearest first: none is skipped

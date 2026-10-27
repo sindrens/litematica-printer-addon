@@ -164,3 +164,12 @@
 - Players who don't stop it: friends and island members can come close without stopping the build.
 - A normal game close is no longer sent as a crash with reports.
 - Clearer text for the cheapest-buying setting.
+
+## 26.2-0.17.11
+- Out of something the shop doesn't sell (string): it waits where it is instead of flying empty lanes, tells you (on screen and in Discord) how many the layer still needs, and goes on by itself once you put some in your inventory.
+- Cactus flowers are only broken when they're in the way of the next block it can place: no more going round breaking flowers that keep coming back on a big farm, and none at all while it waits for items.
+- Auto break no longer stops for every block that goes with one hit (string): it keeps flying along, much faster on string layers.
+- A schematic placed outside your island's border isn't started (it flew to the edge and down towards the void); parts of a build outside the border are left alone at once.
+- Bulk buying no longer puts stacks into a vault and takes them straight back out.
+- Blocks put into a vault to make room are checked: when the vault doesn't take them, the log says so.
+- "Bring these" shows the numbers with commas, and the cactus warning shows once.

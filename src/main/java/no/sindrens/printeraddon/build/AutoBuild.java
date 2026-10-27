@@ -521,6 +521,9 @@ public class AutoBuild {
         if (ServerWatch.stalled()) {
             return "server-slow";
         }
+        if (!waitingFor.isEmpty()) {
+            return "waiting-for-items";
+        }
         if (no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.isRunning() || fetcher.isBusy() || crafter.isBusy() || tripGoingOn()) {
             return "supply-trip";
         }
@@ -1246,6 +1249,9 @@ public class AutoBuild {
 
     /** What this tick goes to, for the build stats. */
     private BuildStats.Activity activity() {
+        if (!waitingFor.isEmpty()) {
+            return BuildStats.Activity.WAITING;
+        }
         if (no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.isRunning()) {
             return BuildStats.Activity.BUYING;
         }
@@ -1300,6 +1306,7 @@ public class AutoBuild {
         boolean due = false;
         boolean dueAnyway = false;
         boolean outOfSomething = false;
+        outNow.clear();
         java.util.Set<net.minecraft.world.item.Item> forLane = clientTicks <= laneShortUntil ? laneShort : java.util.Set.of();
         laneShort = java.util.Set.of();
         for (var entry : layerNeeds.entrySet()) {
@@ -1318,11 +1325,17 @@ public class AutoBuild {
             // A tool that can't be had (a recipe the server doesn't allow) never stops the build: tilling or
             // breaking waits for it, everything else goes on (a stone shovel that couldn't be crafted stopped a build)
             if (have == 0 && !Tools.isMarker(item)) {
-                outOfSomething |= !autoBuy || !gettable(mc, item) && !retryPending(item);
+                // Not out while a vault is known to have some (string isn't sold, but was in /pv 1)
+                boolean inStorage = storage && fetcher.knownCount(item) > 0;
+                boolean out = !inStorage && (!autoBuy || !gettable(mc, item) && !retryPending(item));
+                outOfSomething |= out;
+                if (out) {
+                    outNow.put(item, entry.getValue() - have);
+                }
             }
             // Only once it's (nearly) used up: this many or fewer left; or the lane about to be flown takes more than
             // is left (topped up before it, not with a stop halfway along it: 14 s in the middle of a lane once)
-            if (gettable(mc, item) && (have <= buyWhenLeft || forLane.contains(item))
+            if ((gettable(mc, item) || storage && fetcher.knownCount(item) > 0) && (have <= buyWhenLeft || forLane.contains(item))
                     && (storage || autoBuy && no.sindrens.printeraddon.shop.ShopBuyer.room(mc, item) > 0)) {
                 due = true;
                 if (have <= buyWhenLeft) {
@@ -1707,15 +1720,94 @@ public class AutoBuild {
         return false;
     }
 
-    /** Pause only when something is used up that can't be got, and the layer can't go on without it. */
+    /** Items used up that can't be got (not in the shop, not in storage), with how many the layer still needs. */
+    private final java.util.Map<net.minecraft.world.item.Item, Integer> outNow = new java.util.LinkedHashMap<>();
+    /** The build waits for these to be put in the inventory (empty: not waiting). */
+    private final java.util.Map<net.minecraft.world.item.Item, Integer> waitingFor = new java.util.LinkedHashMap<>();
+    private long waitingSince = -1;
+    private long waitWarnedAt = -100000;
+    private boolean waitHeld;
+
+    /**
+     * Something the layer needs is used up and can't be got (string isn't sold in the shop). It used to fly lane after
+     * lane placing only the sand that didn't stand on string, then stop after 20 s without progress (a cactus tower
+     * flew 2 lanes with nothing placed). Now it waits right where it is as soon as that item is a big part of what's
+     * left (or nothing else goes on for 20 s), says what to bring, and goes on by itself once it's in the inventory.
+     */
     private void pauseIfOut(Minecraft mc, boolean outOfSomething) {
-        if (outOfSomething && layers.stalledFor(20 * 20)) {
-            StringBuilder sb = new StringBuilder();
-            shoppingList.forEach((item, count) -> sb.append(count).append(' ')
-                    .append(new net.minecraft.world.item.ItemStack(item).getHoverName().getString()).append(", "));
-            stop(mc, "missing " + (sb.length() > 2 ? sb.substring(0, sb.length() - 2) : "items")
-                    + ". Put them in your inventory and start auto build again (J+B menu)");
+        if (!outOfSomething || !waitingFor.isEmpty()) {
+            return;
         }
+        java.util.Map<net.minecraft.world.item.Item, Integer> needs = layers.layerNeeds();
+        long total = 0;
+        long outNeed = 0;
+        for (var e : needs.entrySet()) {
+            if (InventoryCleaner.isBucket(e.getKey())) {
+                continue;
+            }
+            total += e.getValue();
+            if (outNow.containsKey(e.getKey())) {
+                outNeed += e.getValue();
+            }
+        }
+        if (outNow.isEmpty() || !(layers.stalledFor(20 * 20) || total > 0 && outNeed * 4 >= total)) {
+            return;
+        }
+        waitingFor.putAll(outNow);
+        waitingSince = clientTicks;
+        waitWarnedAt = -100000;
+        waitHeld = false;
+        BuildLog.line("WAIT-ITEMS", "out of " + itemList(waitingFor) + " (not in the shop or storage; " + outNeed + " of the layer's "
+                + total + " items): waiting here until it's in the inventory");
+        no.sindrens.printeraddon.discord.DiscordLink.event("missing", "Out of " + itemList(waitingFor)
+                + ": not in the shop or your vaults. The build waits until you put some in your inventory.");
+        Chat.announce("Out of " + itemList(waitingFor), "Put some in your inventory: the build goes on by itself", false);
+    }
+
+    private static String itemList(java.util.Map<net.minecraft.world.item.Item, Integer> items) {
+        StringBuilder sb = new StringBuilder();
+        items.forEach((item, count) -> sb.append(new net.minecraft.world.item.ItemStack(item).getHoverName().getString())
+                .append(" (").append(count).append(" more for this layer), "));
+        return sb.length() > 2 ? sb.substring(0, sb.length() - 2) : "items";
+    }
+
+    public boolean isWaitingForItems() {
+        return running && !waitingFor.isEmpty();
+    }
+
+    /** Waiting for items the player has to bring (see pauseIfOut); ends by itself once they're in the inventory. */
+    public boolean waitingForItems(Minecraft mc) {
+        if (waitingFor.isEmpty()) {
+            return false;
+        }
+        if (!running || mc.player == null) {
+            waitingFor.clear();
+            return false;
+        }
+        net.minecraft.world.entity.player.Inventory inventory = mc.player.getInventory();
+        boolean any = false;
+        for (net.minecraft.world.item.Item item : waitingFor.keySet()) {
+            if (inventory.countItem(item) > 0) {
+                any = true;
+                break;
+            }
+        }
+        if (any) {
+            BuildLog.line("WAIT-ITEMS", "got them after " + (clientTicks - waitingSince) / 20 + " s: going on");
+            Chat.info("Got " + itemList(waitingFor).replaceAll(" \\(\\d+ more for this layer\\)", "") + ": going on with the build.");
+            for (net.minecraft.world.item.Item item : waitingFor.keySet()) {
+                couldntBuy.remove(item);
+                buyFailures.remove(item);
+            }
+            waitingFor.clear();
+            return false;
+        }
+        if (clientTicks - waitWarnedAt > 20 * 60 * 2) {
+            waitWarnedAt = clientTicks;
+            Chat.warn("Waiting for " + itemList(waitingFor) + ": not in the shop or your vaults. Put some in your inventory and the build"
+                    + " goes on by itself (or stop it: J+B).");
+        }
+        return true;
     }
 
     /** "observer: keep 12 stacks, hopper: all" for the build log. */
@@ -1923,6 +2015,27 @@ public class AutoBuild {
             Configs.Generic.AUTO_BUILD.setBooleanValue(false);
             return;
         }
+        // A placement left somewhere else (a schematic loaded 5400 blocks away, at Y -44): it flew to the island's edge
+        // and down towards the void looking for it. Not started when no part of it is inside the world border
+        if (mc.level != null) {
+            net.minecraft.world.level.border.WorldBorder border = mc.level.getWorldBorder();
+            boolean anyInside = false;
+            SchematicHelper.Area first = null;
+            for (SchematicHelper.Area a : SchematicHelper.areas()) {
+                first = first == null ? a : first;
+                if (a.maxX() >= border.getMinX() && a.minX() <= border.getMaxX() && a.maxZ() >= border.getMinZ() && a.minZ() <= border.getMaxZ()) {
+                    anyInside = true;
+                    break;
+                }
+            }
+            if (!anyInside && first != null) {
+                Chat.warn("The schematic (" + placementNames() + ") is placed at " + first.minX() + ", " + first.minY() + ", " + first.minZ()
+                        + ", outside your island's border: move the placement to where it should be built (Litematica: placement menu, or"
+                        + " move it to you), then start again.");
+                Configs.Generic.AUTO_BUILD.setBooleanValue(false);
+                return;
+            }
+        }
 
         running = true;
         Configs.Generic.AUTO_BUILD.setBooleanValue(true);
@@ -2008,6 +2121,7 @@ public class AutoBuild {
         airPlace.reset();
         stock.reset();
         fluids.reset();
+        waitingFor.clear();
         tiller.reset();
         rails.reset();
         entities.reset();
@@ -2073,8 +2187,6 @@ public class AutoBuild {
         // Cactus left open on top grow while it's stopped (into where the string goes, to be broken one by one later)
         int openCactus = wasRunning && mc.level != null && !"finished".equals(stopNote) ? layers.openCactus(mc.level) : 0;
         if (openCactus > 0) {
-            BuildLog.line("WARN", openCactus + " cactus of " + layers.describeLayers() + " stand open on top (the sand beside them isn't in yet):"
-                    + " they grow while auto build is stopped");
             Chat.warn(openCactus + " cactus of " + layers.describeLayers() + " have no sand beside their top yet: they grow while auto build"
                     + " is stopped, and have to be broken one by one after. Start it again soon to cap them.");
         }
@@ -2722,6 +2834,14 @@ public class AutoBuild {
             }
         }
 
+        if (waitingForItems(mc)) {
+            if (!waitHeld) {
+                waitHeld = true;
+                mover.stop(mc);
+            }
+            updateStatus(mc);
+            return;
+        }
         watchdog(mc);
         long moverStarted = Perf.start();
         mover.tick(mc);

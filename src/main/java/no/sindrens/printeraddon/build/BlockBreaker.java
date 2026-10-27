@@ -75,6 +75,13 @@ public class BlockBreaker {
         return target != null;
     }
 
+    /** The block being broken goes with the first hit (string, a flower): no need to hold still for it. */
+    private boolean quickTarget;
+
+    public boolean quickTarget() {
+        return target != null && quickTarget && hopTo == null;
+    }
+
     /** Breaking this block, or one up to 3 under it in its column (a column of cactus falls with its lowest). */
     public boolean breakingUnder(BlockPos pos) {
         return target != null && target.getX() == pos.getX() && target.getZ() == pos.getZ()
@@ -337,6 +344,7 @@ public class BlockBreaker {
         ticksOnTarget = 0;
         face = faceTowardsPlayer(player, pos);
         selectBestTool(player, state, currentMode == Mode.AREA);
+        quickTarget = state.getDestroyProgress(player, mc.level, pos) >= 1.0f;
         lookAt(player, pos);
         hopTo = spot;
         hopTicks = 0;
@@ -424,17 +432,35 @@ public class BlockBreaker {
         return !alwaysBreak.isEmpty() && alwaysBreak.contains(state.getBlock());
     }
 
-    /** Broken as one of the "always break" blocks: there, and not what the schematic wants there. */
+    /**
+     * Broken as one of the "always break" blocks: there, on the layers being built, where the schematic wants a block
+     * that can be placed right now (it's in the inventory, and the build isn't waiting for items). On a big cactus farm
+     * flowers come back on the cactus tops all the time: out of string it stopped placing and went round breaking
+     * flowers until string came, and flowers anywhere else in the schematic were chased too. Now a flower only goes
+     * when it's in the way of the next block.
+     */
     public static boolean breakAnyway(net.minecraft.world.level.Level level, WorldSchematic schematic, BlockPos pos) {
         BlockState state = level.getBlockState(pos);
-        return alwaysBreak(state) && schematic.getBlockState(pos).getBlock() != state.getBlock();
+        if (!alwaysBreak(state)) {
+            return false;
+        }
+        BlockState wanted = schematic.getBlockState(pos);
+        if (wanted.isAir() || wanted.getBlock() == state.getBlock() || !DataManager.getRenderLayerRange().isPositionWithinRange(pos)) {
+            return false;
+        }
+        net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+        if (mc.player == null || AutoBuild.INSTANCE.isWaitingForItems()) {
+            return false;
+        }
+        net.minecraft.world.item.Item item = wanted.getBlock().asItem();
+        return item != net.minecraft.world.item.Items.AIR && (mc.player.getAbilities().instabuild || mc.player.getInventory().countItem(item) > 0);
     }
 
     private static boolean shouldBreak(BlockCheck.Result result, Mode mode, BlockPos pos) {
         net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
         WorldSchematic schematic = SchematicHelper.world();
-        if (mode == Mode.WRONG && mc.level != null && schematic != null && breakAnyway(mc.level, schematic, pos)) {
-            return true;
+        if (mode == Mode.WRONG && mc.level != null && schematic != null && alwaysBreak(mc.level.getBlockState(pos))) {
+            return breakAnyway(mc.level, schematic, pos);
         }
         return switch (mode) {
             // A container the printer put in the wrong spot during this build may be broken too

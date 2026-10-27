@@ -158,13 +158,24 @@ public class InventoryCleaner {
                 && !AutoBuild.INSTANCE.layers.layerNeeds().containsKey(item);
     }
 
+    /** How many slots of the inventory hold strays (see isStray): room once they're put into a vault. */
+    public int strayStacks(Inventory inventory) {
+        int stacks = 0;
+        for (int i = 0; i < 36; i++) {
+            if (isStray(inventory.getItem(i))) {
+                stacks++;
+            }
+        }
+        return stacks;
+    }
+
     /**
      * Puts the strays (see isStray) into the open vault or chest while it keeps its free part (see StockUp#keepFree).
-     * Returns how many items went in.
+     * Returns what was clicked in (checked against the server's answer by the caller).
      */
-    public int storeStrays(Minecraft mc, LocalPlayer player, AbstractContainerMenu menu, String where) {
+    public Map<Item, Integer> storeStrays(Minecraft mc, LocalPlayer player, AbstractContainerMenu menu, String where) {
         if (mc.gameMode == null || !menu.getCarried().isEmpty()) {
-            return 0;
+            return Map.of();
         }
         int free = 0;
         int total = 0;
@@ -192,12 +203,12 @@ public class InventoryCleaner {
             }
         }
         if (items > 0) {
-            BuildLog.line("STORAGE", where + ": put in " + describe(stored) + " (blocks this build doesn't use: room for the trip)");
+            BuildLog.line("STORAGE", where + ": putting in " + describe(stored) + " (blocks this build doesn't use: room for the trip)");
             no.sindrens.printeraddon.util.Chat.quiet("Put " + describe(stored) + " in " + where + ": this build doesn't use them,"
                     + " and the supply trip needs the room.");
             RunLog.straysStored(items);
         }
-        return items;
+        return stored;
     }
 
     private static String describe(Map<Item, Integer> items) {

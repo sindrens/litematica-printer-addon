@@ -517,7 +517,10 @@ public class ChestFetcher {
                     cleanedHere = true;
                     InventoryCleaner.throwJunk(mc, player, menu, current.name());
                     if (!nearOnly && InventoryCleaner.freeSlots(player.getInventory()) < STRAYS_BELOW_FREE) {
-                        AutoBuild.INSTANCE.cleaner.storeStrays(mc, player, menu, current.name());
+                        // Checked like the rest (see VERIFY): strays "put in" while the vault was full stayed in the
+                        // inventory, and the log said they went in
+                        AutoBuild.INSTANCE.cleaner.storeStrays(mc, player, menu, current.name())
+                                .forEach((item, count) -> clicked.merge(item, -count, Integer::sum));
                     }
                 }
                 if (!storing.isEmpty()) {

@@ -165,7 +165,7 @@ public final class CostEstimate {
             String name = new ItemStack(entry.getKey()).getHoverName().getString();
             Price price = shop == null ? null : priceOf(shop, entry.getKey());
             if (price == null) {
-                notSold.add(missing + " " + name);
+                notSold.add(String.format(java.util.Locale.ROOT, "%,d %s", missing, name));
                 continue;
             }
             double cost = missing * price.each();
@@ -192,7 +192,7 @@ public final class CostEstimate {
                     : String.format(java.util.Locale.ROOT, " §c(short by $%,.0f)", total - balance))));
         }
         if (!notSold.isEmpty()) {
-            Chat.warn("Not in the shop, bring these: " + String.join(", ", notSold));
+            Chat.warn("Not in the shop, bring these (whole build; it takes them from your vaults too): " + String.join(", ", notSold));
         }
     }
 
