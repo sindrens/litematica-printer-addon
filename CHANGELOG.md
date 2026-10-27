@@ -235,3 +235,6 @@
 
 ## 26.2-0.17.21
 - AutoSell 1.2 can send its log through the add-on's log channel (rounds that went wrong, and /autosell log).
+
+## 26.2-0.17.22
+- A floor that floats as a whole (a farm floor with air under it) no longer gets stuck with "the printer can't place them from where it can stand": one block is air placed and the rest go against it.

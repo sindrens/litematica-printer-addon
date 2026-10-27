@@ -192,6 +192,12 @@ public class AirPlace {
 
         BlockPos best = null;
         double bestScore = Double.MAX_VALUE;
+        // A floor that floats as a whole (a farm's concrete floor one block over the ground with air under it): each
+        // block has the others beside it in the schematic, so none floats "for good", yet none of them can be placed
+        // against anything: 9 minutes of "the printer can't place them from where it can stand" and a layer with 0
+        // placed. One of them is air placed (the lowest, nearest), and the rest are placed against it as usual
+        BlockPos seed = null;
+        double seedScore = Double.MAX_VALUE;
 
         for (BlockPos pos : BlockPos.betweenClosed(center.offset(-r, -r, -r), center.offset(r, r, r))) {
             double distance = eye.distanceToSqr(Vec3.atCenterOf(pos));
@@ -212,6 +218,14 @@ public class AirPlace {
                 continue;
             }
             if (!needsAirPlace(mc.level, schematic, pos, target)) {
+                if (!(target.getBlock() instanceof net.minecraft.world.level.block.FallingBlock) && airSafe(target)
+                        && !hasSupport(mc.level, pos)) {
+                    double score = (pos.getY() - eye.y) * 100 + distance;
+                    if (score < seedScore) {
+                        seedScore = score;
+                        seed = pos.immutable();
+                    }
+                }
                 continue;
             }
 
@@ -223,6 +237,11 @@ public class AirPlace {
             }
         }
 
+        if (best == null && seed != null) {
+            BuildLog.line("AIR-SEED", seed.toShortString() + ": nothing in reach can be placed against anything (it floats as a whole):"
+                    + " this one is air placed, the rest go against it");
+            return seed;
+        }
         return best;
     }
 
