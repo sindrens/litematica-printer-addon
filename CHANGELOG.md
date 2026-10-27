@@ -246,5 +246,7 @@
 
 ## 26.2-0.17.24
 - Breaking stands on the ground far more often: a spot to stand is looked for all around the block (up to 4 blocks), not only right beside the player. Test with wrong cactus: 65 of 76 breaks standing instead of 19 of 82, 3 times faster per block, layer done in 175 s instead of not done after 240 s.
+
+## 26.2-0.17.25
 - Keys: J+G starts / stops auto build, J+Z pauses it and goes on again (it keeps its place and spending limit). Change them in the settings (Hotkeys).
 - Changing a setting while auto build runs (auto eat...) no longer stops the build.
