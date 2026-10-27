@@ -922,6 +922,15 @@ public final class RunLog {
             // A stem on dirt that should have been tilled: its own cause (it was "not-ready" with the rest)
             return Tiller.untilled(mc.level, schematic, pos.below()) ? "needs-tilling" : "not-ready";
         }
+        // Sand with nothing under it yet (its string isn't in: out of string), a cactus that can't stand there yet:
+        // these were all "out-of-reach-when-passing", 600 of a layer flown with no string, which hid the real cause
+        net.minecraft.world.level.block.state.BlockState want = schematic.getBlockState(pos);
+        if (want.getBlock() instanceof net.minecraft.world.level.block.FallingBlock && mc.level.getBlockState(pos.below()).canBeReplaced()) {
+            return "nothing-under-it(" + LayerManager.blockName(schematic.getBlockState(pos.below())) + ")";
+        }
+        if (!want.canSurvive(mc.level, pos)) {
+            return "cant-stand-there-yet";
+        }
         String held = holdReason(pos);
         if (held != null) {
             return "held(" + held + ")";
