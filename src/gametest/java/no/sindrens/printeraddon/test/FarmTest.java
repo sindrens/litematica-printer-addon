@@ -247,6 +247,10 @@ public class FarmTest implements FabricClientGameTest {
                 if (together != null) {
                     Configs.Layers.LAYERS_TOGETHER.setBooleanValue(!together.equals("0"));
                 }
+                // PRINTER_ADDON_OLD_ROUTE=1: as before 0.17.16 (route and clicks), to compare
+                if (System.getenv("PRINTER_ADDON_OLD_ROUTE") != null) {
+                    no.sindrens.printeraddon.config.Configs.Speed.CLICK_SEEN_FACE.setBooleanValue(false);
+                }
                 // PRINTER_ADDON_BREAK=1: the farm built (PRINTER_ADDON_PREBUILT_LAYERS=99) is broken again by Auto break
                 if (System.getenv("PRINTER_ADDON_BREAK") != null) {
                     // PRINTER_ADDON_BREAK_SKIP=cactus,sand: only the string is broken (like the player's runs)

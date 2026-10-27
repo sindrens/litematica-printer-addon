@@ -259,6 +259,7 @@ public class BlockBreaker {
     /** Forget which spots were given up on (start of a new build). */
     public void reset() {
         footingWait.clear();
+        columnBases.clear();
         failed.clear();
         suspects.clear();
         breakCounts.clear();
@@ -366,6 +367,7 @@ public class BlockBreaker {
         // than it could to keep up
         if (quickTarget && !standing && mc.level.getBlockState(target).isAir()) {
             forced.remove(target);
+            columnBases.remove(target);
             breaks++;
             brokenCount++;
             target = null;
@@ -376,13 +378,14 @@ public class BlockBreaker {
     private void continueBreaking(Minecraft mc, LocalPlayer player, @Nullable WorldSchematic schematic, Mode mode) {
         BlockPos pos = target;
         BlockCheck.Result result = schematic == null ? null : BlockCheck.check(mc.level, schematic, pos);
-        boolean isForced = forced.contains(pos);
+        boolean isForced = forced.contains(pos) || columnBases.contains(pos);
 
         boolean gone = mode == Mode.AREA ? !AreaBreaker.stillThere(mc.level, pos)
                 : isForced ? mc.level.getBlockState(pos).isAir() : !shouldBreak(result, mode, pos);
         if (gone) {
             if (isForced) {
                 forced.remove(pos);
+                columnBases.remove(pos);
             }
             // Gone (or fixed): done
             PrinterAddon.debug("Done with {} after {} ticks ({}{})", pos.toShortString(), ticksOnTarget, result, standing ? ", standing" : "");
@@ -606,6 +609,19 @@ public class BlockBreaker {
                 low = low.below();
             }
             best = low;
+            // Under the column a block the schematic doesn't want there (sand that went into a growth spot, the grown
+            // part of a cactus below): broken instead, the whole column drops with it. Sand goes in a few ticks with a
+            // shovel, a cactus takes 3 s from the air: 126 cactus broken one by one were 58 % of a test run
+            BlockPos base = low.below();
+            BlockState baseState = mc.level.getBlockState(base);
+            if (mode == Mode.WRONG && SchematicHelper.isInAnyArea(areas, base) && !failed.containsKey(base)
+                    && schematic.getBlockState(base).isAir() && !baseState.isAir() && baseState.getFluidState().isEmpty()
+                    && (baseState.getBlock() instanceof net.minecraft.world.level.block.FallingBlock || baseState.is(net.minecraft.world.level.block.Blocks.CACTUS))
+                    && eye.distanceToSqr(Vec3.atCenterOf(base)) <= range * range
+                    && !AutoBuild.INSTANCE.isConflict(base, BlockCheck.Result.EXTRA, baseState)) {
+                best = base;
+                columnBases.add(base.immutable());
+            }
         }
         // A slow block (a grown cactus, 2 s from the air) with nowhere to stand yet while the lanes are being flown:
         // left until the lanes are done, when the sand around it is in and there's footing (5 times faster standing).
@@ -613,9 +629,18 @@ public class BlockBreaker {
         return best;
     }
 
+    /** Blocks under a wrong column broken so it drops (see findNext): done once they're gone. */
+    private final java.util.Set<BlockPos> columnBases = new java.util.HashSet<>();
+
     /** Slow blocks left for later while lanes are flown (see findNext), and since when. */
     private final Map<BlockPos, Long> footingWait = new HashMap<>();
     private static final int FOOTING_WAIT_TICKS = 20 * 120;
+
+    /** Left until there's somewhere to stand (see waitsForFooting), for the mover: not something to do now. */
+    public boolean leftForFooting(BlockPos pos) {
+        Long since = footingWait.get(pos);
+        return since != null && tickCounter - since < FOOTING_WAIT_TICKS && AutoBuild.INSTANCE.mover.onLane();
+    }
 
     private boolean waitsForFooting(Minecraft mc, LocalPlayer player, BlockPos pos) {
         Long since = footingWait.get(pos);
@@ -631,6 +656,16 @@ public class BlockBreaker {
         if (!lanes || !Configs.Breaking.STAND_TO_BREAK.getBooleanValue() || !player.getAbilities().flying
                 || state.getDestroySpeed(mc.level, pos) <= 0.05f || state.getDestroyProgress(player, mc.level, pos) >= 0.2f
                 || standSpot(player, pos) != null) {
+            return false;
+        }
+        // A column on sand the schematic doesn't want there: that sand goes in a few ticks and takes the column along
+        BlockPos down = pos;
+        while (mc.level.getBlockState(down).is(net.minecraft.world.level.block.Blocks.CACTUS)) {
+            down = down.below();
+        }
+        WorldSchematic world = SchematicHelper.world();
+        if (world != null && world.getBlockState(down).isAir()
+                && mc.level.getBlockState(down).getBlock() instanceof net.minecraft.world.level.block.FallingBlock) {
             return false;
         }
         footingWait.put(pos.immutable(), tickCounter);

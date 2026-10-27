@@ -412,6 +412,11 @@ public class Configs implements IConfigHandler {
                         + "clicks (on play.mythian.net 7 % of the clicks right after a switch, against 0.5 % of the others).\n"
                         + "Off: a little faster on servers that don't.",
                 "Wait a tick after switching items");
+        public static final ConfigBoolean CLICK_SEEN_FACE = new ConfigBoolean("clickSeenFace", true,
+                "Clicks go on a side of a block the player can see, on the block's real shape (a cactus is thinner than\n"
+                        + "its block). Blocks that go in the same way from any side (string, sand) are clicked against another\n"
+                        + "block beside them when the printer's choice faces away: servers refuse those clicks.",
+                "Click a side you can see");
         public static final ConfigInteger LAG_PAUSE_TPS = new ConfigInteger("lagPauseTps", 12, 0, 19,
                 "On a server: stop placing while the server runs below this many ticks per second (20 is normal),\n"
                         + "because clicks then get answered late and blocks come out wrong. 0 = never wait.",
@@ -436,7 +441,7 @@ public class Configs implements IConfigHandler {
                 "Custom: fly speed");
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                AUTO_SPEED, AUTO_SPEED_MIN_INTERVAL, SPEED_GUARD, AUTO_SPEED_STEP_BLOCKS, MAX_PLACEMENTS_PER_SECOND, WAIT_AFTER_SWITCH, LAG_PAUSE_TPS, PRINTER_INTERVAL, BREAK_COOLDOWN, SHOP_CLICK_DELAY, WALK_SPEED, FLY_SPEED);
+                AUTO_SPEED, AUTO_SPEED_MIN_INTERVAL, SPEED_GUARD, AUTO_SPEED_STEP_BLOCKS, MAX_PLACEMENTS_PER_SECOND, WAIT_AFTER_SWITCH, CLICK_SEEN_FACE, LAG_PAUSE_TPS, PRINTER_INTERVAL, BREAK_COOLDOWN, SHOP_CLICK_DELAY, WALK_SPEED, FLY_SPEED);
 
         public static double walkSpeed() {
             SpeedPreset preset = preset();

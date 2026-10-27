@@ -197,3 +197,11 @@
 - The layer right above a finished one is checked at once, not only in the background.
 - How many layers go together is worked out each time: the next layer only when it stands on the one below, leaves no cactus open, and the narrower lanes it needs still do more a sweep. With your reach that's 2 (string and cactus, then the sand on the string); the log says why ("3 layers ...? no").
 - Auto break: blocks that go with one hit (string) are broken every 2 ticks instead of every 5.
+
+## 26.2-0.17.16
+- Lane order: a grown cactus at a lane's end no longer makes the lane beside count as 30 blocks farther. The sweep took every other lane and flew back for the rest (460 blocks of flying to lanes in one layer of your tower, about 130 now).
+- Clicks go on a side of a block you can see, on its real shape: string between two cactus is clicked against the cactus facing you. Your server refused 12 % of the string clicks (the side facing away), and those were most of the holes left after the lanes.
+- Lanes no longer stand still 3 s at each grown cactus they leave for later.
+- A grown column standing on sand that doesn't belong there: the sand is broken (a few ticks with a shovel) and the whole column drops, instead of each cactus from the air (3 s each).
+- New setting "Click a side you can see" (on).
+- Test farm with grown cactus in a quarter of the string spots: 229 s now, was over 480 s and stuck on its last 2 blocks.

@@ -47,6 +47,20 @@ public class InteractActionMixin {
     @Unique
     private static Object printer_addon$deferred;
 
+    /** The click moved to a face the player sees, on the block's real shape (see Clicks.visibleFace). */
+    @org.spongepowered.asm.mixin.injection.ModifyVariable(method = "interact", at = @At("HEAD"), argsOnly = true)
+    private BlockHitResult printer_addon$visibleFace(BlockHitResult hit) {
+        try {
+            if (Configs.enabled() && no.sindrens.printeraddon.build.AutoBuild.INSTANCE.isRunning()
+                    && Configs.Speed.CLICK_SEEN_FACE.getBooleanValue()) {
+                return no.sindrens.printeraddon.build.Clicks.visibleFace(Minecraft.getInstance(), hit);
+            }
+        } catch (RuntimeException | LinkageError e) {
+            no.sindrens.printeraddon.PrinterAddon.LOGGER.warn("visibleFace: {}", e.toString());
+        }
+        return hit;
+    }
+
     @Inject(method = "interact", at = @At("HEAD"), cancellable = true)
     private void printer_addon$beforeClick(Minecraft client, LocalPlayer player, InteractionHand hand, BlockHitResult hit, CallbackInfo ci) {
         // An error in the add-on's part stops auto build and goes into the build log; the click and the game go on

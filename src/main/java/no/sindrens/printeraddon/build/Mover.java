@@ -1297,7 +1297,7 @@ public class Mover {
             if (raw > nearest + 1) {
                 break;
             }
-            double distance = raw + (overWall(player, part) ? OVER_WALL : 0);
+            double distance = raw + wallCost(player, part);
             nearest = Math.min(nearest, distance);
             rated.add(new double[]{i, distance});
         }
@@ -1321,7 +1321,7 @@ public class Mover {
                 }
             }
             if (inOrder != null && inOrder != best
-                    && partDistance(at, inOrder) + (overWall(player, inOrder) ? OVER_WALL : 0) <= nearest + IN_ORDER_SLACK) {
+                    && partDistance(at, inOrder) + wallCost(player, inOrder) <= nearest + IN_ORDER_SLACK) {
                 best = inOrder;
                 pickWhy = "next-in-order";
             } else if (inOrder == best && inOrder != null) {
@@ -1455,6 +1455,36 @@ public class Mover {
     }
 
     /** Something tall stands between the player and the nearer end of this part (a wall to go up over and down). */
+    /**
+     * What getting over what stands between the player and the part's nearer end costs, in blocks of flying: up and
+     * down again (3 for each block of climb), or OVER_WALL when there's no way over. A flat 30 for any climb made the
+     * lane beside (7 away, a grown cactus or two on the way) count as 37, so the sweep took every other lane and came
+     * back for the rest: 460 blocks of flying to lanes in a layer instead of about 130.
+     */
+    /** Test runs only (PRINTER_ADDON_OLD_ROUTE): the route as before, to compare. */
+    private static final boolean OLD_ROUTE = System.getenv("PRINTER_ADDON_OLD_ROUTE") != null;
+
+    private double wallCost(LocalPlayer player, LanePart part) {
+        Vec3 at = player.position();
+        int line = lineOf(part.c());
+        Vec3 a = laneHover(lanePos(line, part.lo() - 1, part.y()));
+        Vec3 b = laneHover(lanePos(line, part.hi() + 1, part.y()));
+        Vec3 end = at.distanceToSqr(a) <= at.distanceToSqr(b) ? a : b;
+        Vec3 from = new Vec3(at.x, end.y, at.z);
+        if (FlyPath.clearAsFarAsKnown(player.level(), from, end)) {
+            return 0;
+        }
+        List<Vec3> over = FlyPath.lineWay(player.level(), from, end, (int) Math.floor(end.y + 0.01), true);
+        if (over == null) {
+            return OVER_WALL;
+        }
+        double climb = over.stream().mapToDouble(p -> p.y).max().orElse(end.y) - end.y;
+        if (OLD_ROUTE) {
+            return climb >= LANE_TALL ? OVER_WALL : 0;
+        }
+        return Math.max(0, climb) * 3;
+    }
+
     private boolean overWall(LocalPlayer player, LanePart part) {
         Vec3 at = player.position();
         int line = lineOf(part.c());
@@ -2023,6 +2053,11 @@ public class Mover {
                 return false;
             }
             BlockCheck.Result result = BlockCheck.check(mc.level, schematic, p);
+            // A wrong block the breaker leaves until there's footing (see BlockBreaker.waitsForFooting): nothing to
+            // do with it now. The lanes stood 3 s at each (31 stalls in a test with grown cactus in the string spots)
+            if (result.needsBreaking() && AutoBuild.INSTANCE.breaker.leftForFooting(p)) {
+                return false;
+            }
             if (result.needsBreaking() || result == BlockCheck.Result.PROTECTED
                     || result == BlockCheck.Result.EXTRA && BlockBreaker.breakAnyway(mc.level, schematic, p)) {
                 return true;
