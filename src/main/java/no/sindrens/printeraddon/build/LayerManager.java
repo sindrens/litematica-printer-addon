@@ -653,7 +653,10 @@ public class LayerManager {
         }
         updateShoppingList(mc, findings.needs);
         layerNeeds = findings.needs;
-        boolean air = findings.floating > 0 && findings.notAirSafe == 0 && AutoBuild.INSTANCE.airPlace.allowed();
+        // Also a layer that floats as a whole (a floor with air under it, none of it in yet): nothing of it can be
+        // placed against anything, so it's air placed until some of it is in (then the rest goes against that)
+        boolean air = (findings.floating > 0 || findings.missing > 0 && findings.supported == 0) && findings.notAirSafe == 0
+                && AutoBuild.INSTANCE.airPlace.allowed();
         if (air != airLayer()) {
             BuildLog.line("AIRPLACE", air ? describeLayers() + ": " + findings.floating + " blocks float (nothing beside or under"
                     + " them to place them against): the printer places in the air until they're in"
@@ -1605,6 +1608,8 @@ public class LayerManager {
         int water;
         /** Missing blocks with nothing beside or under them to place them against, now or later (see AirPlace). */
         int floating;
+        int missing;
+        int supported;
         /** Missing blocks that could come out wrong placed in the air (they face a way, see AirPlace#airSafe). */
         int notAirSafe;
     }
@@ -1680,6 +1685,12 @@ public class LayerManager {
                             }
                             if (AirPlace.floatsForGood(level, schematic, pos)) {
                                 findings.floating++;
+                            }
+                            if (result == BlockCheck.Result.MISSING) {
+                                findings.missing++;
+                                if (AirPlace.hasSupport(level, pos)) {
+                                    findings.supported++;
+                                }
                             }
                             if (!AirPlace.airSafe(target)) {
                                 findings.notAirSafe++;

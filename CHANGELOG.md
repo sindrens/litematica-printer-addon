@@ -238,3 +238,8 @@
 
 ## 26.2-0.17.22
 - A floor that floats as a whole (a farm floor with air under it) no longer gets stuck with "the printer can't place them from where it can stand": one block is air placed and the rest go against it.
+
+## 26.2-0.17.23
+- A floor that floats as a whole is really placed now (tested): the blocks with nothing to go against are placed in the air, the rest against them. A floating patch beside a supported part works too.
+- New setting "Break blocks not in the schematic" (Breaking, off by default): blocks where the schematic has air, and blocks of yours where it wants something else (dirt or farmland where the floor goes), are broken and the right block goes in. Containers and unbreakable blocks are never broken.
+- The debug says when the printer places in the air.

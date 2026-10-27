@@ -69,6 +69,9 @@ public final class Diagnose {
                     break;
                 }
             }
+            if (PrinterBridge.isAirPlace()) {
+                sb.append(" (in the air on)");
+            }
         }
         return sb.toString();
     }

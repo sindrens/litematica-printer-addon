@@ -457,6 +457,9 @@ public class BlockBreaker {
      */
     public static boolean breakAnyway(net.minecraft.world.level.Level level, WorldSchematic schematic, BlockPos pos) {
         BlockState state = level.getBlockState(pos);
+        if (notInSchematic(level, schematic, pos, state)) {
+            return DataManager.getRenderLayerRange().isPositionWithinRange(pos) && SchematicHelper.isInAnyArea(SchematicHelper.areas(), pos);
+        }
         if (!alwaysBreak(state)) {
             return false;
         }
@@ -485,6 +488,21 @@ public class BlockBreaker {
         return false;
     }
 
+    /**
+     * "Break blocks not in the schematic" is on and this is one: a block where the schematic has air (not a liquid, not
+     * a container, not unbreakable).
+     */
+    public static boolean notInSchematic(net.minecraft.world.level.Level level, WorldSchematic schematic, BlockPos pos, BlockState state) {
+        if (!Configs.Breaking.BREAK_NOT_IN_SCHEMATIC.getBooleanValue() || state.isAir() || !state.getFluidState().isEmpty() && state.canBeReplaced()
+                || !schematic.getBlockState(pos).isAir()) {
+            return false;
+        }
+        if (state.getDestroySpeed(level, pos) < 0 || level.getBlockEntity(pos) instanceof net.minecraft.world.Container) {
+            return false;
+        }
+        return BlockCheck.check(level, schematic, pos) == BlockCheck.Result.EXTRA;
+    }
+
     private static boolean canPlaceNow(net.minecraft.client.Minecraft mc, BlockState wanted) {
         net.minecraft.world.item.Item item = wanted.getBlock().asItem();
         return item != net.minecraft.world.item.Items.AIR && (mc.player.getAbilities().instabuild || mc.player.getInventory().countItem(item) > 0);
@@ -493,7 +511,8 @@ public class BlockBreaker {
     private static boolean shouldBreak(BlockCheck.Result result, Mode mode, BlockPos pos) {
         net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
         WorldSchematic schematic = SchematicHelper.world();
-        if (mode == Mode.WRONG && mc.level != null && schematic != null && alwaysBreak(mc.level.getBlockState(pos))) {
+        if (mode == Mode.WRONG && mc.level != null && schematic != null && (alwaysBreak(mc.level.getBlockState(pos))
+                || notInSchematic(mc.level, schematic, pos, mc.level.getBlockState(pos)))) {
             return breakAnyway(mc.level, schematic, pos);
         }
         return switch (mode) {

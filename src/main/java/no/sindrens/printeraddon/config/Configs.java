@@ -118,6 +118,12 @@ public class Configs implements IConfigHandler {
         public static final ConfigBoolean BREAK_WRONG_BLOCKS = new ConfigBoolean("breakWrongBlocks", true,
                 "While auto build is on, break blocks that don't match the schematic so the printer can place the right one.",
                 "Break wrong blocks");
+        public static final ConfigBoolean BREAK_NOT_IN_SCHEMATIC = new ConfigBoolean("breakBlocksNotInSchematic", false,
+                "Also break blocks that aren't part of the schematic, inside its area and the layers being built: blocks where\n"
+                        + "the schematic has air (terrain, leftovers, a stray block), and blocks of yours where the schematic wants\n"
+                        + "something else (dirt or farmland where the floor goes): broken, and the right block goes in.\n"
+                        + "Containers and unbreakable blocks are never broken. Off: those are left alone (and listed as conflicts).",
+                "Break blocks not in the schematic");
         public static final ConfigBoolean BREAK_WRONG_STATE = new ConfigBoolean("breakWrongState", true,
                 "Also break the right block when it faces the wrong way or has the wrong half/type (stairs, observers, logs, slabs).\n"
                         + "Things the printer can fix by clicking (repeater delay, comparator mode, doors, levers) are left to the printer.",
@@ -166,7 +172,7 @@ public class Configs implements IConfigHandler {
                 "Stand while breaking");
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                BREAK_WRONG_BLOCKS, BREAK_WRONG_STATE, BREAK_RANGE, MIN_TOOL_DURABILITY, BREAK_TIMEOUT_SECONDS,
+                BREAK_WRONG_BLOCKS, BREAK_NOT_IN_SCHEMATIC, BREAK_WRONG_STATE, BREAK_RANGE, MIN_TOOL_DURABILITY, BREAK_TIMEOUT_SECONDS,
                 WRONG_FOR_TICKS, MAX_BREAKS_PER_BLOCK, LOOK_AT_BLOCKS, ALWAYS_BREAK, SKIP_CONTAINERS, STAND_TO_BREAK, PICK_UP_ITEMS,
                 AUTO_BREAK_SKIP);
     }

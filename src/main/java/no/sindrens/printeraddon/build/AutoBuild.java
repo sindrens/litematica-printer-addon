@@ -789,7 +789,12 @@ public class AutoBuild {
         if (mc.level == null || schematic == null) {
             return true;
         }
-        return AirPlace.needsAirPlace(mc.level, schematic, pos, schematic.getBlockState(pos));
+        net.minecraft.world.level.block.state.BlockState target = schematic.getBlockState(pos);
+        // Also one with nothing to be placed against right now (a floor that floats as a whole, none of it in yet):
+        // there's no other way to place it. Not sand and the like (it would fall)
+        return AirPlace.needsAirPlace(mc.level, schematic, pos, target)
+                || !(target.getBlock() instanceof net.minecraft.world.level.block.FallingBlock) && AirPlace.airSafe(target)
+                && !AirPlace.hasSupport(mc.level, pos);
     }
 
     /** An item with no stack on the hotbar for this long is taken from the inventory by the printer itself. */
@@ -1110,6 +1115,10 @@ public class AutoBuild {
     public boolean isConflict(net.minecraft.core.BlockPos pos, BlockCheck.Result result,
                               net.minecraft.world.level.block.state.BlockState current) {
         if (!running || result != BlockCheck.Result.WRONG_BLOCK) {
+            return false;
+        }
+        // "Break blocks not in the schematic" on: the player's own blocks in the way are broken like wrong ones
+        if (no.sindrens.printeraddon.config.Configs.Breaking.BREAK_NOT_IN_SCHEMATIC.getBooleanValue()) {
             return false;
         }
         if (schematicBlocks.isEmpty()) {

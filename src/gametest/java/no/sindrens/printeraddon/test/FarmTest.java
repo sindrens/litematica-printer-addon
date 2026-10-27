@@ -211,9 +211,20 @@ public class FarmTest implements FabricClientGameTest {
                 }
                 System.out.println("FARM TEST: cactus flowers and blocks the build doesn't use in the inventory");
             }
+            // PRINTER_ADDON_EXTRA=1: blocks that aren't the schematic's in its area (stone where it has air, dirt and
+            // farmland where its floor goes), with "Break blocks not in the schematic" on: all broken, the floor put in
+            boolean extra = System.getenv("PRINTER_ADDON_EXTRA") != null;
+            if (extra) {
+                for (String command : List.of("setblock 5 -60 5 stone", "setblock 9 -60 12 cobblestone", "setblock 7 -58 7 stone",
+                        "setblock 14 -58 3 oak_planks", "setblock 12 -59 4 dirt", "setblock 4 -59 13 farmland")) {
+                    server.runCommand(command);
+                }
+                System.out.println("FARM TEST: 6 blocks that aren't the schematic's put in its area");
+            }
             context.waitTicks(20);
 
             context.runOnClient(mc -> {
+                Configs.Breaking.BREAK_NOT_IN_SCHEMATIC.setBooleanValue(extra);
                 Configs.Generic.SPEED_PRESET.setOptionListValue(SpeedPreset.FAST);
                 Configs.Movement.MOVE_MODE.setOptionListValue(no.sindrens.printeraddon.config.MoveMode.FLY);
                 Configs.Generic.DEBUG_LOG.setBooleanValue(true);

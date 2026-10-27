@@ -294,7 +294,7 @@ public class AirPlace {
                 || block instanceof net.minecraft.world.level.block.SugarCaneBlock;
     }
 
-    private static boolean hasSupport(Level level, BlockPos pos) {
+    static boolean hasSupport(Level level, BlockPos pos) {
         for (Direction direction : Direction.values()) {
             BlockState neighbor = level.getBlockState(pos.relative(direction));
             if (!neighbor.isAir() && !neighbor.canBeReplaced() && neighbor.getFluidState().isEmpty()) {
