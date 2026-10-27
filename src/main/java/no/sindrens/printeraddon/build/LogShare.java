@@ -320,10 +320,13 @@ public final class LogShare {
      * most every 10 minutes); else the player is asked, when {@code ask} (not after a disconnect, the game closing, a
      * start with nothing to build, or a stop from Discord), see StopPrompt.
      */
+    /** The developer's game tests: nothing of theirs goes to the players' report channel. */
+    private static final boolean TEST_RUN = net.fabricmc.loader.api.FabricLoader.getInstance().isModLoaded("printer_addon_test");
+
     public static void afterRun(Minecraft mc, String why, boolean ask) {
         try {
-            if (channel().isEmpty()) {
-                // nowhere to send it
+            if (channel().isEmpty() || net.fabricmc.loader.api.FabricLoader.getInstance().isModLoaded("printer_addon_test")) {
+                // nowhere to send it, or a test run (the developer's tests went to the players' report channel)
             } else if (Configs.Generic.SHARE_LOGS.getBooleanValue()) {
                 long now = System.currentTimeMillis();
                 if (!"could-not-start".equals(why) || now - lastNotStarted >= NOT_STARTED_EVERY_MS) {
@@ -360,6 +363,9 @@ public final class LogShare {
      * and the log of a run that never ended); once in a world, the player is told that logs go by themselves.
      */
     public static void tick(Minecraft mc) {
+        if (TEST_RUN) {
+            return;
+        }
         if (!loaded) {
             loaded = true;
             try {
