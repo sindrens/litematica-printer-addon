@@ -225,7 +225,7 @@ public class FarmTest implements FabricClientGameTest {
 
             context.runOnClient(mc -> {
                 Configs.Breaking.BREAK_NOT_IN_SCHEMATIC.setBooleanValue(extra);
-                Configs.Generic.SPEED_PRESET.setOptionListValue(SpeedPreset.FAST);
+                Configs.Generic.SPEED_PRESET.setOptionListValue(SpeedPreset.NORMAL);
                 Configs.Movement.MOVE_MODE.setOptionListValue(no.sindrens.printeraddon.config.MoveMode.FLY);
                 Configs.Generic.DEBUG_LOG.setBooleanValue(true);
                 Configs.Generic.DETAILED_CHAT.setBooleanValue(true);

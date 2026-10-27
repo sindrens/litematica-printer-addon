@@ -83,9 +83,13 @@ public class AutoBuild {
         }
     }
 
+    /** When the printer last clicked (see pauseReasonNow: placements spaced as in vanilla). */
+    private long lastPrinterClickTick = -1000;
+
     /** The printer is about to click this spot with this item (null: none in particular). */
     public void printerTried(net.minecraft.core.BlockPos pos, @javax.annotation.Nullable net.minecraft.world.item.Item item) {
         Minecraft mc = Minecraft.getInstance();
+        lastPrinterClickTick = clientTicks;
         lastTriedItem = item;
         if (mc.level != null) {
             ServerAcks.tried(pos);
@@ -558,6 +562,11 @@ public class AutoBuild {
             }
             // Optional cap for strict anticheats: no more than this many placements per second; and the speed
             // guard's limit while the server catches up
+            // Never two placements closer than a vanilla player gets them (holding right-click: one every 4 ticks)
+            int spacing = Math.max(no.sindrens.printeraddon.Edition.OFFICIAL ? 4 : 0, Configs.Speed.MIN_TICKS_BETWEEN_PLACEMENTS.getIntegerValue());
+            if (spacing > 0 && clientTicks - lastPrinterClickTick < spacing) {
+                return "placement spacing";
+            }
             int cap = Configs.Speed.MAX_PLACEMENTS_PER_SECOND.getIntegerValue();
             int guard = ServerWatch.cap();
             if (guard > 0 && (cap <= 0 || guard < cap)) {

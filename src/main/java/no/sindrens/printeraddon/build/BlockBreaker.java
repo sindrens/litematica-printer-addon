@@ -407,7 +407,8 @@ public class BlockBreaker {
             }
             target = null;
             brokenCount++;
-            cooldown = Configs.Speed.breakCooldownTicks();
+            // The vanilla wait between two mined blocks (5 ticks), never less
+            cooldown = Math.max(no.sindrens.printeraddon.Edition.OFFICIAL ? 5 : 0, Configs.Speed.breakCooldownTicks());
             flyAgain(player);
             return;
         }

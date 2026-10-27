@@ -250,3 +250,8 @@
 ## 26.2-0.17.25
 - Keys: J+G starts / stops auto build, J+Z pauses it and goes on again (it keeps its place and spending limit). Change them in the settings (Hotkeys).
 - Changing a setting while auto build runs (auto eat...) no longer stops the build.
+
+## 26.2-0.17.26
+- This is the Mythian build (the jar ends in +mythian): every speed setting is yours to choose. A separate official build with vanilla limits is coming for Modrinth.
+- Changing one of the custom speeds switches the speed preset to Custom by itself (before, it did nothing while another preset was picked), and picking Custom starts from the preset you had.
+- New speed settings: ticks between placements, and a placements-per-second cap (both off by default here).

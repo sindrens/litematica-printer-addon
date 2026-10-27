@@ -428,7 +428,13 @@ public class Configs implements IConfigHandler {
                         + "for it, then goes on at at most 8 blocks a second, more again step by step after 30 s each. Answers\n"
                         + "slow on average set a limit too. Every 10 s the build log gets a SERVER line with what it saw.",
                 "Speed guard");
-        public static final ConfigInteger MAX_PLACEMENTS_PER_SECOND = new ConfigInteger("maxPlacementsPerSecond", 0, 0, 40,
+        public static final ConfigInteger MIN_TICKS_BETWEEN_PLACEMENTS = new ConfigInteger("minTicksBetweenPlacements",
+                no.sindrens.printeraddon.Edition.OFFICIAL ? 4 : 0, no.sindrens.printeraddon.Edition.OFFICIAL ? 4 : 0, 20,
+                "Ticks between two blocks placed (0: no wait, the printer's interval decides). In the official build at least 4,\n"
+                        + "as holding right-click in vanilla: 5 blocks a second at most.",
+                "Ticks between placements");
+        public static final ConfigInteger MAX_PLACEMENTS_PER_SECOND = new ConfigInteger("maxPlacementsPerSecond", 0, 0,
+                no.sindrens.printeraddon.Edition.OFFICIAL ? 5 : 40,
                 "For servers with a strict anticheat: the printer places at most this many blocks per second. 0 = no limit\n"
                         + "(the printer's interval decides).",
                 "Max placements per second");
@@ -452,25 +458,64 @@ public class Configs implements IConfigHandler {
         public static final ConfigInteger PRINTER_INTERVAL = new ConfigInteger("customPrinterInterval", 12, 2, 40,
                 "Custom preset: the printer's printing interval (lower is faster). Below 12 the printer often places blocks wrong.",
                 "Custom: printer interval");
-        public static final ConfigInteger BREAK_COOLDOWN = new ConfigInteger("customBreakCooldownTicks", 2, 0, 100,
+        public static final ConfigInteger BREAK_COOLDOWN = new ConfigInteger("customBreakCooldownTicks",
+                no.sindrens.printeraddon.Edition.OFFICIAL ? 5 : 2, no.sindrens.printeraddon.Edition.OFFICIAL ? 5 : 0, 100,
                 "Custom preset: ticks to wait after breaking a block before the next one.",
                 "Custom: break cooldown (ticks)");
         public static final ConfigInteger SHOP_CLICK_DELAY = new ConfigInteger("customShopClickDelayTicks", 6, 1, 100,
                 "Custom preset: ticks to wait between clicks in the shop menu.",
                 "Custom: shop click delay (ticks)");
-        public static final ConfigDouble WALK_SPEED = new ConfigDouble("customWalkSpeed", 0.21, 0.05, 0.4,
+        public static final ConfigDouble WALK_SPEED = new ConfigDouble("customWalkSpeed", 0.21, 0.05,
+                no.sindrens.printeraddon.Edition.OFFICIAL ? 0.21 : 0.4,
                 "Custom preset: walking speed in blocks per tick (vanilla walking is about 0.21).",
                 "Custom: walk speed");
-        public static final ConfigDouble FLY_SPEED = new ConfigDouble("customFlySpeed", 0.55, 0.1, 2.0,
+        public static final ConfigDouble FLY_SPEED = new ConfigDouble("customFlySpeed", 0.55, 0.1,
+                no.sindrens.printeraddon.Edition.OFFICIAL ? 0.55 : 2.0,
                 "Custom preset: flying speed in blocks per tick (vanilla flying is about 0.55).",
                 "Custom: fly speed");
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                AUTO_SPEED, AUTO_SPEED_MIN_INTERVAL, SPEED_GUARD, AUTO_SPEED_STEP_BLOCKS, MAX_PLACEMENTS_PER_SECOND, WAIT_AFTER_SWITCH, CLICK_SEEN_FACE, LAG_PAUSE_TPS, PRINTER_INTERVAL, BREAK_COOLDOWN, SHOP_CLICK_DELAY, WALK_SPEED, FLY_SPEED);
+                AUTO_SPEED, AUTO_SPEED_MIN_INTERVAL, SPEED_GUARD, AUTO_SPEED_STEP_BLOCKS, MIN_TICKS_BETWEEN_PLACEMENTS, MAX_PLACEMENTS_PER_SECOND, WAIT_AFTER_SWITCH, CLICK_SEEN_FACE, LAG_PAUSE_TPS, PRINTER_INTERVAL, BREAK_COOLDOWN, SHOP_CLICK_DELAY, WALK_SPEED, FLY_SPEED);
 
         public static double walkSpeed() {
             SpeedPreset preset = preset();
             return preset == SpeedPreset.CUSTOM ? WALK_SPEED.getDoubleValue() : preset.walkSpeed;
+        }
+
+        private static SpeedPreset lastPreset;
+        private static boolean copying;
+
+        /** See AddonInit: custom speed values and the preset kept in step. */
+        public static void linkCustomToPreset() {
+            lastPreset = preset();
+            for (fi.dy.masa.malilib.config.IConfigBase custom : new fi.dy.masa.malilib.config.IConfigBase[]{
+                    PRINTER_INTERVAL, BREAK_COOLDOWN, SHOP_CLICK_DELAY, WALK_SPEED, FLY_SPEED}) {
+                if (custom instanceof fi.dy.masa.malilib.config.options.ConfigBase<?> base) {
+                    base.setValueChangeCallback(c -> {
+                        if (!copying && !Configs.loading && preset() != SpeedPreset.CUSTOM) {
+                            Generic.SPEED_PRESET.setOptionListValue(SpeedPreset.CUSTOM);
+                            lastPreset = SpeedPreset.CUSTOM;
+                            no.sindrens.printeraddon.util.Chat.info("Speed preset set to Custom (you changed one of its speeds).");
+                        }
+                    });
+                }
+            }
+            Generic.SPEED_PRESET.setValueChangeCallback(c -> {
+                SpeedPreset now = preset();
+                if (now == SpeedPreset.CUSTOM && lastPreset != null && lastPreset != SpeedPreset.CUSTOM && !Configs.loading) {
+                    copying = true;
+                    try {
+                        PRINTER_INTERVAL.setIntegerValue(lastPreset.printerInterval);
+                        BREAK_COOLDOWN.setIntegerValue(lastPreset.breakCooldownTicks);
+                        SHOP_CLICK_DELAY.setIntegerValue(lastPreset.shopClickDelayTicks);
+                        WALK_SPEED.setDoubleValue(lastPreset.walkSpeed);
+                        FLY_SPEED.setDoubleValue(lastPreset.flySpeed);
+                    } finally {
+                        copying = false;
+                    }
+                }
+                lastPreset = now;
+            });
         }
 
         public static double flySpeed() {
@@ -500,11 +545,25 @@ public class Configs implements IConfigHandler {
 
     /** The settings were read once since the game started (see loadFromFile). */
     private static boolean loadedOnce;
+    /** The settings are being read from the file (value-change callbacks do nothing meanwhile). */
+    public static boolean loading;
 
     public static void loadFromFile() {
         // Read again later (the settings screen saves and reads them back when a setting is changed): a build that's
         // running goes on. Changing "auto eat" stopped a build: the file has auto build off, as it's saved off
         boolean buildOn = Generic.AUTO_BUILD.getBooleanValue();
+        loading = true;
+        try {
+            readFile();
+        } finally {
+            loading = false;
+        }
+        // Never start building on its own after a restart; a reload while it builds keeps it building
+        Generic.AUTO_BUILD.setBooleanValue(loadedOnce && buildOn);
+        loadedOnce = true;
+    }
+
+    private static void readFile() {
         Path configFile = FileUtils.getConfigDirectory().resolve(CONFIG_FILE_NAME);
 
         if (Files.exists(configFile) && Files.isReadable(configFile)) {
@@ -561,9 +620,6 @@ public class Configs implements IConfigHandler {
             }
         }
 
-        // Never start building on its own after a restart; a reload while it builds keeps it building
-        Generic.AUTO_BUILD.setBooleanValue(loadedOnce && buildOn);
-        loadedOnce = true;
     }
 
     public static void saveToFile() {

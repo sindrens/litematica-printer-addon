@@ -48,14 +48,18 @@ fabricApi {
 
 base {
     archivesName = "${project.mod_id}-${project.minecraft_version}"
-    version = project.mod_version
+    // Two editions from one source: "mythian" (default, for the Mythian server: every speed setting open) and
+    // "official" (Modrinth: vanilla limits enforced). ./gradlew build -Pedition=official
+    version = project.mod_version + (project.findProperty('edition') == 'official' ? '' : '+mythian')
     group = project.maven_group
 }
 
 processResources {
+    def edition = project.findProperty('edition') ?: 'mythian'
     inputs.property 'mod_version', project.mod_version
+    inputs.property 'edition', edition
     filesMatching('fabric.mod.json') {
-        expand 'mod_version': project.mod_version
+        expand 'mod_version': project.mod_version + (edition == 'official' ? '' : '+mythian'), 'edition': edition
     }
 }
 

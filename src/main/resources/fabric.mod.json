@@ -11,6 +11,9 @@
     "sources": "https://github.com/sindrens/litematica-printer-addon"
   },
   "license": "AGPL-3.0-only",
+  "custom": {
+    "printer_addon:edition": "${edition}"
+  },
   "icon": "assets/printer_addon/icon.png",
   "environment": "client",
   "entrypoints": {

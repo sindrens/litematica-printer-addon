@@ -39,6 +39,10 @@ public class AddonInit implements IInitializationHandler {
             }
         });
 
+        // Speed settings: changing one of the custom speeds switches the preset to Custom (else it did nothing while a
+        // preset was picked); picking Custom starts from the preset that was picked before
+        no.sindrens.printeraddon.config.Configs.Speed.linkCustomToPreset();
+
         // Closing the game during a run ends it there, so its log is whole (sent on the next start, see LogShare)
         net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents.CLIENT_STOPPING.register(mc -> {
             try {
