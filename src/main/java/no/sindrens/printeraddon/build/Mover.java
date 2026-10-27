@@ -1036,7 +1036,8 @@ public class Mover {
             // The new layer's blocks at once: the work is still the last layer's until the next scan
             ticksUntilScan = 0;
         }
-        if (sweepDone || !Configs.Movement.LANES.getBooleanValue() || !layers.isActive() || layers.isFinishingDeferred()) {
+        if (sweepDone || !Configs.Movement.LANES.getBooleanValue() || !layers.isActive() || layers.isFinishingDeferred()
+                || AutoBuild.INSTANCE.isCapping()) {
             return false;
         }
         if (!sweepPlanned) {
@@ -3649,7 +3650,8 @@ public class Mover {
                         boolean protectedHere = result == BlockCheck.Result.PROTECTED
                                 && !AutoBuild.INSTANCE.placedDuringBuild(immutable);
                         // Left out of this layer (no spot in reach of it can be got to): listed at the end
-                        if (protectedHere || skipped.containsKey(immutable) || AutoBuild.INSTANCE.couldNotPlace.contains(immutable)) {
+                        if (protectedHere || skipped.containsKey(immutable) || AutoBuild.INSTANCE.couldNotPlace.contains(immutable)
+                                || AutoBuild.INSTANCE.capOnly(immutable)) {
                             continue;
                         }
                         if (result == BlockCheck.Result.MISSING && !creative && !hasItemFor(player, target)) {

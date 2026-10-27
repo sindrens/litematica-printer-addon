@@ -134,6 +134,33 @@ public final class AreaBreaker {
         return running;
     }
 
+    /** Done so far of the area, in percent (for Discord's status), or -1. */
+    public double progressPercent() {
+        if (!running || total <= 0) {
+            return -1;
+        }
+        int broken = AutoBuild.INSTANCE.breaker.getBrokenCount() - brokenAtStart;
+        return Math.min(100, broken * 100.0 / total);
+    }
+
+    /** Seconds left at the speed so far, or -1 this early (under a minute, under 50 broken). */
+    public long etaSeconds() {
+        if (!running || total <= 0) {
+            return -1;
+        }
+        int broken = AutoBuild.INSTANCE.breaker.getBrokenCount() - brokenAtStart;
+        long ticks = AutoBuild.clientTicks - startedAt;
+        if (broken < 50 || ticks < 20 * 60) {
+            return -1;
+        }
+        return Math.max(0, Math.round((total - broken) * (ticks / 20.0) / broken));
+    }
+
+    /** "Y 132 to 130, lane 3 of 8": where it is, for Discord's status. */
+    public String where() {
+        return running ? "Y " + layer + " to " + bandBottom() + ", lane " + (currentLane + 1) + " of " + laneCount : "";
+    }
+
     /** On the way to a block to break (for the run log's time split). */
     public boolean hasGoal() {
         return running && goal != null;
@@ -638,8 +665,11 @@ public final class AreaBreaker {
             }
             int layerBroken = breaker.getBrokenCount() - layerBrokenAtStart;
             if (layerBroken > 0) {
-                BuildLog.line("AREA", String.format(Locale.ROOT, "Y %d to %d done: %d broken in %.1fs%s", layer, bandBottom(), layerBroken,
-                        (AutoBuild.clientTicks - layerStartedAt) / 20.0, bandGivenUp == layer ? " (the rest left out: back for it at the end)" : ""));
+                long eta = etaSeconds();
+                String left = eta < 0 ? "" : String.format(Locale.ROOT, "; about %s left", eta >= 3600 ? eta / 3600 + " h " + eta % 3600 / 60 + " min" : Math.max(1, eta / 60) + " min");
+                BuildLog.line("AREA", String.format(Locale.ROOT, "Y %d to %d done: %d broken in %.1fs%s%s", layer, bandBottom(), layerBroken,
+                        (AutoBuild.clientTicks - layerStartedAt) / 20.0, bandGivenUp == layer ? " (the rest left out: back for it at the end)" : "", left));
+                Chat.quiet(String.format(Locale.ROOT, "Auto break: Y %d to %d done (%d broken)%s.", layer, bandBottom(), layerBroken, left));
             }
             bandGivenUp = Integer.MIN_VALUE;
             // The next band starts at the next level with something on it: a cactus farm has string every other

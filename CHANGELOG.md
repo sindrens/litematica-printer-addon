@@ -215,3 +215,13 @@
 ## 26.2-0.17.18
 - A few blocks at the far end of the build (left from before a restart) are placed with the spots after the lanes, on their planned route, not flown to as a lane of their own (a layer ended with a 139 block flight for 3 blocks).
 - After each layer: how long the rest of the build takes at this run's speed, in chat and in the build log ("About 6 h 10 min left").
+
+## 26.2-0.17.19
+- Stopping covers the cactus first: the sand beside cactus left open on top goes in (90 s at most), so nothing grows while it's stopped. Stop again to stop at once. Setting "Cover cactus before stopping" (on).
+- Schedule: stop at a time of day ("Stop at", like 07:00) and never spend below an amount ("Keep at least this much money", read from the sidebar balance). In the settings, or from Discord: /schedule or the ⏰ button in your control room.
+- A layer that costs much more than the ones before it: a warning in chat and Discord (a shop price went up?). Every layer's cost is in the build log (LAYER-COST).
+- The Discord control room shows more: blocks a minute, money an hour, the layer it's on, the build type and the schedule. Auto break shows its progress and time left there too.
+- No presets to choose: the build is looked at once it's counted (cactus farm, crop farm, redstone, sand/gravel, water...) and what matters for it is switched on by itself; it's said in chat and the log (PROFILE).
+- Auto break: time left after each band, in chat and the log.
+- When something stops the build, the message says what to do about it (in chat and Discord).
+- Works with AutoSell 1.1: collectors that are well filled are sold right after a supply trip, on the same stop.

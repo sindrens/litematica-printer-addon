@@ -296,7 +296,15 @@ public final class DiscordLink {
             s.addProperty("detail", "not in a world");
         } else if (AreaBreaker.INSTANCE.isRunning()) {
             state = "breaking";
-            s.addProperty("detail", "auto break");
+            s.addProperty("detail", "auto break: " + AreaBreaker.INSTANCE.where());
+            double done = AreaBreaker.INSTANCE.progressPercent();
+            if (done >= 0) {
+                s.addProperty("progress", Math.round(done * 10) / 10.0);
+            }
+            long eta = AreaBreaker.INSTANCE.etaSeconds();
+            if (eta >= 0) {
+                s.addProperty("eta_s", eta);
+            }
         } else if (build.isRunning()) {
             state = "building";
             s.addProperty("detail", build.doing());
@@ -315,6 +323,20 @@ public final class DiscordLink {
             }
             s.addProperty("blocks_placed", build.stats.totalPlaced());
             s.addProperty("money_spent", Math.round(build.spentTotal()));
+            s.addProperty("layer_text", build.layers.describeLayers());
+            if (!no.sindrens.printeraddon.build.BuildProfile.last().isEmpty()) {
+                s.addProperty("kind", no.sindrens.printeraddon.build.BuildProfile.last());
+            }
+            if (perMinute > 0) {
+                s.addProperty("per_min", Math.round(perMinute));
+            }
+            long millis = build.stats.runMillis();
+            if (millis > 5 * 60_000 && build.spentTotal() > 0) {
+                s.addProperty("spent_per_hour", Math.round(build.spentTotal() * 3_600_000.0 / millis));
+            }
+            if (build.isCapping()) {
+                s.addProperty("detail", "covering open cactus, then stopping");
+            }
         } else if (build.isRemotelyPaused()) {
             state = "paused";
             s.addProperty("detail", build.pausedText());
@@ -323,6 +345,10 @@ public final class DiscordLink {
             state = "idle";
         }
         s.addProperty("state", state);
+        String schedule = no.sindrens.printeraddon.build.Schedule.describe();
+        if (!schedule.isEmpty()) {
+            s.addProperty("schedule", schedule);
+        }
         s.addProperty("version", version());
         if (mc.getCurrentServer() != null) {
             s.addProperty("server", mc.getCurrentServer().ip);
@@ -397,7 +423,15 @@ public final class DiscordLink {
                     Chat.info("Stopped from Discord.");
                 }
             }
-            default -> PrinterAddon.LOGGER.info("Unknown Discord command {}", action);
+            default -> {
+                if (action.startsWith("schedule:")) {
+                    String now = no.sindrens.printeraddon.build.Schedule.apply(action.substring(9));
+                    Chat.info("Schedule from Discord: " + now + ".");
+                    event("custom", "Schedule set: " + now + ".");
+                } else {
+                    PrinterAddon.LOGGER.info("Unknown Discord command {}", action);
+                }
+            }
         }
         ticks = STATUS_EVERY_TICKS - 10; // new status soon
     }
@@ -503,7 +537,8 @@ public final class DiscordLink {
         run.addProperty("money", Math.round(spent));
         JsonObject o = new JsonObject();
         o.addProperty("type", "run_end");
-        o.addProperty("message", result.equals("problem") || lower.contains("discord") ? clean(why) : "");
+        o.addProperty("message", result.equals("problem") ? clean(no.sindrens.printeraddon.build.Advice.withAdvice(why))
+                : lower.contains("discord") ? clean(why) : "");
         o.add("run", run);
         sendEvent(o);
         ticks = STATUS_EVERY_TICKS - 10;

@@ -255,6 +255,11 @@ public class BuildStats {
         return String.format(java.util.Locale.ROOT, "About %s left (%,d blocks at this run's %.0f a minute)", time, blocksLeft, perMinute);
     }
 
+    /** Real time since the build started, in milliseconds (for money per hour). */
+    public long runMillis() {
+        return System.currentTimeMillis() - buildStartMillis;
+    }
+
     public int totalPlaced() {
         return totalPlaced;
     }

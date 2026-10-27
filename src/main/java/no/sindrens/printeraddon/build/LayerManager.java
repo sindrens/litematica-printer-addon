@@ -349,6 +349,46 @@ public class LayerManager {
      * breaks them when they grow) not in yet. They grow while auto build is stopped and have to be broken one by one
      * later. For the warning when it stops (see AutoBuild).
      */
+    /**
+     * What closes the open cactus of the layers being built (see openCactus): the missing blocks beside each open top,
+     * and what those stand on when it's missing too (the string under the sand). For "cover cactus before stopping".
+     */
+    public java.util.Set<BlockPos> openCactusCaps(Level level) {
+        java.util.Set<BlockPos> caps = new java.util.HashSet<>();
+        WorldSchematic schematic = SchematicHelper.world();
+        if (!active || schematic == null) {
+            return caps;
+        }
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        for (SchematicHelper.Area area : SchematicHelper.areas()) {
+            for (int y = Math.max(layer, area.minY()); y <= Math.min(layerTop, area.maxY()); y++) {
+                for (int x = area.minX(); x <= area.maxX(); x++) {
+                    for (int z = area.minZ(); z <= area.maxZ(); z++) {
+                        pos.set(x, y, z);
+                        if (!level.isLoaded(pos) || !level.getBlockState(pos).is(net.minecraft.world.level.block.Blocks.CACTUS)) {
+                            continue;
+                        }
+                        BlockPos above = pos.above();
+                        if (!level.getBlockState(above).isAir() || !schematic.getBlockState(above).isAir()) {
+                            continue;
+                        }
+                        for (Direction side : Direction.Plane.HORIZONTAL) {
+                            BlockPos beside = above.relative(side);
+                            if (schematic.getBlockState(beside).isSolid() && level.getBlockState(beside).isAir()) {
+                                caps.add(beside.immutable());
+                                BlockPos under = beside.below();
+                                if (!schematic.getBlockState(under).isAir() && level.getBlockState(under).canBeReplaced()) {
+                                    caps.add(under.immutable());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return caps;
+    }
+
     public int openCactus(Level level) {
         WorldSchematic schematic = SchematicHelper.world();
         if (!active || schematic == null) {
@@ -660,6 +700,7 @@ public class LayerManager {
                 BuildLog.line("ETA", eta);
             }
             AutoBuild.INSTANCE.stats.layerDone(describeLayers());
+            AutoBuild.INSTANCE.layerCostCheck(describeLayers());
             leftAtDone(mc.level, schematic, areas);
             RunLog.layerEnd(describeLayers());
             AutoBuild.INSTANCE.speed.newLayer();

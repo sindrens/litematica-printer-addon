@@ -105,8 +105,13 @@ public class Configs implements IConfigHandler {
                 "The Printer Addon bot's address. Leave it as it is unless the developer says otherwise.",
                 "Discord bot address");
 
+        public static final ConfigString STOP_AT = new ConfigString("stopAt", "",
+                "Stop the build (and Auto break) at this time of day, like 07:00 (your computer's clock). Once, then it's\n"
+                        + "cleared. Empty: no stop time. Can be set from Discord too (/schedule).",
+                "Stop at (time of day)");
+
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                ADDON_ENABLED, AUTO_BUILD, SHOW_HUD, RESUME_AFTER_REJOIN, RECONNECT, BACK_COMMANDS, BUILD_RENDER_DISTANCE, SPEED_PRESET, APPLY_SPEED_TO_PRINTER, TURN_VIEW_FOR_PRINTER, CHAT_MESSAGES, DETAILED_CHAT, STATUS_FILE, DEBUG_LOG, TEXT_LOG, SHARE_LOGS, LOG_CHANNEL, DISCORD_SYNC, DISCORD_API);
+                ADDON_ENABLED, AUTO_BUILD, STOP_AT, SHOW_HUD, RESUME_AFTER_REJOIN, RECONNECT, BACK_COMMANDS, BUILD_RENDER_DISTANCE, SPEED_PRESET, APPLY_SPEED_TO_PRINTER, TURN_VIEW_FOR_PRINTER, CHAT_MESSAGES, DETAILED_CHAT, STATUS_FILE, DEBUG_LOG, TEXT_LOG, SHARE_LOGS, LOG_CHANNEL, DISCORD_SYNC, DISCORD_API);
     }
 
     public static class Breaking {
@@ -203,8 +208,13 @@ public class Configs implements IConfigHandler {
                         + "left. If the server doesn't keep blocks placed in the air, it stops by itself and says so.",
                 "Air place floating blocks");
 
+        public static final ConfigBoolean CAP_BEFORE_STOP = new ConfigBoolean("capBeforeStop", true,
+                "When you stop the build, the sand beside cactus left open on top goes in first (a few seconds; at most\n"
+                        + "90): open cactus grow while it's stopped and have to be broken one by one after. Stop again to stop at once.",
+                "Cover cactus before stopping");
+
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                AUTO_LAYER, LAYERS_TOGETHER, ADDON_PLACES, LAYER_CHECK_INTERVAL, STUCK_REPORT_SECONDS, SKIP_STUCK_SECONDS, EXTRA_BLOCKS_BLOCK_LAYER,
+                AUTO_LAYER, LAYERS_TOGETHER, CAP_BEFORE_STOP, ADDON_PLACES, LAYER_CHECK_INTERVAL, STUCK_REPORT_SECONDS, SKIP_STUCK_SECONDS, EXTRA_BLOCKS_BLOCK_LAYER,
                 USE_AIR_PLACE);
     }
 
@@ -358,15 +368,24 @@ public class Configs implements IConfigHandler {
                 "The command that opens a crafting table, without the slash.",
                 "Craft command");
 
+        public static final ConfigInteger KEEP_MONEY = new ConfigInteger("keepMoney", 0, 0, 2_000_000_000,
+                "Never spend below this much money (read from the sidebar's balance): what's left above it is what the\n"
+                        + "build may spend. 0: no limit. Can be set from Discord too (/schedule).",
+                "Keep at least this much money");
+        public static final ConfigBoolean LAYER_COST_ALERT = new ConfigBoolean("layerCostAlert", true,
+                "Warn (in chat and Discord) when a layer cost much more than the layers before it: a shop price went up,\n"
+                        + "or something is bought that shouldn't be.",
+                "Warn when a layer costs more");
+
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                FETCH_FROM_CHESTS, VAULTS, PUT_AWAY_ON_STOP, VAULT_COMMAND, AUTO_BUY, STOCK_UP, SELL_LEFTOVERS, BUY_WHEN_LEFT, STACKS_BELOW, PREFER_BLOCKS, USE_CRAFT_COMMAND, CRAFT_COMMAND,
+                KEEP_MONEY, LAYER_COST_ALERT, FETCH_FROM_CHESTS, VAULTS, PUT_AWAY_ON_STOP, VAULT_COMMAND, AUTO_BUY, STOCK_UP, SELL_LEFTOVERS, BUY_WHEN_LEFT, STACKS_BELOW, PREFER_BLOCKS, USE_CRAFT_COMMAND, CRAFT_COMMAND,
                 SHOP_COMMAND, SHOP_SECTION, PROBE_BUY_SCREEN, MAX_PAGES, WAIT_TIMEOUT_TICKS);
     }
 
     /** The settings most players need to look at once (first tab of the settings); everything else is tuned already. */
     public static java.util.List<IConfigBase> important() {
         return java.util.List.of(
-                Generic.ADDON_ENABLED,
+                Generic.ADDON_ENABLED, Generic.STOP_AT, Shop.KEEP_MONEY, Layers.CAP_BEFORE_STOP,
                 Shop.VAULTS, Shop.FETCH_FROM_CHESTS, Shop.PUT_AWAY_ON_STOP, Shop.AUTO_BUY, Shop.SELL_LEFTOVERS, Shop.PREFER_BLOCKS,
                 Shop.USE_CRAFT_COMMAND, Safety.USE_FEED_COMMAND, Safety.AUTO_EAT,
                 Movement.MOVE_MODE,

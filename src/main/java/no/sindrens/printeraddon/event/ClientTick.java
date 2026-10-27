@@ -70,5 +70,6 @@ public class ClientTick implements IClientTickHandler {
         }
         AutoBuild.INSTANCE.tick(mc);
         no.sindrens.printeraddon.build.AreaBreaker.INSTANCE.tick(mc);
+        no.sindrens.printeraddon.build.Schedule.tick(mc);
     }
 }

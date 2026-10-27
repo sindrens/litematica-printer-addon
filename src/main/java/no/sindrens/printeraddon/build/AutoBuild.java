@@ -737,7 +737,7 @@ public class AutoBuild {
             // Nor a block that can't stand there as things are (a cactus with its sand still to come, or next to a
             // block): the click is refused, and costs a turn
             boolean cantStand = result == BlockCheck.Result.MISSING && !schematic.getBlockState(pos).canSurvive(mc.level, pos);
-            if (waiting || givenUp(pos) || nextToWaiting || onUnconfirmed || supportGoing || supportUnconfirmed || cantStand
+            if (capOnly(pos) || waiting || givenUp(pos) || nextToWaiting || onUnconfirmed || supportGoing || supportUnconfirmed || cantStand
                     || heldForBelow(mc, schematic, pos) || itemSettling(mc, schematic, pos)) {
                 held++;
                 if (RunLog.isActive()) {
@@ -1611,15 +1611,18 @@ public class AutoBuild {
             return crafter.isBusy();
         }
         // Within the spending limit: what's left of it goes into this trip (the shop cuts the list to fit)
-        double budget = spendLimit < 0 ? Double.MAX_VALUE : spendLimit - spentTotal;
+        double budget = budgetLeft(mc);
         if (budget <= 1) {
             if (!warnedLimit) {
                 warnedLimit = true;
-                Chat.warn(String.format(java.util.Locale.ROOT, "Spending limit reached ($%,.0f of $%,.0f): nothing more is bought. Start again (J+B) for a new limit,"
-                        + " or bring the items.", spentTotal, spendLimit));
-                BuildLog.line("SHOP", "spending limit reached: " + spendingLine());
-                no.sindrens.printeraddon.discord.DiscordLink.event("no_money", "Spending limit reached: " + spendingLine()
-                        + ". Nothing more is bought; bring the items or start again with a new limit.");
+                Double aboveKeep = Schedule.moneyAboveKeep(mc);
+                String what = aboveKeep != null && aboveKeep <= 1
+                        ? String.format(java.util.Locale.ROOT, "Down to the money to keep ($%,d)", Configs.Shop.KEEP_MONEY.getIntegerValue())
+                        : String.format(java.util.Locale.ROOT, "Spending limit reached ($%,.0f of $%,.0f)", spentTotal, spendLimit);
+                Chat.warn(what + ": nothing more is bought. Bring the items, or change the limit (J+B, or /schedule on Discord).");
+                BuildLog.line("SHOP", what + ": " + spendingLine());
+                no.sindrens.printeraddon.discord.DiscordLink.event("no_money", what + ". Nothing more is bought; bring the items,"
+                        + " or change the limit with /schedule.");
             }
             cantBuy(toBuy.keySet());
             craftAfterBuying = java.util.List.of();
@@ -1675,7 +1678,7 @@ public class AutoBuild {
 
     /** A purchase for StockUp, within the spending limit. False when nothing could be started. */
     boolean startPurchase(Minecraft mc, java.util.Map<net.minecraft.world.item.Item, Integer> toBuy) {
-        double budget = spendLimit < 0 ? Double.MAX_VALUE : spendLimit - spentTotal;
+        double budget = budgetLeft(mc);
         if (budget <= 1) {
             return false;
         }
@@ -2135,6 +2138,7 @@ public class AutoBuild {
         // Which kinds of blocks the schematic has, from its palettes (to tell the player's own buildings from wrong
         // blocks before anything is broken); what it needs is read in the background from the first tick on
         schematicBlocks.addAll(SchematicHelper.blockKinds());
+        profiled = false;
         wholeFirstPass = true;
         wholeNextY = Integer.MIN_VALUE;
         if (Configs.Layers.AUTO_LAYER.getBooleanValue() && !layers.start(mc)) {
@@ -2163,6 +2167,87 @@ public class AutoBuild {
         return names.isEmpty() ? "?" : names.length() > 40 ? names.substring(0, 40) : names.toString();
     }
 
+    /** Money spent when the current layer began, and what the layers before it cost (this run). */
+    private double layerCostFrom;
+    private final java.util.List<Double> layerCosts = new java.util.ArrayList<>();
+
+    /**
+     * After each layer: what it cost, and a warning (chat and Discord) when it's much more than the layers before it
+     * usually cost: a shop price went up, or something is bought that shouldn't be.
+     */
+    public void layerCostCheck(String layer) {
+        double cost = spentTotal - layerCostFrom;
+        layerCostFrom = spentTotal;
+        if (cost <= 0) {
+            return;
+        }
+        java.util.List<Double> before = new java.util.ArrayList<>(layerCosts);
+        layerCosts.add(cost);
+        BuildLog.line("LAYER-COST", String.format(java.util.Locale.ROOT, "%s cost $%,.0f", layer, cost));
+        if (before.size() < 2 || !Configs.Shop.LAYER_COST_ALERT.getBooleanValue()) {
+            return;
+        }
+        java.util.Collections.sort(before);
+        double usual = before.get(before.size() / 2);
+        if (cost > usual * 1.6 && cost - usual > 20000) {
+            String text = String.format(java.util.Locale.ROOT, "%s cost $%,.0f, the layers before about $%,.0f each (%.1f times as much)."
+                    + " A shop price may have gone up: check the build log's SHOP lines.", layer, cost, usual, cost / usual);
+            Chat.warn(text);
+            no.sindrens.printeraddon.discord.DiscordLink.event("layer_cost", text);
+        }
+    }
+
+    /** Blocks that cover open cactus, placed before a stop (see stop); null when not doing that. */
+    @javax.annotation.Nullable
+    private java.util.Set<net.minecraft.core.BlockPos> capping;
+    private long capUntil;
+    private long capProgressAt;
+    private int capLeft;
+    private boolean capFinishing;
+
+    /** While covering cactus before a stop: everything else is left alone. */
+    public boolean capOnly(net.minecraft.core.BlockPos pos) {
+        return capping != null && !capping.contains(pos);
+    }
+
+    private boolean profiled;
+
+    public boolean isCapping() {
+        return capping != null;
+    }
+
+    /** Covering before a stop: done when all are in, nothing went in for 15 s, or after 90 s. */
+    private boolean capTick(Minecraft mc) {
+        if (capping == null) {
+            return false;
+        }
+        fi.dy.masa.litematica.world.WorldSchematic schematic = SchematicHelper.world();
+        int left = 0;
+        if (schematic != null && mc.level != null) {
+            for (net.minecraft.core.BlockPos pos : capping) {
+                if (BlockCheck.check(mc.level, schematic, pos) != BlockCheck.Result.OK) {
+                    left++;
+                }
+            }
+        }
+        if (left < capLeft) {
+            capLeft = left;
+            capProgressAt = clientTicks;
+        }
+        if (left == 0 || clientTicks > capUntil || clientTicks - capProgressAt > 20 * 15) {
+            BuildLog.line("CAP", left == 0 ? "all open cactus covered: stopping" : left + " blocks not covered (" + (clientTicks > capUntil ? "90 s" : "nothing for 15 s") + "): stopping");
+            capping = null;
+            capFinishing = true;
+            try {
+                stop(mc, null);
+            } finally {
+                capFinishing = false;
+            }
+            return true;
+        }
+        return false;
+    }
+
     /** Why auto build stops when no reason is shown: "finished", "could-not-start", or null (the player stopped it). */
     @javax.annotation.Nullable
     private String stopNote;
@@ -2174,6 +2259,24 @@ public class AutoBuild {
 
     /** {@code mayPutAway}: stopped by the player or done, the building items go into storage (see putAway). */
     private void stop(Minecraft mc, String reason, boolean mayPutAway) {
+        // Stopped by the player (or Discord, or the stop time): the cactus left open on top get their sand first, or
+        // they grow while it's stopped and are broken one by one after (2 s each from the air). A second stop: at once
+        if (running && reason == null && !resumeLater && capping == null && !capFinishing && stopNote == null
+                && Configs.Layers.CAP_BEFORE_STOP.getBooleanValue() && mc.level != null) {
+            java.util.Set<net.minecraft.core.BlockPos> caps = layers.openCactusCaps(mc.level);
+            if (!caps.isEmpty() && caps.size() <= 800) {
+                capping = caps;
+                capUntil = clientTicks + 20 * 90;
+                capProgressAt = clientTicks;
+                capLeft = caps.size();
+                Configs.Generic.AUTO_BUILD.setBooleanValue(true);
+                mover.stop(mc);
+                BuildLog.line("CAP", "stop asked: covering the open cactus first, " + caps.size() + " blocks");
+                Chat.info("Stopping: first the sand beside the open cactus (" + caps.size() + " blocks, 90 s at most). Stop again to stop now.");
+                return;
+            }
+        }
+        capping = null;
         boolean wasRunning = running;
         // Never left standing in a cactus: up and out of it first, whatever the reason for stopping (a stop for the
         // damage it did left the player in it, taking more)
@@ -2239,7 +2342,8 @@ public class AutoBuild {
             PrinterBridge.setAirPlace(airPlaceWasOn);
             PrinterBridge.restoreSettings();
             if (reason != null) {
-                Chat.warn("Auto build stopped: " + reason + ".");
+                String advice = Advice.forStop(reason);
+                Chat.warn("Auto build stopped: " + reason + "." + (advice.isEmpty() ? "" : " " + advice));
                 Chat.announce("Auto build stopped", reason, false);
             } else {
                 Chat.info("Auto build §cstopped§r.");
@@ -2408,6 +2512,13 @@ public class AutoBuild {
 
     /** The most auto build may spend in the shop on this build (-1: no limit), and what it has spent on it. */
     private double spendLimit = -1;
+
+    /** What may still be spent: the spending limit's rest, and no lower than the money to keep (see Schedule). */
+    private double budgetLeft(Minecraft mc) {
+        double budget = spendLimit < 0 ? Double.MAX_VALUE : spendLimit - spentTotal;
+        Double aboveKeep = Schedule.moneyAboveKeep(mc);
+        return aboveKeep == null ? budget : Math.min(budget, aboveKeep);
+    }
     private double spentTotal;
     private boolean warnedLimit;
 
@@ -2427,6 +2538,8 @@ public class AutoBuild {
     public void startWithLimit(Minecraft mc, double limit) {
         spendLimit = limit;
         spentTotal = 0;
+        layerCostFrom = 0;
+        layerCosts.clear();
         start(mc);
         if (running) {
             Chat.info(limit < 0 ? "Spending limit: none." : String.format(java.util.Locale.ROOT, "Spending limit for this build: $%,.0f.", limit));
@@ -2444,6 +2557,7 @@ public class AutoBuild {
             String[] parts = text.trim().split(" ");
             spendLimit = Double.parseDouble(parts[0]);
             spentTotal = parts.length > 1 ? Double.parseDouble(parts[1]) : 0;
+            layerCostFrom = spentTotal;
         } catch (RuntimeException ignored) {
         }
     }
@@ -2821,6 +2935,14 @@ public class AutoBuild {
             hotbar.tick(mc, layers.layerNeeds(), !mover.isTravelling(mc.player) && mc.player.getDeltaMovement().lengthSqr() < 0.0004);
         }
 
+        if (capTick(mc)) {
+            return;
+        }
+        // Once the whole schematic is counted: what kind of build it is, and the settings for it (see BuildProfile)
+        if (!profiled && wholeKnown()) {
+            profiled = true;
+            BuildProfile.apply(neededWhole, schematicBlocks);
+        }
         long layersStarted = Perf.start();
         boolean layersGoOn = !layers.isActive() || layers.tick(mc);
         Perf.end("layer check", layersStarted);
@@ -2832,7 +2954,7 @@ public class AutoBuild {
 
         if (PrinterBridge.isIdle() && !breaker.isBusy() && !fluids.isBusy() && !rails.isBusy() && !entities.isBusy()) {
             long itemsStarted = Perf.start();
-            boolean busy = cleaner.tick(mc, neededWhole, fetcher) || buyMissing(mc);
+            boolean busy = capping == null && (cleaner.tick(mc, neededWhole, fetcher) || buyMissing(mc));
             Perf.end("inventory and buying", itemsStarted);
             if (busy) {
                 return;
