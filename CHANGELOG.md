@@ -186,3 +186,8 @@
 - Auto break no longer hovers doing nothing when the blocks left on a level can't be got to: on down, back for them at the end. It also tries spots right beside a block, not only above it.
 - A grown cactus to break while the lanes are flown waits until the sand around it is in and it can stand there (5 times faster than breaking from the air): breaking from the air took most of a 24 minute run.
 - Stopping for damage says what the damage was in the log.
+
+## 26.2-0.17.14
+- Auto break on string (anything that goes with one hit): lanes 7 wide flown along their middle, everything in reach broken on the way, instead of 3-wide lanes with a stop at each block. About twice fewer sweeps over the area.
+- Auto break's 3 levels at a time start at a level that has something on it: on a cactus farm (string every other level) that's 2 string levels in one sweep, not 1.
+- The build log says how each Auto break band is laid out (how many blocks, lanes, how wide).

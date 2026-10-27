@@ -83,6 +83,15 @@ public final class AreaBreaker {
      * player, who then had to get over the gap: "it mines in a circle around me".)
      */
     private static final int LANE_ROWS = 3;
+    /**
+     * Lanes of a band that breaks with one hit each (string): 7 rows wide, flown in the air (nothing to stand for), every
+     * block in reach broken whatever its lane. 3-row lanes for string took 42 sweeps of a 125 wide area, 87% flying.
+     */
+    private static final int QUICK_LANE_ROWS = 7;
+    private int laneRows = LANE_ROWS;
+    private boolean quickBand;
+    /** The band's lanes are laid for what's in it (once per band, see scanLayer). */
+    private int rowsChosenFor = Integer.MIN_VALUE;
     /** Lanes run along X (rows across them are Z), or along Z. */
     private boolean alongX = true;
     /** The first row of the first lane, and which way the lanes go across (+1 or -1). */
@@ -360,7 +369,7 @@ public final class AreaBreaker {
         int r = (int) Math.ceil(range);
         BlockPos center = BlockPos.containing(eye);
         for (BlockPos pos : BlockPos.betweenClosed(center.offset(-r, -r, -r), center.offset(r, r, r))) {
-            if (pos.getY() < bottom || pos.getY() > layer || laneOf(pos) > currentLane) {
+            if (pos.getY() < bottom || pos.getY() > layer || !quickBand && laneOf(pos) > currentLane) {
                 continue;
             }
             double distance = eye.distanceToSqr(Vec3.atCenterOf(pos));
@@ -411,14 +420,14 @@ public final class AreaBreaker {
         double along = alongX ? player.x : player.z;
         acrossStep = Math.abs(across - acrossMin) <= Math.abs(across - acrossMax) ? 1 : -1;
         acrossOrigin = acrossStep > 0 ? acrossMin : acrossMax;
-        laneCount = (acrossMax - acrossMin) / LANE_ROWS + 1;
+        laneCount = (acrossMax - acrossMin) / laneRows + 1;
         firstForward = Math.abs(along - alongMin) <= Math.abs(along - alongMax);
         currentLane = 0;
     }
 
     private int laneOf(BlockPos pos) {
         int across = alongX ? pos.getZ() : pos.getX();
-        return Math.max(0, (across - acrossOrigin) * acrossStep / LANE_ROWS);
+        return Math.max(0, (across - acrossOrigin) * acrossStep / laneRows);
     }
 
     /** Lane by lane, and along each lane the way it runs: the order a level is broken in. */
@@ -440,7 +449,7 @@ public final class AreaBreaker {
     private Vec3 standBeside(Minecraft mc, LocalPlayer player, BlockPos pos) {
         double reach = player.blockInteractionRange() - 0.4;
         Vec3 center = Vec3.atCenterOf(pos);
-        int nextRow = acrossOrigin + acrossStep * LANE_ROWS * (laneOf(pos) + 1);
+        int nextRow = acrossOrigin + acrossStep * laneRows * (laneOf(pos) + 1);
         int along = alongX ? pos.getX() : pos.getZ();
         for (int extra = 0; extra <= 1; extra++) {
             for (int shift : new int[]{0, 1, -1}) {
@@ -489,7 +498,10 @@ public final class AreaBreaker {
             top = Math.max(top, b[4]);
             bottom = Math.min(bottom, b[1]);
         }
-        layer = top;
+        layer = highestWithBlocks(mc, top);
+        laneRows = LANE_ROWS;
+        quickBand = false;
+        rowsChosenFor = Integer.MIN_VALUE;
         layLanes(player.position());
         total = 0;
         for (Map.Entry<Block, Integer> entry : blocksIn(mc, boxes, true).entrySet()) {
@@ -630,7 +642,9 @@ public final class AreaBreaker {
                         (AutoBuild.clientTicks - layerStartedAt) / 20.0, bandGivenUp == layer ? " (the rest left out: back for it at the end)" : ""));
             }
             bandGivenUp = Integer.MIN_VALUE;
-            layer = bandBottom() - 1;
+            // The next band starts at the next level with something on it: a cactus farm has string every other
+            // level, and a band starting on an empty level held only one of them
+            layer = highestWithBlocks(mc, bandBottom() - 1);
             layerStartedAt = AutoBuild.clientTicks;
             layerBrokenAtStart = breaker.getBrokenCount();
             // The next level's lanes start where the player is now: back the way it came, no flight across the area
@@ -697,7 +711,9 @@ public final class AreaBreaker {
         // a cactus (sand under a cactus that drops with it)
         if (goalSpot == null || !next.equals(goalSpotFor)) {
             goalSpotFor = next;
-            goalSpot = standBeside(mc, player, next);
+            // Quick blocks: along the middle of the lane, 2 over the band's top, so the whole 7-row lane is in reach
+            // on one straight flight (not a hop to each block)
+            goalSpot = quickBand ? laneMiddleSpot(mc, player, next) : standBeside(mc, player, next);
             if (goalSpot == null) {
                 goalSpot = hoverFor(mc, player, next);
             }
@@ -711,6 +727,23 @@ public final class AreaBreaker {
         // On foot when there's a way on the ground (5 times faster breaking than from the air), else flying there
         mover.goTo(goal, goalSpot, true);
         mover.tick(mc);
+    }
+
+    @Nullable
+    private Vec3 laneMiddleSpot(Minecraft mc, LocalPlayer player, BlockPos pos) {
+        int lane = laneOf(pos);
+        int across = acrossOrigin + acrossStep * (lane * laneRows + laneRows / 2);
+        int along = alongX ? pos.getX() : pos.getZ();
+        double reach = player.blockInteractionRange() - 0.3;
+        for (int up = 2; up >= 1; up--) {
+            BlockPos feet = alongX ? new BlockPos(along, layer + up, across) : new BlockPos(across, layer + up, along);
+            Vec3 spot = new Vec3(feet.getX() + 0.5, feet.getY(), feet.getZ() + 0.5);
+            if (FlyPath.fits(mc.level, feet) && Mover.harmNear(mc.level, spot) == null
+                    && spot.add(0, player.getEyeHeight(), 0).distanceToSqr(Vec3.atCenterOf(pos)) <= reach * reach) {
+                return spot;
+            }
+        }
+        return null;
     }
 
     @Nullable
@@ -811,6 +844,27 @@ public final class AreaBreaker {
         return top;
     }
 
+    /** The highest level from this one down with something to break (or unloaded), or the bottom. */
+    private int highestWithBlocks(Minecraft mc, int from) {
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        for (int y = from; y > bottom; y--) {
+            for (int[] b : boxes) {
+                if (y < b[1] || y > b[4]) {
+                    continue;
+                }
+                for (int x = b[0]; x <= b[3]; x++) {
+                    for (int z = b[2]; z <= b[5]; z++) {
+                        pos.set(x, y, z);
+                        if (!mc.level.isLoaded(pos) || wants(mc.level, pos)) {
+                            return y;
+                        }
+                    }
+                }
+            }
+        }
+        return bottom;
+    }
+
     /** The current level's blocks to break where it's loaded, and one spot per part of it not loaded yet. */
     private void scanLayer(Minecraft mc) {
         layerScannedAt = AutoBuild.clientTicks;
@@ -837,6 +891,24 @@ public final class AreaBreaker {
                     }
                 }
             }
+        }
+        if (rowsChosenFor != layer && mc.player != null && !layerLeft.isEmpty()) {
+            rowsChosenFor = layer;
+            int quick = 0;
+            for (BlockPos p : layerLeft) {
+                if (mc.level.getBlockState(p).getDestroyProgress(mc.player, mc.level, p) >= 1.0f) {
+                    quick++;
+                }
+            }
+            boolean nowQuick = quick * 10 >= layerLeft.size() * 9;
+            int rows = nowQuick ? QUICK_LANE_ROWS : LANE_ROWS;
+            quickBand = nowQuick;
+            if (rows != laneRows) {
+                laneRows = rows;
+                layLanes(mc.player.position());
+            }
+            BuildLog.line("AREA", String.format(Locale.ROOT, "Y %d to %d: %d blocks, %d of them go with one hit: lanes %d wide (%d lanes)%s",
+                    layer, low, layerLeft.size(), quick, laneRows, laneCount, quickBand ? ", flown, everything in reach broken" : ", standing where it can"));
         }
     }
 
