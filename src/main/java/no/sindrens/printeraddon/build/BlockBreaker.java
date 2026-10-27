@@ -103,6 +103,8 @@ public class BlockBreaker {
     private Vec3 hopTo;
     private int hopTicks;
     private static final int HOP_TICKS = 20;
+    /** More time for a hop to a spot farther away (at 0.2 blocks a tick). */
+    private int hopExtraTicks;
     /**
      * The spot to stand at is at most this many blocks to the side (a hop of 0.6 s at most). Waiting for the sand
      * around to come in first was tried: the lane flew on meanwhile and came back for each, the layer took twice as long.
@@ -127,11 +129,19 @@ public class BlockBreaker {
         int harm = 0;
         int far = 0;
         int blocked = 0;
-        // At the feet's height, or one lower (hovering a block over the layer's top, the footing is the top itself)
-        for (int dy = 0; dy >= -1; dy--)
-        for (int dx = -HOP_REACH; dx <= HOP_REACH; dx++) {
-            for (int dz = -HOP_REACH; dz <= HOP_REACH; dz++) {
-                BlockPos spotFeet = feet.offset(dx, dy, dz);
+        // Around the block to break, not only beside the player: any spot in reach of it with a whole block to stand
+        // on, from 2 under it to 2 over it, the nearest to the player that it gets to in a straight line (breaking
+        // from the air takes 5 times as long; only spots beside the player were tried, and with the layer's blocks
+        // all around them most blocks of a floor were broken from the air)
+        int around = Math.min(4, (int) Math.ceil(range));
+        for (int dy = 2; dy >= -2; dy--)
+        for (int dx = -around; dx <= around; dx++) {
+            for (int dz = -around; dz <= around; dz++) {
+                BlockPos spotFeet = target.offset(dx, dy, dz);
+                if (spotFeet.distToCenterSqr(at) > (HOP_REACH + 4) * (HOP_REACH + 4)) {
+                    far++;
+                    continue;
+                }
                 BlockPos below = spotFeet.below();
                 if (below.equals(target) || !FlyPath.fits(level, spotFeet)) {
                     blocked++;
@@ -191,7 +201,7 @@ public class BlockBreaker {
             return false;
         }
         Vec3 to = hopTo.subtract(player.position());
-        if (to.lengthSqr() < 0.06 * 0.06 || ++hopTicks > HOP_TICKS) {
+        if (to.lengthSqr() < 0.06 * 0.06 || ++hopTicks > HOP_TICKS + hopExtraTicks) {
             hopTo = null;
             player.setDeltaMovement(Vec3.ZERO);
             standForBreaking(player, target);
@@ -352,6 +362,7 @@ public class BlockBreaker {
         lookAt(player, pos);
         hopTo = spot;
         hopTicks = 0;
+        hopExtraTicks = spot == null ? 0 : (int) Math.ceil(spot.distanceTo(player.position()) / 0.2);
         PrinterAddon.debug("Breaking {} at {} with {}{}", state, target.toShortString(),
                 player.getInventory().getItem(player.getInventory().getSelectedSlot()), hopTo != null ? ", from " + hopTo : "");
         if (hopTo != null) {

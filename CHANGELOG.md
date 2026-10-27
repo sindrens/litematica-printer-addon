@@ -243,3 +243,7 @@
 - A floor that floats as a whole is really placed now (tested): the blocks with nothing to go against are placed in the air, the rest against them. A floating patch beside a supported part works too.
 - New setting "Break blocks not in the schematic" (Breaking, off by default): blocks where the schematic has air, and blocks of yours where it wants something else (dirt or farmland where the floor goes), are broken and the right block goes in. Containers and unbreakable blocks are never broken.
 - The debug says when the printer places in the air.
+
+## 26.2-0.17.24
+- Breaking stands on the ground far more often: a spot to stand is looked for all around the block (up to 4 blocks), not only right beside the player. Test with wrong cactus: 65 of 76 breaks standing instead of 19 of 82, 3 times faster per block, layer done in 175 s instead of not done after 240 s.
+- Keys: J+G starts / stops auto build, J+Z pauses it and goes on again (it keeps its place and spending limit). Change them in the settings (Hotkeys).

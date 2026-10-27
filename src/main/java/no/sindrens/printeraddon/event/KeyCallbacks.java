@@ -62,6 +62,8 @@ public class KeyCallbacks {
                 no.sindrens.printeraddon.build.CostEstimate.show(mc);
             } else if (key == Hotkeys.TOGGLE_AUTO_BUILD.getKeybind()) {
                 build.toggle(mc);
+            } else if (key == Hotkeys.PAUSE_AUTO_BUILD.getKeybind()) {
+                build.togglePause(mc);
             } else if (key == Hotkeys.FIX_WRONG_NOW.getKeybind()) {
                 build.fixWrongNow();
             } else if (key == Hotkeys.CLEAR_EXTRA_BLOCKS.getKeybind()) {

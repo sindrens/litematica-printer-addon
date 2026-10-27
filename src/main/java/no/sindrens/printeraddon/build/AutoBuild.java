@@ -1960,6 +1960,19 @@ public class AutoBuild {
         }
     }
 
+    /** The pause key: a running build pauses (as from Discord), a paused one goes on. */
+    public void togglePause(Minecraft mc) {
+        if (running) {
+            pauseRemote(mc);
+            Chat.info("Auto build paused. Press the pause key again (" + no.sindrens.printeraddon.config.Hotkeys.PAUSE_AUTO_BUILD.getKeybind().getKeysDisplayString()
+                    + ") to go on.");
+        } else if (remotePaused) {
+            resumeRemote(mc);
+        } else {
+            Chat.info("Auto build isn't running (start it with " + no.sindrens.printeraddon.config.Hotkeys.TOGGLE_AUTO_BUILD.getKeybind().getKeysDisplayString() + ").");
+        }
+    }
+
     /** Stops for now, keeping the spending limit; nothing is put away and no log question is asked. */
     public void pauseRemote(Minecraft mc) {
         if (!running) {

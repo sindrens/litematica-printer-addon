@@ -216,7 +216,7 @@ public class FarmTest implements FabricClientGameTest {
             boolean extra = System.getenv("PRINTER_ADDON_EXTRA") != null;
             if (extra) {
                 for (String command : List.of("setblock 5 -60 5 stone", "setblock 9 -60 12 cobblestone", "setblock 7 -58 7 stone",
-                        "setblock 14 -58 3 oak_planks", "setblock 12 -59 4 dirt", "setblock 4 -59 13 farmland")) {
+                        "setblock 14 -58 3 oak_planks", "setblock 12 -59 4 dirt", "setblock 4 -59 13 farmland", "fill 6 -59 6 11 -59 11 stone")) {
                     server.runCommand(command);
                 }
                 System.out.println("FARM TEST: 6 blocks that aren't the schematic's put in its area");

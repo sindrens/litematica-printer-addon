@@ -14,8 +14,10 @@ public class Hotkeys {
     public static final ConfigHotkey BUILD_MENU = new ConfigHotkey("buildMenu", "J,B",
             "Open the build menu: start / stop auto build, link the chest you look at, build report, cost, shop scan.",
             "Build menu");
-    public static final ConfigHotkey TOGGLE_AUTO_BUILD = new ConfigHotkey("startStopAutoBuild", "",
-            "Start / stop auto build right away, without the menu (no key by default).", "Start / stop auto build");
+    public static final ConfigHotkey TOGGLE_AUTO_BUILD = new ConfigHotkey("startStopAutoBuild", "J,G",
+            "Start / stop auto build right away, without the menu.", "Start / stop auto build");
+    public static final ConfigHotkey PAUSE_AUTO_BUILD = new ConfigHotkey("pauseAutoBuild", "J,Z",
+            "Pause auto build (it keeps its place and spending limit), and go on with it when pressed again.", "Pause / go on");
     public static final ConfigHotkey FIX_WRONG_NOW = new ConfigHotkey("fixWrongNow", "J,F",
             "Break all wrong blocks within reach now (in the current layer range), even when auto build is off.",
             "Fix wrong blocks around me");
@@ -46,6 +48,6 @@ public class Hotkeys {
             "Link with Discord");
 
     public static final ImmutableList<ConfigHotkey> HOTKEY_LIST = ImmutableList.of(
-            OPEN_SETTINGS, LINK_DISCORD, BUILD_MENU, TOGGLE_ADDON, TOGGLE_AUTO_BUILD, FIX_WRONG_NOW, CLEAR_EXTRA_BLOCKS, NEXT_LAYER, PREVIOUS_LAYER,
+            OPEN_SETTINGS, LINK_DISCORD, BUILD_MENU, TOGGLE_ADDON, TOGGLE_AUTO_BUILD, PAUSE_AUTO_BUILD, FIX_WRONG_NOW, CLEAR_EXTRA_BLOCKS, NEXT_LAYER, PREVIOUS_LAYER,
             SHOW_COST, BUILD_REPORT, SCAN_SHOP, STOP_ALL);
 }
