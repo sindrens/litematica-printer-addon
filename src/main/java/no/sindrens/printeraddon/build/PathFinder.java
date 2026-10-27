@@ -29,7 +29,9 @@ public final class PathFinder {
     private static final Set<Block> DANGEROUS = Set.of(
             Blocks.LAVA, Blocks.FIRE, Blocks.SOUL_FIRE, Blocks.MAGMA_BLOCK, Blocks.CACTUS, Blocks.CAMPFIRE,
             Blocks.SOUL_CAMPFIRE, Blocks.SWEET_BERRY_BUSH, Blocks.POWDER_SNOW, Blocks.WITHER_ROSE,
-            Blocks.POINTED_DRIPSTONE, Blocks.COBWEB);
+            Blocks.POINTED_DRIPSTONE, Blocks.COBWEB,
+            // Never into a portal (Auto break flew into a nether portal while breaking its frame)
+            Blocks.NETHER_PORTAL, Blocks.END_PORTAL, Blocks.END_GATEWAY);
 
     private PathFinder() {
     }

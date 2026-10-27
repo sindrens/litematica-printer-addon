@@ -2765,7 +2765,12 @@ public class Mover {
             samePlans = 0;
         }
 
-        if (mode.canWalk() && (player.onGround() || player.isInWater()) && !flying(player)) {
+        // Auto break flies when it may: walking on the layers it breaks, it went a block every 2 s and fell through
+        // the holes it made (35 blocks down a tower)
+        boolean preferFly = AreaBreaker.INSTANCE.isRunning() && mode.canFly() && !flyUnavailable && player.getAbilities().mayfly;
+        if (preferFly) {
+            // nothing: on to flying below
+        } else if (mode.canWalk() && (player.onGround() || player.isInWater()) && !flying(player)) {
             List<BlockPos> route = findWalk(mc, player.blockPosition(), goalBlock, reach);
             if (route != null) {
                 path = route;
@@ -3485,6 +3490,8 @@ public class Mover {
         moveStartTick = -1;
     }
 
+    private long lastCantFlyNote = -100000;
+
     /** Turns flying on (sending the fly command once if needed). Returns false while waiting for it. */
     private boolean ensureFlying(LocalPlayer player) {
         // Standing on the layer for a moment to break a block faster, or hopping there (see BlockBreaker#isStanding):
@@ -3515,8 +3522,12 @@ public class Mover {
 
         flyUnavailable = true;
         state = State.IDLE;
-        Chat.warn("Can't fly here" + (command.isEmpty() ? "" : " (/" + command + " didn't allow flying)")
-                + ". Walking only from now on.");
+        // Once in a while only: it was said 18 times in a second
+        if (tick - lastCantFlyNote > 20 * 120) {
+            lastCantFlyNote = tick;
+            Chat.warn("Can't fly here" + (command.isEmpty() ? "" : " (/" + command + " didn't allow flying)")
+                    + ". Walking only from now on.");
+        }
         return false;
     }
 

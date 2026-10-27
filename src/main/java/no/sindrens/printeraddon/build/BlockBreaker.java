@@ -230,6 +230,10 @@ public class BlockBreaker {
         standingTicks = 0;
     }
 
+    /** Ticks standing on after a break for the next one from the same spot, before flying again. */
+    private static final int STAY_STANDING_TICKS = 10;
+    private long flyAgainAt = -1;
+
     /** Flying again after breaking (or when standing didn't work out). */
     private void flyAgain(LocalPlayer player) {
         if (!standing) {
@@ -314,6 +318,12 @@ public class BlockBreaker {
 
         waiting = false;
         BlockPos next = findNext(mc, player, schematic, mode);
+        if (next != null) {
+            flyAgainAt = -1;
+        } else if (flyAgainAt >= 0 && tickCounter >= flyAgainAt) {
+            flyAgainAt = -1;
+            flyAgain(player);
+        }
         if (next == null) {
             // Still busy if a wrong block is being watched before it's broken
             return waiting;
@@ -409,7 +419,11 @@ public class BlockBreaker {
             brokenCount++;
             // The vanilla wait between two mined blocks (5 ticks), never less
             cooldown = Math.max(no.sindrens.printeraddon.Edition.OFFICIAL ? 5 : 0, Configs.Speed.breakCooldownTicks());
-            flyAgain(player);
+            // Standing stays for a moment: the next block in reach is broken from here too. Flying up after every
+            // block and landing again for the next (Auto break) took longer than the breaking
+            if (standing) {
+                flyAgainAt = tickCounter + STAY_STANDING_TICKS;
+            }
             return;
         }
         // Standing didn't work out (nothing held the player after all): flying again, breaking on from the air
@@ -510,6 +524,15 @@ public class BlockBreaker {
             return false;
         }
         if (state.getDestroySpeed(level, pos) < 0 || level.getBlockEntity(pos) instanceof net.minecraft.world.Container) {
+            return false;
+        }
+        // A plant of the build that grew where the schematic has air (a cactus over the layer's cactus): it drops by
+        // itself once the block beside it goes in, or it's handled as growth. Broken one by one from the air, a
+        // cactus tower layer placed 96 blocks in 3.5 minutes
+        if ((state.getBlock() instanceof net.minecraft.world.level.block.CactusBlock || state.getBlock() instanceof net.minecraft.world.level.block.SugarCaneBlock
+                || state.getBlock() instanceof net.minecraft.world.level.block.BambooStalkBlock || state.is(net.minecraft.world.level.block.Blocks.CACTUS_FLOWER))
+                && AutoBuild.INSTANCE.schematicBlocks.contains(state.is(net.minecraft.world.level.block.Blocks.CACTUS_FLOWER)
+                ? net.minecraft.world.level.block.Blocks.CACTUS : state.getBlock())) {
             return false;
         }
         return BlockCheck.check(level, schematic, pos) == BlockCheck.Result.EXTRA;

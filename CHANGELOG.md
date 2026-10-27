@@ -255,3 +255,10 @@
 - This is the Mythian build (the jar ends in +mythian): every speed setting is yours to choose. A separate official build with vanilla limits is coming for Modrinth.
 - Changing one of the custom speeds switches the speed preset to Custom by itself (before, it did nothing while another preset was picked), and picking Custom starts from the preset you had.
 - New speed settings: ticks between placements, and a placements-per-second cap (both off by default here).
+
+## 26.2-0.17.27
+- "Break blocks not in the schematic" no longer breaks cactus that grew above the layer one by one (it drops by itself when the sand beside it goes in). With it on, a tower layer placed 96 blocks in 3.5 minutes.
+- Auto break stays standing between blocks it can reach from the same spot, instead of flying up and landing again for every block.
+- Never flies or steps into a nether portal, end portal or end gateway.
+- Auto break flies between spots instead of walking on the layers it breaks (it went a block every 2 seconds and fell through its own holes).
+- "Can't fly here" is said once, not many times a second.
