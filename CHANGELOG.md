@@ -205,3 +205,9 @@
 - A grown column standing on sand that doesn't belong there: the sand is broken (a few ticks with a shovel) and the whole column drops, instead of each cactus from the air (3 s each).
 - New setting "Click a side you can see" (on).
 - Test farm with grown cactus in a quarter of the string spots: 229 s now, was over 480 s and stuck on its last 2 blocks.
+
+## 26.2-0.17.17
+- Fewer and shorter supply trips: what the vaults won't have enough of for the next trip is bought in bulk at the start of a trip, while the inventory is still empty. Bought later in the trip, the whole inventory (29 stacks) went into the vaults to make room and came back out, about 5 s, every third trip.
+- A bulk purchase fills the vault room with more than one round of an item (a second purchase when 16 stacks or more are still to go): fewer shop visits.
+- Blocks the layer needs only a few of (3 white concrete) are no longer put away to make room: that was a trip of its own a minute later, twice a layer.
+- Test runs of the developer no longer send their logs to the report channel.

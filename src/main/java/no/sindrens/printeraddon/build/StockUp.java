@@ -101,7 +101,10 @@ public final class StockUp {
                     continue;
                 }
                 int stacks = stacksOf(inventory, item);
-                if (stacks > 0) {
+                // What the layer needs only a little of (3 white concrete) stays: put away, it was the reason for a
+                // trip of its own a minute later
+                int need = AutoBuild.INSTANCE.layers.layerNeeds().getOrDefault(item, 0);
+                if (stacks > 0 && need > item.getDefaultMaxStackSize() * 2) {
                     clear.put(item, 0);
                     clearStacks += stacks;
                 }
@@ -257,8 +260,10 @@ public final class StockUp {
             if (entry.getValue() <= 0) {
                 continue;
             }
-            // One purchase per item: a second one of 3 stacks costs as long as the first of 20
-            entry.setValue(0);
+            // Another purchase of the same item only when a big one is left (a second one of 3 stacks costs as long
+            // as the first of 20): the vaults filled with one item per shop visit, the next trip bought the next
+            int rest = entry.getValue() - stacks * stack;
+            entry.setValue(rest >= CLEAR_WORTH * stack ? rest : 0);
             if (stacks < MIN_STACKS) {
                 BuildLog.line("STOCK", "skip item=" + name(item) + " reason=inventory-room freeSlots=" + free);
                 continue;

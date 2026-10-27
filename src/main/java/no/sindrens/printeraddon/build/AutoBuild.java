@@ -1502,10 +1502,15 @@ public class AutoBuild {
         // them (taken out, it was all put away again to make room for the purchase, and taken out once more)
         if (!fetchedThisTrip && !stockedThisTrip && autoBuy && storage) {
             java.util.Map<net.minecraft.world.item.Item, Integer> shortfall = new java.util.LinkedHashMap<>();
+            // Also what the vaults won't have enough of for the next trip: bought now, while the inventory is still
+            // empty. Bought later in the trip (the inventory full from the vaults), all of it went into the vaults to
+            // make room and came back out: 29 stacks put away and taken again, about 5 s, every third trip of a run
             list.forEach((item, count) -> {
                 int known = fetcher.knownCount(item);
                 if (count > known) {
                     shortfall.put(item, count - known);
+                } else if (known < 2 * count && count >= item.getDefaultMaxStackSize() * 4) {
+                    shortfall.put(item, count);
                 }
             });
             if (!shortfall.isEmpty()) {
