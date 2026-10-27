@@ -318,13 +318,31 @@ public class SpeedTuner {
         return AutoBuild.INSTANCE.triedRecently(pos, PICK_TIMEOUT);
     }
 
+    /** When each spot last placed nothing (see judge). */
+    private final java.util.Map<BlockPos, Long> emptyAt = new java.util.HashMap<>();
+
     private void judge(Minecraft mc, WorldSchematic schematic, Pick pick, Outcome outcome, long age) {
         ItemSpeed s = speedOf(pick.item());
         boolean switched = pick.before() != null && pick.item() != null && pick.before() != pick.item();
         String how = name(pick.item()) + " at interval " + pick.interval() + (switched ? ", right after switching from " + name(pick.before()) : "")
                 + ", " + age + " ticks after the click";
-        s.recent[s.recentCount++ % RECENT] = outcome != Outcome.NOTHING;
-        ReachStats.clicked(pick.distance(), outcome != Outcome.NOTHING);
+        // The same spot refused again (the island's edge, a spot the server won't have a block in): it says nothing
+        // about the speed or the reach. 14 refusals at the edge of an island slowed bricks from interval 2 to 10
+        Long emptyBefore = emptyAt.get(pick.pos());
+        boolean repeat = outcome == Outcome.NOTHING && (emptyBefore != null && AutoBuild.clientTicks - emptyBefore < 20 * 120
+                || Edge.outside(mc.level, pick.pos()));
+        if (outcome == Outcome.NOTHING) {
+            if (emptyAt.size() > 4096) {
+                emptyAt.clear();
+            }
+            emptyAt.put(pick.pos().immutable(), AutoBuild.clientTicks);
+        } else {
+            emptyAt.remove(pick.pos());
+        }
+        if (!repeat) {
+            s.recent[s.recentCount++ % RECENT] = outcome != Outcome.NOTHING;
+            ReachStats.clicked(pick.distance(), outcome != Outcome.NOTHING);
+        }
         if (pick.air()) {
             AutoBuild.INSTANCE.airPlace.judged(pick.pos(), outcome != Outcome.NOTHING);
         }
@@ -401,7 +419,7 @@ public class SpeedTuner {
                         missed++;
                     }
                 }
-                if (Configs.Speed.AUTO_SPEED.getBooleanValue() && known == RECENT && missed > RECENT / 2 && s.interval < slowest()) {
+                if (!repeat && Configs.Speed.AUTO_SPEED.getBooleanValue() && known == RECENT && missed > RECENT / 2 && s.interval < slowest()) {
                     s.interval = Math.min(slowest(), s.interval + 1);
                     s.calmUntil = AutoBuild.clientTicks + CALM_AFTER_MISTAKE;
                     java.util.Arrays.fill(s.recent, true);

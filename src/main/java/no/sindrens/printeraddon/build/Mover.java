@@ -3544,8 +3544,13 @@ public class Mover {
     }
 
     private static double reach(LocalPlayer player) {
-        // The printer's own range (the player's setting): that's where it places
-        return me.aleksilassila.litematica.printer.config.Configs.PRINTING_RANGE.getDoubleValue();
+        // The printer's own range (the player's setting), but no farther than the add-on lets it click (the reach
+        // learned on this server, see AutoBuild's hold): with range 5.0 and clicks held back past 4.5, a platform's
+        // lanes were flown for blocks out to 5.0, every 4th column was left 4.8 away, and the lane stood still 3 s
+        // for it each time ("nothing placed for 3 s", 31 times in 3.7 minutes: 334 blocks a minute)
+        double range = me.aleksilassila.litematica.printer.config.Configs.PRINTING_RANGE.getDoubleValue();
+        double learned = ReachStats.reach(range);
+        return learned < range - 0.05 ? Math.min(range, learned + 0.25) : range;
     }
 
     private static BlockPos nearest(LocalPlayer player, List<BlockPos> positions) {

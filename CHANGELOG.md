@@ -225,3 +225,10 @@
 - Auto break: time left after each band, in chat and the log.
 - When something stops the build, the message says what to do about it (in chat and Discord).
 - Works with AutoSell 1.1: collectors that are well filled are sold right after a supply trip, on the same stop.
+
+## 26.2-0.17.20
+- Platforms: no more 3 s stops every few blocks (lanes now fly at the reach the printer really clicks).
+- A schematic bigger than your island: the part past the border is left out (not clicked, bought or flown to) and said once.
+- Learns an island edge from refused clicks too, and leaves everything past it.
+- Refused clicks on the same spot no longer slow the printer down or shrink the reach.
+- Debug info shows the world border.

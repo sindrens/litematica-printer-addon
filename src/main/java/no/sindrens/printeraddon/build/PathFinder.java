@@ -171,6 +171,9 @@ public final class PathFinder {
      */
     public static boolean insideBorder(Level level, BlockPos pos) {
         net.minecraft.world.level.border.WorldBorder border = level.getWorldBorder();
+        if (Edge.known() && Edge.outside(null, pos)) {
+            return false;
+        }
         return pos.getX() >= border.getMinX() && pos.getX() + 1 <= border.getMaxX()
                 && pos.getZ() >= border.getMinZ() && pos.getZ() + 1 <= border.getMaxZ();
     }

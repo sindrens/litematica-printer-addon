@@ -121,6 +121,7 @@ public class AutoBuild {
                             + Diagnose.explain(mc, schematic, pos));
                 }
                 RunLog.gaveUp("clicked-" + MAX_TRIES + "-times-without-change");
+                Edge.gaveUp(mc, pos);
                 // Built over already: the block above comes off for it (and goes back after)
                 unsealIfCovered(mc, pos, "clicked " + MAX_TRIES + " times without a change");
             } else {
@@ -737,7 +738,7 @@ public class AutoBuild {
             // Nor a block that can't stand there as things are (a cactus with its sand still to come, or next to a
             // block): the click is refused, and costs a turn
             boolean cantStand = result == BlockCheck.Result.MISSING && !schematic.getBlockState(pos).canSurvive(mc.level, pos);
-            if (capOnly(pos) || waiting || givenUp(pos) || nextToWaiting || onUnconfirmed || supportGoing || supportUnconfirmed || cantStand
+            if (capOnly(pos) || Edge.outside(mc.level, pos) || waiting || givenUp(pos) || nextToWaiting || onUnconfirmed || supportGoing || supportUnconfirmed || cantStand
                     || heldForBelow(mc, schematic, pos) || itemSettling(mc, schematic, pos)) {
                 held++;
                 if (RunLog.isActive()) {
@@ -2048,6 +2049,30 @@ public class AutoBuild {
         running = true;
         Configs.Generic.AUTO_BUILD.setBooleanValue(true);
         BuildLog.open("auto build " + placementNames());
+        Edge.start(mc);
+        // A schematic bigger than the island (a 200x200 platform on a 125-wide island): the part past the border is
+        // left out from the start (BlockCheck), said once, instead of clicked, refused and given up on row by row
+        if (mc.level != null) {
+            net.minecraft.world.level.border.WorldBorder border = mc.level.getWorldBorder();
+            long all = 0;
+            long in = 0;
+            for (SchematicHelper.Area a : SchematicHelper.areas()) {
+                long w = a.maxX() - a.minX() + 1L;
+                long d = a.maxZ() - a.minZ() + 1L;
+                all += w * d;
+                long iw = Math.max(0, Math.min(a.maxX(), (long) Math.ceil(border.getMaxX()) - 1) - Math.max(a.minX(), (long) Math.ceil(border.getMinX())) + 1);
+                long id = Math.max(0, Math.min(a.maxZ(), (long) Math.ceil(border.getMaxZ()) - 1) - Math.max(a.minZ(), (long) Math.ceil(border.getMinZ())) + 1);
+                in += iw * id;
+            }
+            BuildLog.line("BORDER", String.format(java.util.Locale.ROOT, "world border x %.1f to %.1f, z %.1f to %.1f | %d of %d columns of the schematic inside",
+                    border.getMinX(), border.getMaxX(), border.getMinZ(), border.getMaxZ(), in, all));
+            if (all > 0 && in < all) {
+                Chat.warn(String.format(java.util.Locale.ROOT, "%d%% of the schematic is past your island's border (x %d to %d, z %d to %d):"
+                                + " that part is left out, only what's inside is built and bought for.",
+                        Math.round(100.0 * (all - in) / all), (long) Math.ceil(border.getMinX()), (long) Math.ceil(border.getMaxX()) - 1,
+                        (long) Math.ceil(border.getMinZ()), (long) Math.ceil(border.getMaxZ()) - 1));
+            }
+        }
         Perf.report();
         logTicks = 0;
         placedAtSnapshot = 0;

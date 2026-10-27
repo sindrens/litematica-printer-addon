@@ -207,6 +207,9 @@ public final class DebugInfo {
         return String.join("\n",
                 String.format(Locale.ROOT, "Position: %.2f %.2f %.2f in %s, looking %.0f / %.0f", player.getX(), player.getY(), player.getZ(),
                         mc.level.dimension().identifier(), player.getYRot(), player.getXRot()),
+                String.format(Locale.ROOT, "World border: x %.1f to %.1f, z %.1f to %.1f%s", mc.level.getWorldBorder().getMinX(),
+                        mc.level.getWorldBorder().getMaxX(), mc.level.getWorldBorder().getMinZ(), mc.level.getWorldBorder().getMaxZ(),
+                        Edge.known() ? " | edge learned: " + Edge.describe() : ""),
                 "Flying: " + player.getAbilities().flying + ", on the ground: " + player.onGround() + ", game mode: "
                         + (mc.gameMode == null ? "?" : mc.gameMode.getPlayerMode().getName()),
                 String.format(Locale.ROOT, "Health: %.0f, food: %d", player.getHealth(), player.getFoodData().getFoodLevel()),

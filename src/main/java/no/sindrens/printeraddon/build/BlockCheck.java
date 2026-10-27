@@ -75,6 +75,10 @@ public final class BlockCheck {
         if (!level.isLoaded(pos) || !schematic.getChunkSource().hasChunk(pos.getX() >> 4, pos.getZ() >> 4)) {
             return Result.UNLOADED;
         }
+        // Past the edge of where the server lets the player build (see Edge): nothing to do there
+        if (Edge.outside(level, pos)) {
+            return Result.OK;
+        }
 
         BlockState target = schematic.getBlockState(pos);
         BlockState current = level.getBlockState(pos);
