@@ -498,7 +498,13 @@ public class Configs implements IConfigHandler {
         }
     }
 
+    /** The settings were read once since the game started (see loadFromFile). */
+    private static boolean loadedOnce;
+
     public static void loadFromFile() {
+        // Read again later (the settings screen saves and reads them back when a setting is changed): a build that's
+        // running goes on. Changing "auto eat" stopped a build: the file has auto build off, as it's saved off
+        boolean buildOn = Generic.AUTO_BUILD.getBooleanValue();
         Path configFile = FileUtils.getConfigDirectory().resolve(CONFIG_FILE_NAME);
 
         if (Files.exists(configFile) && Files.isReadable(configFile)) {
@@ -555,8 +561,9 @@ public class Configs implements IConfigHandler {
             }
         }
 
-        // Never start building on its own after a restart
-        Generic.AUTO_BUILD.setBooleanValue(false);
+        // Never start building on its own after a restart; a reload while it builds keeps it building
+        Generic.AUTO_BUILD.setBooleanValue(loadedOnce && buildOn);
+        loadedOnce = true;
     }
 
     public static void saveToFile() {

@@ -54,7 +54,7 @@ public final class Diagnose {
         if (build.rails.isTemp(pos)) {
             sb.append(" | temporary rail spot");
         }
-        if (AirPlace.needsAirPlace(mc.level, schematic, pos, target)) {
+        if (result == BlockCheck.Result.MISSING && AirPlace.needsAirPlace(mc.level, schematic, pos, target)) {
             sb.append(AutoBuild.INSTANCE.airPlace.allowed() ? " | floating: air place" : " | floating: air place is off");
         }
 
