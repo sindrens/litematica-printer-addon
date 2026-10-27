@@ -211,3 +211,7 @@
 - A bulk purchase fills the vault room with more than one round of an item (a second purchase when 16 stacks or more are still to go): fewer shop visits.
 - Blocks the layer needs only a few of (3 white concrete) are no longer put away to make room: that was a trip of its own a minute later, twice a layer.
 - Test runs of the developer no longer send their logs to the report channel.
+
+## 26.2-0.17.18
+- A few blocks at the far end of the build (left from before a restart) are placed with the spots after the lanes, on their planned route, not flown to as a lane of their own (a layer ended with a 139 block flight for 3 blocks).
+- After each layer: how long the rest of the build takes at this run's speed, in chat and in the build log ("About 6 h 10 min left").

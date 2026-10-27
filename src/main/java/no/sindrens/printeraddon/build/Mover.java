@@ -971,6 +971,10 @@ public class Mover {
     private static final double IN_ORDER_SLACK = 12;
     /** A lane part with fewer blocks than this isn't flown as a lane (see nextLane). */
     private static final int MIN_LANE_PART = 20;
+    /** A lane part with fewer blocks than this, farther away than FAR_PART_DISTANCE, is left for after the lanes. */
+    private static final int FAR_PART_BLOCKS = 40;
+    private static final double FAR_PART_DISTANCE = 48;
+    private int lastFarSmall;
     private int lastTinyParts = -1;
     /** Held at a lane's end at most this long while blocks in reach are still to be placed (see sweepTick). */
     private static final int LANE_END_WAIT = 20;
@@ -1281,6 +1285,22 @@ public class Mover {
                 BuildLog.line("SWEEP", tiny + " lane part" + (tiny == 1 ? "" : "s") + " with fewer than " + MIN_LANE_PART
                         + " blocks (" + tinyBlocks + " in all) not flown as lanes: placed from the lanes beside them or after the lanes");
             }
+        }
+        // A small part far away (a few blocks at the far end of lanes done before a restart): with the spots left
+        // after the lanes, on their planned route, not a lane of its own. A layer ended with a 139 block flight for 3
+        Vec3 here = player.position();
+        int farSmall = 0;
+        for (java.util.Iterator<LanePart> it = parts.iterator(); it.hasNext(); ) {
+            LanePart part = it.next();
+            if (part.unloaded() == 0 && part.blocks() < FAR_PART_BLOCKS && partDistance(here, part) > FAR_PART_DISTANCE) {
+                it.remove();
+                farSmall++;
+            }
+        }
+        if (farSmall > 0 && farSmall != lastFarSmall) {
+            lastFarSmall = farSmall;
+            BuildLog.line("SWEEP", farSmall + " small lane part" + (farSmall == 1 ? "" : "s") + " more than " + (int) FAR_PART_DISTANCE
+                    + " blocks away: placed with the spots left after the lanes");
         }
         if (parts.isEmpty()) {
             return false;

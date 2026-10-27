@@ -239,6 +239,22 @@ public class BuildStats {
         layerStartMillis = System.currentTimeMillis();
     }
 
+    /**
+     * "About 6 h 10 min left (247,000 blocks at this run's 668 a minute)", after each layer, or null this early in a
+     * run (under 3 minutes or 1000 blocks: the rate isn't known well enough yet).
+     */
+    @javax.annotation.Nullable
+    public String eta(int blocksLeft) {
+        long millis = System.currentTimeMillis() - buildStartMillis;
+        if (blocksLeft <= 0 || millis < 3 * 60_000 || totalPlaced < 1000) {
+            return null;
+        }
+        double perMinute = totalPlaced / (millis / 60_000.0);
+        long minutes = Math.round(blocksLeft / perMinute);
+        String time = minutes >= 60 ? minutes / 60 + " h " + minutes % 60 + " min" : minutes + " min";
+        return String.format(java.util.Locale.ROOT, "About %s left (%,d blocks at this run's %.0f a minute)", time, blocksLeft, perMinute);
+    }
+
     public int totalPlaced() {
         return totalPlaced;
     }

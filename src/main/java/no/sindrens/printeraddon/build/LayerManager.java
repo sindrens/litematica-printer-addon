@@ -654,7 +654,11 @@ public class LayerManager {
                 return true;
             }
 
-            Chat.info(describeLayers() + " done.");
+            String eta = AutoBuild.INSTANCE.stats.eta(AutoBuild.INSTANCE.blocksLeft());
+            Chat.info(describeLayers() + " done." + (eta == null ? "" : " " + eta + "."));
+            if (eta != null) {
+                BuildLog.line("ETA", eta);
+            }
             AutoBuild.INSTANCE.stats.layerDone(describeLayers());
             leftAtDone(mc.level, schematic, areas);
             RunLog.layerEnd(describeLayers());
