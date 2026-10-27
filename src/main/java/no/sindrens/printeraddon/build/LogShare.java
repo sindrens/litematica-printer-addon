@@ -526,6 +526,26 @@ public final class LogShare {
         }
     }
 
+    /**
+     * Another mod's log (AutoSell) through the same channel, with the debug. {@code automatic}: only when logs go by
+     * themselves (the setting). False when it can't go (no channel, or automatic sending is off).
+     */
+    public static boolean shareOther(Minecraft mc, String what, String why, Path file, String summary, boolean automatic) {
+        String url = channel();
+        if (url.isEmpty() || !url.startsWith("https://") || automatic && !Configs.Generic.SHARE_LOGS.getBooleanValue()
+                || !Files.isRegularFile(file)) {
+            return false;
+        }
+        char kind = automatic ? 'S' : 'L';
+        String version = modVersion(PrinterAddon.MOD_ID);
+        String head = header(mc, automatic, version);
+        String text = "**Ran:** " + what + "\n**Ended:** " + why + (summary.isBlank() ? "" : "\n**Last:** " + summary);
+        long now = System.currentTimeMillis();
+        add(new Job(newId(kind), now, GAME, now, kind, version, playerName(mc), what, automatic, what + ": " + why, head, text,
+                gather(mc, null, head, text, file), file.toString(), null, null));
+        return true;
+    }
+
     private static String gather(Minecraft mc, @Nullable Report report, String head, String summary, @Nullable Path log) {
         try {
             return DebugInfo.collect(mc, report, head, summary, log);

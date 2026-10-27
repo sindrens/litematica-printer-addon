@@ -42,4 +42,9 @@ public final class PrinterAddonApi {
     public static void discordEvent(String type, String message) {
         DiscordLink.event(type, message);
     }
+
+    /** Sends another mod's log file through the log channel (with the debug); false when it can't go. */
+    public static boolean shareLog(String what, String why, String file, String summary, boolean automatic) {
+        return no.sindrens.printeraddon.build.LogShare.shareOther(Minecraft.getInstance(), what, why, java.nio.file.Path.of(file), summary, automatic);
+    }
 }

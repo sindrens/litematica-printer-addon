@@ -232,3 +232,6 @@
 - Learns an island edge from refused clicks too, and leaves everything past it.
 - Refused clicks on the same spot no longer slow the printer down or shrink the reach.
 - Debug info shows the world border.
+
+## 26.2-0.17.21
+- AutoSell 1.2 can send its log through the add-on's log channel (rounds that went wrong, and /autosell log).
