@@ -177,3 +177,12 @@
 ## 26.2-0.17.12
 - A cactus flower right beside a block still to go in is broken (string and sand waited for good beside flowers nobody broke, and the layer was called done without them). Flowers that aren't in the way are still left alone.
 - Blocks left over far below (at the bottom of a tower) are only done at the very end, not flown down to after every layer.
+
+## 26.2-0.17.13
+- "Storage full" says what fills it: mostly the build's own string, sand and cactus bought ahead is fine (nothing to do), and it only asks you to empty some when other things take up the room.
+- The build log shows the route: which lane it flies to next and why, how far, the next best choice, and between layers where the last layer ended and where the next one starts.
+- Blocks a lane leaves say why: sand with nothing under it yet (its string isn't in) instead of "out of reach".
+- Auto break does 3 levels at a time in one sweep instead of one level per sweep (a string level of a cactus tower, then the next, each across the whole area).
+- Auto break no longer hovers doing nothing when the blocks left on a level can't be got to: on down, back for them at the end. It also tries spots right beside a block, not only above it.
+- A grown cactus to break while the lanes are flown waits until the sand around it is in and it can stand there (5 times faster than breaking from the air): breaking from the air took most of a 24 minute run.
+- Stopping for damage says what the damage was in the log.

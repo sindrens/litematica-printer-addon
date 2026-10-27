@@ -96,6 +96,19 @@ public final class AreaBreaker {
     /** The lane being broken: the later ones are left standing (the player stands on them). */
     private int currentLane;
 
+    /**
+     * Levels broken together: the current one and the two under it, in one sweep of lanes (each block from the top of
+     * its column down). One level at a time flew the whole area for each string level of a cactus tower, a few blocks
+     * on some of them.
+     */
+    private static final int BAND = 3;
+    /** The band whose blocks left are all left out for now: on to the next band, back for them in the final pass. */
+    private int bandGivenUp = Integer.MIN_VALUE;
+
+    private int bandBottom() {
+        return Math.max(bottom, layer - BAND + 1);
+    }
+
     /** Leave a block out for this long when it can't be got to. */
     private static final int LEAVE_OUT_TICKS = 20 * 60;
     /** Given up on getting to a block after this long. */
@@ -110,6 +123,11 @@ public final class AreaBreaker {
 
     public boolean isRunning() {
         return running;
+    }
+
+    /** On the way to a block to break (for the run log's time split). */
+    public boolean hasGoal() {
+        return running && goal != null;
     }
 
     // ---- the selection
@@ -408,7 +426,9 @@ public final class AreaBreaker {
         int lane = laneOf(pos);
         int along = alongX ? pos.getX() : pos.getZ();
         boolean forward = (lane % 2 == 0) == firstForward;
-        return (long) lane * 1_000_000L + (forward ? along - alongMin : alongMax - along);
+        // Within a band: the higher block of a spot first (a column from the top down)
+        int depth = Math.max(0, Math.min(7, layer - pos.getY()));
+        return (long) lane * 10_000_000L + (long) (forward ? along - alongMin : alongMax - along) * 8 + depth;
     }
 
     /**
@@ -587,8 +607,9 @@ public final class AreaBreaker {
             scanLayer(mc);
         }
         // This level done (as far as it's loaded): down to the next one with something to break
-        while (layerLeft.isEmpty() && layerUnloaded.isEmpty()) {
-            if (layer <= bottom) {
+        while (layerLeft.isEmpty() && layerUnloaded.isEmpty() || bandGivenUp == layer) {
+            if (bandBottom() <= bottom) {
+                bandGivenUp = Integer.MIN_VALUE;
                 // Before "done": the whole area once more, top to bottom. Anything still there (grown since, a plant
                 // that was to drop with its base but didn't, a block left out for a while) gets another pass
                 int again = finalCheck(mc);
@@ -605,10 +626,11 @@ public final class AreaBreaker {
             }
             int layerBroken = breaker.getBrokenCount() - layerBrokenAtStart;
             if (layerBroken > 0) {
-                BuildLog.line("AREA", String.format(Locale.ROOT, "Y %d done: %d broken in %.1fs", layer, layerBroken,
-                        (AutoBuild.clientTicks - layerStartedAt) / 20.0));
+                BuildLog.line("AREA", String.format(Locale.ROOT, "Y %d to %d done: %d broken in %.1fs%s", layer, bandBottom(), layerBroken,
+                        (AutoBuild.clientTicks - layerStartedAt) / 20.0, bandGivenUp == layer ? " (the rest left out: back for it at the end)" : ""));
             }
-            layer--;
+            bandGivenUp = Integer.MIN_VALUE;
+            layer = bandBottom() - 1;
             layerStartedAt = AutoBuild.clientTicks;
             layerBrokenAtStart = breaker.getBrokenCount();
             // The next level's lanes start where the player is now: back the way it came, no flight across the area
@@ -650,9 +672,15 @@ public final class AreaBreaker {
             currentLane = laneOf(next);
         }
         if (next == null) {
-            // Everything left is left out for now: wait for that to pass (or for the no-progress stop)
+            // Everything left here is left out for now: on to the next levels, the final pass comes back for it. It
+            // hovered 47 s waiting for 9 blocks with no spot to break them from
             mover.goTo(null);
             leftOut.values().removeIf(until -> until < AutoBuild.clientTicks);
+            if (!breaker.isBusy()) {
+                BuildLog.line("AREA", (layerLeft.size() + layerUnloaded.size()) + " left on Y " + layer + " to " + bandBottom()
+                        + " can't be got to now: on down, back for them at the end");
+                bandGivenUp = layer;
+            }
             return;
         }
         if (!next.equals(goal)) {
@@ -711,9 +739,12 @@ public final class AreaBreaker {
         Vec3 center = Vec3.atCenterOf(pos);
         Vec3 best = null;
         double bestDistance = Double.MAX_VALUE;
-        for (int dy = 1; dy <= 4; dy++) {
+        for (int dy = 0; dy <= 4; dy++) {
             for (int dx = -3; dx <= 3; dx++) {
                 for (int dz = -3; dz <= 3; dz++) {
+                    if (dy == 0 && dx == 0 && dz == 0) {
+                        continue;
+                    }
                     BlockPos feet = pos.offset(dx, dy, dz);
                     Vec3 spot = new Vec3(feet.getX() + 0.5, feet.getY(), feet.getZ() + 0.5);
                     if (spot.add(0, player.getEyeHeight(), 0).distanceToSqr(center) > reach * reach || !FlyPath.fits(mc.level, feet)
@@ -721,7 +752,8 @@ public final class AreaBreaker {
                         continue;
                     }
                     // Low over the level first: from there the most blocks are in reach (from 3 above, those 3 to the side)
-                    double distance = spot.distanceToSqr(player.position()) + dy * dy * 4;
+                    // (Beside it at its own height only when nothing above will do: down among the farm's columns)
+                    double distance = spot.distanceToSqr(player.position()) + (dy == 0 ? 64 : dy * dy * 4);
                     if (distance < bestDistance) {
                         bestDistance = distance;
                         best = spot;
@@ -787,21 +819,21 @@ public final class AreaBreaker {
         leftOut.values().removeIf(until -> until < AutoBuild.clientTicks);
         Set<Long> unloadedChunks = new HashSet<>();
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        int low = bandBottom();
         for (int[] b : boxes) {
-            if (layer < b[1] || layer > b[4]) {
-                continue;
-            }
-            for (int x = b[0]; x <= b[3]; x++) {
-                for (int z = b[2]; z <= b[5]; z++) {
-                    pos.set(x, layer, z);
-                    if (!mc.level.isLoaded(pos)) {
-                        if (unloadedChunks.add(((long) (z >> 4) << 32) | ((x >> 4) & 0xFFFFFFFFL))) {
-                            layerUnloaded.add(pos.immutable());
+            for (int y = Math.min(layer, b[4]); y >= Math.max(low, b[1]); y--) {
+                for (int x = b[0]; x <= b[3]; x++) {
+                    for (int z = b[2]; z <= b[5]; z++) {
+                        pos.set(x, y, z);
+                        if (!mc.level.isLoaded(pos)) {
+                            if (unloadedChunks.add(((long) (z >> 4) << 32) | ((x >> 4) & 0xFFFFFFFFL))) {
+                                layerUnloaded.add(pos.immutable());
+                            }
+                            continue;
                         }
-                        continue;
-                    }
-                    if (wants(mc.level, pos)) {
-                        layerLeft.add(pos.immutable());
+                        if (wants(mc.level, pos)) {
+                            layerLeft.add(pos.immutable());
+                        }
                     }
                 }
             }
@@ -842,7 +874,7 @@ public final class AreaBreaker {
     /** For the HUD and the menu. */
     public String status() {
         int broken = AutoBuild.INSTANCE.breaker.getBrokenCount() - brokenAtStart;
-        return "Auto break: Y " + layer + ", lane " + (currentLane + 1) + " of " + laneCount + " (" + layerLeft.size() + " left on the level), "
+        return "Auto break: Y " + layer + ", lane " + (currentLane + 1) + " of " + laneCount + " (" + layerLeft.size() + " left on Y " + layer + " to " + bandBottom() + "), "
                 + broken + " of about " + total + " broken";
     }
 }

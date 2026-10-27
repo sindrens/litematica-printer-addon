@@ -127,9 +127,11 @@ public class BlockBreaker {
         int harm = 0;
         int far = 0;
         int blocked = 0;
+        // At the feet's height, or one lower (hovering a block over the layer's top, the footing is the top itself)
+        for (int dy = 0; dy >= -1; dy--)
         for (int dx = -HOP_REACH; dx <= HOP_REACH; dx++) {
             for (int dz = -HOP_REACH; dz <= HOP_REACH; dz++) {
-                BlockPos spotFeet = feet.offset(dx, 0, dz);
+                BlockPos spotFeet = feet.offset(dx, dy, dz);
                 BlockPos below = spotFeet.below();
                 if (below.equals(target) || !FlyPath.fits(level, spotFeet)) {
                     blocked++;
@@ -256,6 +258,7 @@ public class BlockBreaker {
 
     /** Forget which spots were given up on (start of a new build). */
     public void reset() {
+        footingWait.clear();
         failed.clear();
         suspects.clear();
         breakCounts.clear();
@@ -575,6 +578,9 @@ public class BlockBreaker {
                 continue;
             }
 
+            if (mode == Mode.WRONG && waitsForFooting(mc, player, immutable)) {
+                continue;
+            }
             best = immutable;
             bestDistance = distance;
         }
@@ -591,7 +597,35 @@ public class BlockBreaker {
             }
             best = low;
         }
+        // A slow block (a grown cactus, 2 s from the air) with nowhere to stand yet while the lanes are being flown:
+        // left until the lanes are done, when the sand around it is in and there's footing (5 times faster standing).
+        // Breaking them from the air took 76% of a 24 minute run: 523 breaks of 2 s each, 89 of them standing
         return best;
+    }
+
+    /** Slow blocks left for later while lanes are flown (see findNext), and since when. */
+    private final Map<BlockPos, Long> footingWait = new HashMap<>();
+    private static final int FOOTING_WAIT_TICKS = 20 * 120;
+
+    private boolean waitsForFooting(Minecraft mc, LocalPlayer player, BlockPos pos) {
+        Long since = footingWait.get(pos);
+        boolean lanes = AutoBuild.INSTANCE.mover.onLane();
+        if (since != null) {
+            if (lanes && tickCounter - since < FOOTING_WAIT_TICKS) {
+                return true;
+            }
+            footingWait.remove(pos);
+            return false;
+        }
+        BlockState state = mc.level.getBlockState(pos);
+        if (!lanes || !Configs.Breaking.STAND_TO_BREAK.getBooleanValue() || !player.getAbilities().flying
+                || state.getDestroySpeed(mc.level, pos) <= 0.05f || state.getDestroyProgress(player, mc.level, pos) >= 0.2f
+                || standSpot(player, pos) != null) {
+            return false;
+        }
+        footingWait.put(pos.immutable(), tickCounter);
+        skipNote(pos, "slow to break from the air, nowhere to stand yet: after the lanes (" + noSpotWhy + ")");
+        return true;
     }
 
     /**

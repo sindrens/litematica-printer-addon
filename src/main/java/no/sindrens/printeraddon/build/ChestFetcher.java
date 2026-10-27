@@ -368,8 +368,7 @@ public class ChestFetcher {
                 if (storageFull) {
                     BuildLog.lineOrKeep("STORAGE", "full: put " + taken + " items away, the rest didn't fit");
                     Chat.warn("Put " + taken + " items in storage; the rest didn't fit: " + storageNames(mc) + " "
-                            + (vaults().size() + ChestLinks.list(mc).size() == 1 ? "is" : "are") + " full. Link a chest for the"
-                            + " rest: look at a chest, press J+B and click 'Link the chest' (then 'Put building items away').");
+                            + (vaults().size() + ChestLinks.list(mc).size() == 1 ? "is" : "are") + " full. " + fullAdvice());
                 } else if (taken > 0) {
                     Chat.quiet("Put " + taken + " items in storage.");
                 }
@@ -836,10 +835,80 @@ public class ChestFetcher {
         if (step > fullWarnedPercent || AutoBuild.clientTicks - fullWarnedAt > 20L * 60 * 10) {
             fullWarnedPercent = step;
             fullWarnedAt = AutoBuild.clientTicks;
+            String advice = AutoBuild.INSTANCE.fetcher.fullAdvice();
             Chat.warn("Your storage is " + (step == 100 ? "full" : "getting full") + ": " + level[0] + " of " + level[1]
-                    + " slots used (" + storageNames(mc) + "). Empty some, or link a chest (look at it, J+B, 'Link the chest').");
-            BuildLog.lineOrKeep("STORAGE", "getting full: " + level[0] + " of " + level[1] + " slots used");
+                    + " slots used (" + storageNames(mc) + "). " + advice);
+            BuildLog.lineOrKeep("STORAGE", "getting full: " + level[0] + " of " + level[1] + " slots used | " + advice);
         }
+    }
+
+    /**
+     * What fills the storage, from what was seen in it last: the build's own items (bought ahead in bulk, see StockUp)
+     * and the rest, by slots. "Full" used to read as "empty your vaults" when they were full of the build's own string,
+     * sand and cactus, which is what they're for.
+     */
+    public String contentsSummary() {
+        Map<Item, Integer> all = new HashMap<>();
+        for (Known k : known.values()) {
+            k.contents().forEach((item, count) -> all.merge(item, count, Integer::sum));
+        }
+        java.util.Set<net.minecraft.world.level.block.Block> blocks = AutoBuild.INSTANCE.schematicBlocks;
+        java.util.Set<Item> needed = AutoBuild.INSTANCE.layers.layerNeeds().keySet();
+        int buildSlots = 0;
+        int otherSlots = 0;
+        List<Map.Entry<Item, Integer>> build = new ArrayList<>();
+        List<Map.Entry<Item, Integer>> other = new ArrayList<>();
+        for (Map.Entry<Item, Integer> e : all.entrySet()) {
+            if (e.getValue() <= 0) {
+                continue;
+            }
+            int slots = (int) Math.ceil(e.getValue() / (double) Math.max(1, e.getKey().getDefaultMaxStackSize()));
+            boolean forBuild = needed.contains(e.getKey()) || e.getKey() instanceof net.minecraft.world.item.BlockItem b && blocks.contains(b.getBlock())
+                    || e.getKey() == net.minecraft.world.item.Items.STRING && blocks.contains(net.minecraft.world.level.block.Blocks.TRIPWIRE);
+            if (forBuild) {
+                buildSlots += slots;
+                build.add(e);
+            } else {
+                otherSlots += slots;
+                other.add(e);
+            }
+        }
+        java.util.Comparator<Map.Entry<Item, Integer>> big = (a, b) -> Integer.compare(b.getValue(), a.getValue());
+        build.sort(big);
+        other.sort(big);
+        StringBuilder sb = new StringBuilder();
+        sb.append(buildSlots).append(" slots of this build's own items");
+        if (!build.isEmpty()) {
+            sb.append(" (").append(describe(top(build))).append(")");
+        }
+        sb.append(", ").append(otherSlots).append(" of other things");
+        if (!other.isEmpty()) {
+            sb.append(" (").append(describe(top(other))).append(")");
+        }
+        lastBuildSlots = buildSlots;
+        lastOtherSlots = otherSlots;
+        return sb.toString();
+    }
+
+    private int lastBuildSlots;
+    private int lastOtherSlots;
+
+    private static Map<Item, Integer> top(List<Map.Entry<Item, Integer>> entries) {
+        Map<Item, Integer> out = new LinkedHashMap<>();
+        for (int i = 0; i < Math.min(4, entries.size()); i++) {
+            out.put(entries.get(i).getKey(), entries.get(i).getValue());
+        }
+        return out;
+    }
+
+    /** What to tell the player about full storage: only "empty some" when other things take a good part of it. */
+    private String fullAdvice() {
+        String what = contentsSummary();
+        if (lastOtherSlots * 4 < lastBuildSlots + lastOtherSlots) {
+            return "Mostly this build's own items bought ahead: " + what + ". Nothing to do, they're used from there; what doesn't"
+                    + " fit stays in your inventory.";
+        }
+        return what + ". Empty some of the other things, or link a chest (look at it, J+B, 'Link the chest').";
     }
 
     /** "/pv 1, /pv 2 and 1 linked chest" for messages. */

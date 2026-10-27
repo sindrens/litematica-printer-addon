@@ -1089,8 +1089,11 @@ public class Mover {
                 sweepDone = true;
                 laneEnd = null;
                 state = State.IDLE;
+                lastLaneEndAt = player.position();
                 BuildLog.line("SWEEP", "all lanes of " + layers.describeLayers() + " flown; " + work.size()
-                        + " blocks left for spot by spot");
+                        + " blocks left for spot by spot" + String.format(java.util.Locale.ROOT,
+                        " | lanes ended at %.0f,%.0f,%.0f; flying to lanes this layer: %.0f blocks in %d",
+                        player.getX(), player.getY(), player.getZ(), approachSum, approachCount));
                 RunLog.lanesDone(work.size());
                 return false;
             }
@@ -1298,6 +1301,8 @@ public class Mover {
             nearest = Math.min(nearest, distance);
             rated.add(new double[]{i, distance});
         }
+        String pickWhy = "nearest";
+        boolean firstOfLayer = laneIndex < 0;
         LanePart best = null;
         for (double[] rating : rated) {
             LanePart part = parts.get((int) rating[0]);
@@ -1318,6 +1323,9 @@ public class Mover {
             if (inOrder != null && inOrder != best
                     && partDistance(at, inOrder) + (overWall(player, inOrder) ? OVER_WALL : 0) <= nearest + IN_ORDER_SLACK) {
                 best = inOrder;
+                pickWhy = "next-in-order";
+            } else if (inOrder == best && inOrder != null) {
+                pickWhy = "next-in-order(nearest too)";
             }
         }
         // The layer's first lane: the edge nearest the player, then across in order. From the middle it swept to one
@@ -1340,7 +1348,11 @@ public class Mover {
                         + (best.index() + 1) + " was nearest, in the middle)");
                 best = edge;
             }
+            pickWhy = "layer-start-edge";
         }
+        // Where the player goes next and why, with what else was there: to see from the log where the flying between
+        // lanes and layers goes (the route's cost), and whether another choice would have been shorter
+        logRoute(player, at, best, parts, pickWhy, firstOfLayer);
         laneIndex = best.index();
         int c = best.c();
         flownParts.computeIfAbsent(c, k -> new ArrayList<>()).add(new int[]{best.lo(), best.hi()});
@@ -1383,6 +1395,51 @@ public class Mover {
                 + laneStart.toShortString() + " to " + laneEnd.toShortString() + String.format(java.util.Locale.ROOT,
                 " | printer %.2f blocks a tick", sweepRate));
         return true;
+    }
+
+    /** Where the last layer's lanes ended (for the route between layers), and the flying to lanes so far this layer. */
+    @Nullable
+    private Vec3 lastLaneEndAt;
+    private double approachSum;
+    private int approachCount;
+
+    private void logRoute(LocalPlayer player, Vec3 at, LanePart best, List<LanePart> parts, String why, boolean firstOfLayer) {
+        double dist = partDistance(at, best);
+        LanePart alt = null;
+        for (LanePart part : parts) {
+            if (part != best && (alt == null || partDistance(at, part) < partDistance(at, alt))) {
+                alt = part;
+            }
+        }
+        if (firstOfLayer) {
+            approachSum = 0;
+            approachCount = 0;
+        }
+        approachSum += dist;
+        approachCount++;
+        StringBuilder sb = new StringBuilder();
+        sb.append(String.format(java.util.Locale.ROOT, "lane %d/%d pick=%s from %.0f,%.0f,%.0f to its %s end, %.1f blocks",
+                best.index() + 1, lanes.size(), why, at.x, at.y, at.z, nearerEndName(at, best), dist));
+        if (alt != null) {
+            sb.append(String.format(java.util.Locale.ROOT, " | next best lane %d at %.1f", alt.index() + 1, partDistance(at, alt)));
+        }
+        sb.append(" | ").append(parts.size()).append(" lane parts left");
+        if (firstOfLayer) {
+            sb.append(" | layer start: ").append(AutoBuild.INSTANCE.layers.describeLayers());
+            if (lastLaneEndAt != null) {
+                sb.append(String.format(java.util.Locale.ROOT, ", last layer's lanes ended at %.0f,%.0f,%.0f (%.1f blocks from here)",
+                        lastLaneEndAt.x, lastLaneEndAt.y, lastLaneEndAt.z, lastLaneEndAt.distanceTo(at)));
+            }
+        } else {
+            sb.append(String.format(java.util.Locale.ROOT, " | to lanes this layer: %.0f blocks in %d", approachSum, approachCount));
+        }
+        BuildLog.line("ROUTE", sb.toString());
+    }
+
+    private String nearerEndName(Vec3 at, LanePart part) {
+        double along = lanesAlongX ? at.x : at.z;
+        boolean lo = Math.abs(along - part.lo()) <= Math.abs(along - part.hi());
+        return (lanesAlongX ? "x " : "z ") + (lo ? part.lo() : part.hi());
     }
 
     /** The block of a lane at this place along it. */

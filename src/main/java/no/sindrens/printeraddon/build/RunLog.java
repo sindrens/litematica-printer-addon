@@ -467,6 +467,10 @@ public final class RunLog {
         if (build.breaker.isBusy()) {
             return Cat.BREAKING;
         }
+        // Auto break: on the way to the next block (it was "stuck", "nothing to place", 59% of a run), or waiting
+        if (AreaBreaker.INSTANCE.isRunning()) {
+            return AreaBreaker.INSTANCE.hasGoal() ? Cat.TRANSIT : Cat.IDLE_NO_WORK;
+        }
         if (placed > 0) {
             return Cat.PLACING;
         }

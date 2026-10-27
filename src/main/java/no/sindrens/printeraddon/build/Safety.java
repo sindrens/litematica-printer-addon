@@ -46,7 +46,14 @@ public class Safety {
             boolean plant = source != null && (source.is(net.minecraft.world.damagesource.DamageTypes.CACTUS)
                     || source.is(net.minecraft.world.damagesource.DamageTypes.SWEET_BERRY_BUSH));
             if (!plant || health < PLANT_DAMAGE_STOP) {
-                return plant ? "a cactus of the build hurt you (" + String.format(java.util.Locale.ROOT, "%.1f", health) + " health left)" : "you took damage";
+                // What it was, for the log: two stops of a night's run said only "you took damage"
+                String kind = source == null ? "unknown" : source.getMsgId();
+                net.minecraft.world.entity.Entity by = source == null ? null : source.getEntity();
+                BuildLog.line("SAFETY", String.format(java.util.Locale.ROOT, "damage source=%s%s player=%.2f,%.2f,%.2f flying=%s onGround=%s lost=%.1f health=%.1f food=%d: stopping",
+                        kind, by == null ? "" : " by=" + by.getName().getString(), player.getX(), player.getY(), player.getZ(),
+                        player.getAbilities().flying, player.onGround(), lost, health, player.getFoodData().getFoodLevel()));
+                return plant ? "a cactus of the build hurt you (" + String.format(java.util.Locale.ROOT, "%.1f", health) + " health left)"
+                        : "you took damage (" + kind + (by == null ? "" : " from " + by.getName().getString()) + String.format(java.util.Locale.ROOT, ", %.1f health left)", health);
             }
             plantHurt = true;
             // Which block it was (the player saw the flower on top and took it for the flower: it's the cactus under it)
