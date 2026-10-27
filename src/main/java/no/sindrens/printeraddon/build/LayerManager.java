@@ -449,7 +449,9 @@ public class LayerManager {
         Chat.warn("Layer Y " + y + " is missing " + fresh.size() + " blocks (broken, or not placed before): building it again first.");
         doneLayers.remove(y);
         layer = y;
-        layerTop = y;
+        // With the layer above when that one stands on it (the sand on this layer's string)
+        WorldSchematic world = SchematicHelper.world();
+        layerTop = world == null || mc.level == null ? y : topFor(mc.level, world, SchematicHelper.areas(), y);
         applyLayer();
         resetProgress();
         saveProgress(mc);
@@ -661,10 +663,20 @@ public class LayerManager {
                 doneLayers.add(y);
             }
             layer = layerTop;
+            int next = layerTop + 1;
             do {
                 layer++;
                 if (layer <= maxY && !doneLayers.contains(layer) && scan(mc.level, schematic, areas, layer, null) == 0) {
                     doneLayers.add(layer);
+                } else if (layer == next && layer <= maxY && doneLayers.contains(layer)) {
+                    // The layer right above, saved as done: looked at now, not only in the background. Its sand had
+                    // fallen (string broken by hand), and the next layers' lanes flew 4 times over the build placing
+                    // nothing with nothing under it, until the background check found it
+                    int missing = scan(mc.level, schematic, areas, layer, null);
+                    if (missing > RECHECK_DEFER_LIMIT) {
+                        doneLayers.remove(layer);
+                        BuildLog.line("VERIFY", "Layer Y " + layer + " (done) has " + missing + " blocks missing: built next");
+                    }
                 }
             } while (layer <= maxY && doneLayers.contains(layer));
             saveProgress(mc);
@@ -1161,21 +1173,79 @@ public class LayerManager {
      * Not when water goes in up there (it would run down where this layer isn't built yet).
      */
     private int topFor(Level level, WorldSchematic schematic, List<SchematicHelper.Area> areas, int y) {
-        if (!Configs.Layers.LAYERS_TOGETHER.getBooleanValue() || y >= maxY || doneLayers.contains(y + 1)) {
+        if (!Configs.Layers.LAYERS_TOGETHER.getBooleanValue() || y >= maxY) {
             return y;
         }
+        // (A layer saved as done above one being built again counts as it is now: string broken by hand let the sand
+        // on it fall, and the layer under it was built alone, 3666 cactus left open with their sand gone)
+        Upper second = upper(level, schematic, areas, y);
+        boolean together = second.together();
+        // Cactus on the upper layer whose sand comes one layer higher: built with that layer instead. Paired with the
+        // layer below, the cactus stood open on top until the next pass, and grew a block or two with a flower on it
+        // (552 flowers where string and sand go, grown cactus to break, the player brushing them)
+        if (together && cactusOpenOnTop(level, schematic, areas, y + 1)) {
+            BuildLog.line("LAYER", "Y " + (y + 1) + " not built together with Y " + y + ": its cactus would stand open on top until Y "
+                    + (y + 2) + " is built; Y " + (y + 1) + " goes with Y " + (y + 2) + " instead");
+            return y;
+        }
+        if (second.onTop > 0) {
+            BuildLog.line("LAYER", String.format(java.util.Locale.ROOT, "Y %d %s Y %d: on Y %d, %d blocks still to place stand on Y %d %s, %d others%s",
+                    y + 1, together ? "built together with" : "not built together with", y, y + 1, second.onTop, y, second.kinds, second.others,
+                    second.water > 0 ? ", " + second.water + " with water" : ""));
+        }
+        if (!together) {
+            return y;
+        }
+        if (doneLayers.remove(y + 1)) {
+            BuildLog.line("LAYER", "Y " + (y + 1) + " was saved as done but has " + second.onTop + " blocks to place again: built with Y " + y);
+        }
+        // A third layer: only when it stands on the second, leaves no cactus open, and the lanes it allows (narrower:
+        // the lowest layer has to be in reach from above the highest) still do more layers a sweep. Reach 4.25 from
+        // over the top: 1 layer 7 rows wide, 2 layers 5 rows (10 layer-rows a sweep), 3 layers 3 rows (9)
+        if (y + 2 > maxY) {
+            return y + 1;
+        }
+        // The reach the lanes are planned with (see Mover.planReach)
+        double reach = ReachStats.reach(me.aleksilassila.litematica.printer.config.Configs.PRINTING_RANGE.getDoubleValue() - 0.25);
+        int w2 = laneRows(reach, 2);
+        int w3 = laneRows(reach, 3);
+        Upper third = upper(level, schematic, areas, y + 1);
+        boolean cactusOpen = third.together() && cactusOpenOnTop(level, schematic, areas, y + 2);
+        boolean worth = w3 * 3 > w2 * 2;
+        boolean three = third.together() && !cactusOpen && worth;
+        if (third.onTop > 0 || three) {
+            BuildLog.line("LAYER", String.format(java.util.Locale.ROOT,
+                    "3 layers Y %d-%d? %s | Y %d on Y %d: %d blocks%s | lanes: 2 layers %d rows (%d layer-rows a sweep), 3 layers %d rows (%d)%s",
+                    y, y + 2, three ? "yes" : "no", y + 2, y + 1, third.onTop, third.together() ? "" : " (not enough standing on it)",
+                    w2, w2 * 2, w3, w3 * 3, cactusOpen ? " | its cactus would stand open on top" : worth ? "" : " | 3 is slower here"));
+        }
+        if (three) {
+            doneLayers.remove(y + 2);
+            return y + 2;
+        }
+        return y + 1;
+    }
+
+    /** What's still to place on layer {@code lower + 1}, by whether it stands on layer {@code lower}. */
+    private record Upper(int onTop, int others, int water, java.util.Map<String, Integer> kinds) {
+        boolean together() {
+            return water == 0 && onTop >= TOGETHER_MIN && others * TOGETHER_OTHERS <= onTop;
+        }
+    }
+
+    private Upper upper(Level level, WorldSchematic schematic, List<SchematicHelper.Area> areas, int lower) {
         int onTop = 0;
         int others = 0;
         int water = 0;
         java.util.Map<String, Integer> kinds = new java.util.TreeMap<>();
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
         for (SchematicHelper.Area area : areas) {
-            if (y + 1 < area.minY() || y + 1 > area.maxY()) {
+            if (lower + 1 < area.minY() || lower + 1 > area.maxY()) {
                 continue;
             }
             for (int x = area.minX(); x <= area.maxX(); x++) {
                 for (int z = area.minZ(); z <= area.maxZ(); z++) {
-                    pos.set(x, y + 1, z);
+                    pos.set(x, lower + 1, z);
                     BlockState target = schematic.getBlockState(pos);
                     if (target.isAir()) {
                         continue;
@@ -1195,21 +1265,17 @@ public class LayerManager {
                 }
             }
         }
-        boolean together = water == 0 && onTop >= TOGETHER_MIN && others * TOGETHER_OTHERS <= onTop;
-        // Cactus on the upper layer whose sand comes one layer higher: built with that layer instead. Paired with the
-        // layer below, the cactus stood open on top until the next pass, and grew a block or two with a flower on it
-        // (552 flowers where string and sand go, grown cactus to break, the player brushing them)
-        if (together && cactusOpenOnTop(level, schematic, areas, y + 1)) {
-            BuildLog.line("LAYER", "Y " + (y + 1) + " not built together with Y " + y + ": its cactus would stand open on top until Y "
-                    + (y + 2) + " is built; Y " + (y + 1) + " goes with Y " + (y + 2) + " instead");
-            return y;
-        }
-        if (onTop > 0) {
-            BuildLog.line("LAYER", String.format(java.util.Locale.ROOT, "Y %d %s Y %d: on Y %d, %d blocks still to place stand on Y %d %s, %d others%s",
-                    y + 1, together ? "built together with" : "not built together with", y, y + 1, onTop, y, kinds, others,
-                    water > 0 ? ", " + water + " with water" : ""));
-        }
-        return together ? y + 1 : y;
+        return new Upper(onTop, others, water, kinds);
+    }
+
+    /**
+     * How wide the lanes can be (rows) for this many layers built together: from 1 block over the top layer (eyes 2.12
+     * over the top layer's middle), the lowest layer has to be in reach to the lane's side rows.
+     */
+    static int laneRows(double reach, int layers) {
+        double dy = 2.12 + (layers - 1);
+        double side = reach * reach - dy * dy;
+        return side <= 0 ? 1 : 2 * (int) Math.floor(Math.sqrt(side)) + 1;
     }
 
     /**

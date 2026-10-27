@@ -361,6 +361,16 @@ public class BlockBreaker {
         }
         mc.gameMode.startDestroyBlock(target, face);
         player.swing(InteractionHand.MAIN_HAND);
+        // Gone with the first hit (string): done now, not a tick later, and the next one after 1 tick at most (a break
+        // every 2 ticks, as fast as the printer places). It was 5 ticks a string: 240 a minute in a test, flying slower
+        // than it could to keep up
+        if (quickTarget && !standing && mc.level.getBlockState(target).isAir()) {
+            forced.remove(target);
+            breaks++;
+            brokenCount++;
+            target = null;
+            cooldown = Math.min(1, Configs.Speed.breakCooldownTicks());
+        }
     }
 
     private void continueBreaking(Minecraft mc, LocalPlayer player, @Nullable WorldSchematic schematic, Mode mode) {

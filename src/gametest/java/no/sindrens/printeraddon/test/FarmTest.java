@@ -249,6 +249,11 @@ public class FarmTest implements FabricClientGameTest {
                 }
                 // PRINTER_ADDON_BREAK=1: the farm built (PRINTER_ADDON_PREBUILT_LAYERS=99) is broken again by Auto break
                 if (System.getenv("PRINTER_ADDON_BREAK") != null) {
+                    // PRINTER_ADDON_BREAK_SKIP=cactus,sand: only the string is broken (like the player's runs)
+                    String skip = System.getenv("PRINTER_ADDON_BREAK_SKIP");
+                    if (skip != null) {
+                        Configs.Breaking.AUTO_BREAK_SKIP.setValueFromString(skip);
+                    }
                     List<int[]> boxes = new java.util.ArrayList<>();
                     for (SchematicHelper.Area a : SchematicHelper.areas()) {
                         boxes.add(new int[]{a.minX(), a.minY(), a.minZ(), a.maxX(), a.maxY(), a.maxZ()});

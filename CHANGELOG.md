@@ -191,3 +191,9 @@
 - Auto break on string (anything that goes with one hit): lanes 7 wide flown along their middle, everything in reach broken on the way, instead of 3-wide lanes with a stop at each block. About twice fewer sweeps over the area.
 - Auto break's 3 levels at a time start at a level that has something on it: on a cactus farm (string every other level) that's 2 string levels in one sweep, not 1.
 - The build log says how each Auto break band is laid out (how many blocks, lanes, how wide).
+
+## 26.2-0.17.15
+- A layer saved as done whose blocks are gone again (the sand falls when the string under it is broken) is built again together with the layer under it: string, then the sand on it in the same lanes. Before, the string layer was built alone and the next layers flew lanes with nothing under them (the sand stripes in your farm).
+- The layer right above a finished one is checked at once, not only in the background.
+- How many layers go together is worked out each time: the next layer only when it stands on the one below, leaves no cactus open, and the narrower lanes it needs still do more a sweep. With your reach that's 2 (string and cactus, then the sand on the string); the log says why ("3 layers ...? no").
+- Auto break: blocks that go with one hit (string) are broken every 2 ticks instead of every 5.
