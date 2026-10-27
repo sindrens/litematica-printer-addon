@@ -3569,6 +3569,12 @@ public class Mover {
             if (skipped.containsKey(pos) || work.contains(pos) || AutoBuild.INSTANCE.couldNotPlace.contains(pos)) {
                 continue;
             }
+            // Far below the layers being built (3 white concrete at the bottom of a tower 50 blocks down): only at the
+            // end. It flew down into the tower through the cactus after them at the end of every layer, a minute each
+            LayerManager layers = AutoBuild.INSTANCE.layers;
+            if (layers.isActive() && !layers.isFinishingDeferred() && pos.getY() < layers.getLayer() - 8) {
+                continue;
+            }
             BlockCheck.Result result = BlockCheck.check(mc.level, schematic, pos);
             if (result != BlockCheck.Result.MISSING) {
                 continue;

@@ -445,13 +445,31 @@ public class BlockBreaker {
             return false;
         }
         BlockState wanted = schematic.getBlockState(pos);
-        if (wanted.isAir() || wanted.getBlock() == state.getBlock() || !DataManager.getRenderLayerRange().isPositionWithinRange(pos)) {
+        if (wanted.getBlock() == state.getBlock() || !DataManager.getRenderLayerRange().isPositionWithinRange(pos)) {
             return false;
         }
         net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
         if (mc.player == null || AutoBuild.INSTANCE.isWaitingForItems()) {
             return false;
         }
+        // Where a block goes itself
+        if (!wanted.isAir()) {
+            return canPlaceNow(mc, wanted);
+        }
+        // Beside a block still to go in: the printer clicks against the flower (or holds that block back while it's
+        // there, see Clicks.goingAway). Three sand blocks of a finished layer waited for flowers beside them for good
+        for (net.minecraft.core.Direction d : net.minecraft.core.Direction.values()) {
+            BlockPos n = pos.relative(d);
+            BlockState nWanted = schematic.getBlockState(n);
+            if (!nWanted.isAir() && level.getBlockState(n).canBeReplaced() && !level.getBlockState(n).is(nWanted.getBlock())
+                    && DataManager.getRenderLayerRange().isPositionWithinRange(n) && canPlaceNow(mc, nWanted)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean canPlaceNow(net.minecraft.client.Minecraft mc, BlockState wanted) {
         net.minecraft.world.item.Item item = wanted.getBlock().asItem();
         return item != net.minecraft.world.item.Items.AIR && (mc.player.getAbilities().instabuild || mc.player.getInventory().countItem(item) > 0);
     }
@@ -535,7 +553,9 @@ public class BlockBreaker {
             // A cactus that grew up (or the flower on it), with the layer's sand still to go in beside it somewhere
             // down its column: the whole column drops by itself once that's placed (breaking each takes 3 s while
             // flying, 5 times slower than standing: 74 blocks a minute on the player's server)
-            BlockPos dropsFor = dropsBecauseOf(mc.level, schematic, pos);
+            // (Not a flower that's in the way: it goes with one hit, and the block it's in the way of may be the one
+            // that would make it drop, held back while it's there)
+            BlockPos dropsFor = alwaysBreak(mc.level.getBlockState(pos)) ? null : dropsBecauseOf(mc.level, schematic, pos);
             if (dropsFor != null) {
                 skipNote(pos, "growth (drops by itself once " + dropsFor.toShortString() + " is placed)");
                 continue;

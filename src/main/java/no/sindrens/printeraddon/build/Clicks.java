@@ -39,7 +39,10 @@ public final class Clicks {
     public static boolean goingAway(net.minecraft.world.level.Level level, BlockPos pos) {
         BlockState state = level.getBlockState(pos);
         if (state.is(net.minecraft.world.level.block.Blocks.CACTUS_FLOWER) || BlockBreaker.alwaysBreak(state)) {
-            return true;
+            // Only when it's actually going to be broken (see BlockBreaker.breakAnyway): else the block beside it
+            // waited for a flower nobody was breaking
+            WorldSchematic schematic = SchematicHelper.world();
+            return schematic == null || BlockBreaker.breakAnyway(level, schematic, pos);
         }
         return state.is(net.minecraft.world.level.block.Blocks.CACTUS)
                 && (!state.canSurvive(level, pos) || AutoBuild.INSTANCE.breaker.breakingUnder(pos));

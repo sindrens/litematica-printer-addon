@@ -173,3 +173,7 @@
 - Bulk buying no longer puts stacks into a vault and takes them straight back out.
 - Blocks put into a vault to make room are checked: when the vault doesn't take them, the log says so.
 - "Bring these" shows the numbers with commas, and the cactus warning shows once.
+
+## 26.2-0.17.12
+- A cactus flower right beside a block still to go in is broken (string and sand waited for good beside flowers nobody broke, and the layer was called done without them). Flowers that aren't in the way are still left alone.
+- Blocks left over far below (at the bottom of a tower) are only done at the very end, not flown down to after every layer.
