@@ -279,3 +279,14 @@
 - Servers can turn the add-on off with the MOTD tag [printer_addon:disable] or the plugin message printer_addon:policy "disable". They can allow faster movement with [printer_addon:allow-fast-movement].
 - Official build: log sharing and the Discord link are off by default. The Discord link only works over https. Air place is off by default.
 - A short guide in chat the first time you join a world (official build).
+- Big layers are checked a little each tick instead of all at once, so 200 x 200 builds don't stutter.
+- New safety stops in both editions:
+  - It stops in lava, when falling into the void, and when health is low.
+  - It stops when the inventory has been full for 90 seconds with nothing placed.
+  - Breaking never goes outside the schematic (or Auto break's selected area).
+- "Why did it stop?": the Controls tab shows the last stop and what to do about it. You can also type /printeraddon why.
+- "Report a problem..." button in Controls, and /printeraddon report. Nothing is sent until you press Send.
+- The settings start in Basic view (Controls, Build, Auto break, Basic settings, Commands). The "Advanced" button shows every tab.
+- The settings are translated into Norwegian (Bokmål) when the game is set to Norwegian.
+- Checks the versions of Litematica, Litematica Printer and MaLiLib, and warns about mods that move the player too (Baritone, Freecam). Sodium and Iris are supported.
+- Test library: 14 test builds in testdata/library, made by tools/make_test_builds.py and run by tools/run_library.sh.

@@ -29,6 +29,7 @@
   ],
   "depends": {
     "minecraft": ">=26.2 <26.3",
+    "fabric-api": "*",
     "malilib": ">=0.29.6- <0.30.0-",
     "litematica": ">=0.28.8- <0.29.0-",
     "litematica_printer": ">=3.2.2"

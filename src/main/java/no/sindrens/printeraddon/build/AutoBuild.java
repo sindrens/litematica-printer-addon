@@ -2359,6 +2359,19 @@ public class AutoBuild {
     private String stopNote;
 
     /** Stops auto build. {@code reason} is shown as a warning when it isn't the player's own choice. */
+    /** Why the last run ended, for "why did it stop?" (Controls tab, /printeraddon why). */
+    public static String lastStopWhy = "";
+    public static long lastStopAt;
+
+    /** "Stopped 3 min ago: why. What to do." or a line saying nothing stopped yet. */
+    public static String whyStopped() {
+        if (lastStopWhy.isEmpty()) {
+            return "Auto build hasn't stopped since the game started.";
+        }
+        long minutes = (System.currentTimeMillis() - lastStopAt) / 60_000;
+        return "Last stop " + (minutes < 1 ? "just now" : minutes + " min ago") + ": " + Advice.withAdvice(lastStopWhy);
+    }
+
     public void stop(Minecraft mc, String reason) {
         stop(mc, reason, true);
     }
@@ -2426,6 +2439,8 @@ public class AutoBuild {
                     : "disconnected: " + disconnectReason) + " (picks up again once back at the build)"
                     : "stopped by you";
             BuildLog.line("END", why + " | " + stats.total() + " | " + spendingLine());
+            lastStopWhy = why;
+            lastStopAt = System.currentTimeMillis();
             if (tiller.tilledCount() > 0 || !schematicBlocks.isEmpty() && schematicBlocks.contains(net.minecraft.world.level.block.Blocks.FARMLAND)) {
                 BuildLog.line("TILL", tiller.summary());
             }

@@ -51,6 +51,16 @@ public final class AreaBreaker {
 
     /** The selection's boxes when it started: minX, minY, minZ, maxX, maxY, maxZ. */
     private final List<int[]> boxes = new ArrayList<>();
+
+    /** The block is in the area being broken (Auto break never breaks outside it). */
+    public boolean inSelection(net.minecraft.core.BlockPos pos) {
+        for (int[] b : boxes) {
+            if (pos.getX() >= b[0] && pos.getY() >= b[1] && pos.getZ() >= b[2] && pos.getX() <= b[3] && pos.getY() <= b[4] && pos.getZ() <= b[5]) {
+                return true;
+            }
+        }
+        return false;
+    }
     private boolean running;
     /** The level being broken now, and the lowest one. */
     private int layer;

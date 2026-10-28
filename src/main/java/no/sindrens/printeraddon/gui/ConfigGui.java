@@ -32,6 +32,7 @@ public class ConfigGui extends GuiConfigsBase {
 
     public ConfigGui() {
         super(10, 50, PrinterAddon.MOD_ID, null, "Printer Addon");
+        no.sindrens.printeraddon.config.Translations.apply();
         this.setListPosition(10, listY(tab));
     }
 
@@ -46,7 +47,7 @@ public class ConfigGui extends GuiConfigsBase {
         return own.isEmpty() ? key(second) : own;
     }
 
-    private static final int CONTROLS_LIST_Y = 52 + 24 * 4 + 22;
+    private static final int CONTROLS_LIST_Y = 52 + 24 * 4 + 22 + 36;
 
     /** J+key text for a button, empty when no key is set. */
     private static String key(fi.dy.masa.malilib.config.options.ConfigHotkey hotkey) {
@@ -62,12 +63,26 @@ public class ConfigGui extends GuiConfigsBase {
         int x = 10;
         int y = 26;
 
+        // Basic: the tabs most players need; Advanced: every tab of settings
+        boolean advanced = Configs.Generic.SHOW_ADVANCED_TABS.getBooleanValue();
+        if (!advanced && tab.advanced) {
+            tab = Tab.IMPORTANT;
+            this.setListPosition(10, listY(tab));
+        }
         for (Tab t : Tab.values()) {
+            if (t.advanced && !advanced) {
+                continue;
+            }
             ButtonGeneric button = new ButtonGeneric(x, y, -1, 20, t.displayName);
             button.setEnabled(tab != t);
             this.addButton(button, new TabListener(t, this));
             x += button.getWidth() + 2;
         }
+        ButtonGeneric more = new ButtonGeneric(x, y, -1, 20, advanced ? "\u00a77\u25c2 Basic" : "\u00a7eAdvanced \u25b8");
+        this.addButton(more, (button, mouse) -> {
+            Configs.Generic.SHOW_ADVANCED_TABS.setBooleanValue(!Configs.Generic.SHOW_ADVANCED_TABS.getBooleanValue());
+            this.initGui();
+        });
 
         if (tab == Tab.CONTROLS) {
             addControlsTab(10, 52);
@@ -155,6 +170,14 @@ public class ConfigGui extends GuiConfigsBase {
                 : "\u00a77Not running";
         this.addLabel(x, y, 600, 10, 0xFFFFFFFF, state);
         y += 14;
+        if (!running) {
+            // Why did it stop? With what to do about it
+            this.addLabel(x, y, 700, 10, 0xFFFFDD55, AutoBuild.whyStopped());
+            y += 14;
+        }
+        this.addButton(new ButtonGeneric(x + (w + 4) * 2, y - 2, w, 20, "Report a problem..."),
+                (button, mouse) -> GuiBase.openGui(new no.sindrens.printeraddon.gui.ShareLogGui(this)));
+        y += 22;
         this.addLabel(x, y, 600, 10, 0xFFAAAAAA, "Keys: click a key to change it, the arrow resets it. Keys left empty do nothing.");
     }
 
@@ -236,7 +259,7 @@ public class ConfigGui extends GuiConfigsBase {
         });
         y += 24;
         // The full log of each build (every step, every flight, a snapshot every 5 s)
-        this.addLabel(x + 210, y + 5, 320, 10, 0xFFAAAAAA, "Settings to look at: the Important tab");
+        this.addLabel(x + 210, y + 5, 320, 10, 0xFFAAAAAA, "Settings to look at: the Basic settings tab");
         this.addButton(new ButtonGeneric(x, y, 200, 20, "Open build logs folder"), (button, mouse) -> {
             java.nio.file.Path folder = no.sindrens.printeraddon.build.BuildLog.folder();
             try {
@@ -406,26 +429,29 @@ public class ConfigGui extends GuiConfigsBase {
     }
 
     private enum Tab {
-        CONTROLS("Controls"),
-        BUILD("Build"),
-        BREAK_AREA("Auto break"),
-        DISCORD("Discord"),
-        IMPORTANT("Important"),
-        COMMANDS("Commands (this server)"),
-        ALL("All settings"),
-        GENERIC("Generic"),
-        BREAKING("Breaking"),
-        LAYERS("Layers"),
-        MOVEMENT("Movement"),
-        SAFETY("Safety"),
-        SHOP("Shop"),
-        SPEED("Speed"),
-        HOTKEYS("Hotkeys");
+        CONTROLS("Controls", false),
+        BUILD("Build", false),
+        BREAK_AREA("Auto break", false),
+        IMPORTANT("Basic settings", false),
+        COMMANDS("Commands (this server)", false),
+        DISCORD("Discord", true),
+        ALL("All settings", true),
+        GENERIC("Generic", true),
+        BREAKING("Breaking", true),
+        LAYERS("Layers", true),
+        MOVEMENT("Movement", true),
+        SAFETY("Safety", true),
+        SHOP("Shop", true),
+        SPEED("Speed", true),
+        HOTKEYS("Hotkeys", true);
 
         final String displayName;
+        /** Shown only with "Advanced" on. */
+        final boolean advanced;
 
-        Tab(String displayName) {
+        Tab(String displayName, boolean advanced) {
             this.displayName = displayName;
+            this.advanced = advanced;
         }
     }
 

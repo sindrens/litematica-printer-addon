@@ -332,8 +332,35 @@ public class BlockBreaker {
         return true;
     }
 
+    /** Blocks this far outside the schematic may be broken (what the build put there itself: a crafting table, a rail). */
+    private static final int OUTSIDE_MARGIN = 3;
+
+    /**
+     * Never breaks outside where it works: Auto break only in the selected area, auto build only in (or right next
+     * to) the schematic.
+     */
+    private boolean allowedToBreak(BlockPos pos, BlockState state) {
+        if (currentMode == Mode.AREA) {
+            return AreaBreaker.INSTANCE.inSelection(pos);
+        }
+        for (SchematicHelper.Area a : SchematicHelper.areas()) {
+            if (pos.getX() >= a.minX() - OUTSIDE_MARGIN && pos.getX() <= a.maxX() + OUTSIDE_MARGIN
+                    && pos.getY() >= a.minY() - OUTSIDE_MARGIN && pos.getY() <= a.maxY() + OUTSIDE_MARGIN
+                    && pos.getZ() >= a.minZ() - OUTSIDE_MARGIN && pos.getZ() <= a.maxZ() + OUTSIDE_MARGIN) {
+                return true;
+            }
+        }
+        return state.is(net.minecraft.world.level.block.Blocks.CRAFTING_TABLE);
+    }
+
     private void startBreaking(Minecraft mc, LocalPlayer player, BlockPos pos) {
         BlockState state = mc.level.getBlockState(pos);
+        if (!allowedToBreak(pos, state)) {
+            failed.put(pos.immutable(), Long.MAX_VALUE);
+            BuildLog.line("SAFETY", "not breaking " + LayerManager.blockName(state) + " at " + pos.toShortString()
+                    + ": outside the " + (currentMode == Mode.AREA ? "selected area" : "schematic"));
+            return;
+        }
         // A block that takes long: standing for it (here, or a hop beside); one that breaks at once (a flower) from the air
         boolean slow = state.getDestroySpeed(mc.level, pos) > 0.05f && Configs.Breaking.STAND_TO_BREAK.getBooleanValue()
                 && player.getAbilities().flying && player.getAbilities().mayfly;

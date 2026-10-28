@@ -24,6 +24,14 @@ public final class LinkCommands {
                             Chat.info("Type §b/link§r on the Printer Addon Discord, then §b/printeraddon link PRINT-XXXX§r (or J+L).");
                             return 1;
                         }))
+                .then(ClientCommands.literal("why").executes(c -> {
+                    Chat.info(no.sindrens.printeraddon.build.AutoBuild.whyStopped());
+                    return 1;
+                }))
+                .then(ClientCommands.literal("report").executes(c -> {
+                    no.sindrens.printeraddon.build.LogShare.reportProblem(net.minecraft.client.Minecraft.getInstance());
+                    return 1;
+                }))
                 .then(ClientCommands.literal("unlink").executes(c -> {
                     DiscordLink.unlink();
                     return 1;

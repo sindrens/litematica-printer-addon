@@ -35,3 +35,15 @@ Nothing is uploaded by default.
 
 ## License and source
 AGPL-3.0. The source code is public (link to the repository).
+
+## Also in this release
+- **Safety stops:** it stops in lava, in the void, at low health, or when the inventory has been full a long time. It never breaks outside the build.
+- **Why did it stop?** The Controls tab and /printeraddon why tell you why it stopped and what to do.
+- **Basic and Advanced settings:** Basic shows only what most players need. Norwegian translation included.
+- **Works with** Sodium and Iris. Mod Menu is optional.
+
+# AutoSell (separate mod)
+AutoSell sells skyblock collectors by itself: it goes to a full one, clicks Sell All, then goes back.
+- It moves with the movement keys and only flies where the server lets you.
+- It sends no /fly or /pay unless you set them.
+- Server admins can turn it off with the MOTD tag `[autosell:disable]`, or with `disable` on the plugin channel `autosell:policy`.

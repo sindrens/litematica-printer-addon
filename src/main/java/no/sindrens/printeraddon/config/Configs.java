@@ -72,6 +72,11 @@ public class Configs implements IConfigHandler {
                         + "the right way (in 26.2 the server takes the direction you look in). Mythian build: the camera only faces\n"
                         + "that way during the click itself. Official build: the camera really turns to each block clicked.",
                 "Right direction for printer");
+        public static final ConfigBoolean SHOW_ADVANCED_TABS = new ConfigBoolean("showAdvancedTabs",
+                !no.sindrens.printeraddon.Edition.OFFICIAL,
+                "Show every tab of settings (Advanced) instead of only Controls, Build, Auto break, Basic settings and\n"
+                        + "Commands. The 'Advanced' button at the end of the tabs switches it too.",
+                "Show advanced tabs");
         public static final ConfigBoolean OPEN_INVENTORY_FOR_MOVES = new ConfigBoolean("openInventoryForItemMoves",
                 no.sindrens.printeraddon.Edition.OFFICIAL,
                 "Open the inventory to move items in it (hotbar refills, tools, stacks), and stand still meanwhile, as a\n"
@@ -116,7 +121,7 @@ public class Configs implements IConfigHandler {
                 "Stop at (time of day)");
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                ADDON_ENABLED, AUTO_BUILD, STOP_AT, SHOW_HUD, RESUME_AFTER_REJOIN, RECONNECT, BACK_COMMANDS, BUILD_RENDER_DISTANCE, SPEED_PRESET, APPLY_SPEED_TO_PRINTER, TURN_VIEW_FOR_PRINTER, OPEN_INVENTORY_FOR_MOVES, CHAT_MESSAGES, DETAILED_CHAT, STATUS_FILE, DEBUG_LOG, TEXT_LOG, SHARE_LOGS, LOG_CHANNEL, DISCORD_SYNC, DISCORD_API);
+                ADDON_ENABLED, AUTO_BUILD, STOP_AT, SHOW_HUD, RESUME_AFTER_REJOIN, RECONNECT, BACK_COMMANDS, BUILD_RENDER_DISTANCE, SPEED_PRESET, APPLY_SPEED_TO_PRINTER, TURN_VIEW_FOR_PRINTER, OPEN_INVENTORY_FOR_MOVES, SHOW_ADVANCED_TABS, CHAT_MESSAGES, DETAILED_CHAT, STATUS_FILE, DEBUG_LOG, TEXT_LOG, SHARE_LOGS, LOG_CHANNEL, DISCORD_SYNC, DISCORD_API);
     }
 
     public static class Breaking {

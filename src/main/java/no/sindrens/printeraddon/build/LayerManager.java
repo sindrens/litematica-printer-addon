@@ -313,6 +313,7 @@ public class LayerManager {
         previousSingle = layerRange.getLayerSingle();
 
         active = true;
+        scanJob = null;
         applyLayer();
         resetProgress();
         Chat.info("Building layer by layer from Y " + layer + " (layers " + minY + " to " + maxY + ").");
@@ -432,6 +433,7 @@ public class LayerManager {
             restoreLayerRange();
         }
         active = false;
+        scanJob = null;
         airLayer = false;
         liftLayer = Integer.MIN_VALUE;
     }
@@ -548,23 +550,30 @@ public class LayerManager {
             return true;
         }
 
-        if (--ticksUntilCheck > 0) {
+        // A check of a big layer goes on over several ticks (see ScanJob): no stutter on a 200 x 200 layer
+        boolean continuing = scanJob != null;
+        if (!continuing && --ticksUntilCheck > 0) {
             return true;
         }
         // At least every 2 seconds: a check reads the whole layer
         int interval = Math.max(40, Configs.Layers.LAYER_CHECK_INTERVAL.getIntegerValue());
-        ticksUntilCheck = interval;
+        if (!continuing) {
+            ticksUntilCheck = interval;
+        }
 
         WorldSchematic schematic = SchematicHelper.world();
         if (schematic == null) {
+            scanJob = null;
             return true;
         }
 
         List<SchematicHelper.Area> areas = SchematicHelper.areas();
 
         if (finishingDeferred) {
+            scanJob = null;
             return finishDeferred(mc, schematic, areas, interval);
         }
+        if (!continuing) {
         followHandChange(mc, schematic, areas);
 
         // Rows of hoppers ending at an empty spot: left out once per layer, built as soon as the spot has something
@@ -578,19 +587,25 @@ public class LayerManager {
             PrinterAddon.debug("Dead-end rows looked for in {} ms", (System.nanoTime() - started) / 1_000_000);
         }
         DeadEnds.tick(mc.level);
+        }
 
-        Findings findings = new Findings();
         if (seenFor != layer || seenForTop != layerTop) {
             seenFinished.clear();
             seenFor = layer;
             seenForTop = layerTop;
         }
-        Parts parts = new Parts(seenFinished);
-        List<BlockPos> left = new ArrayList<>();
-        int remaining = 0;
-        for (int y = layer; y <= layerTop; y++) {
-            remaining += scan(mc.level, schematic, areas, y, left, findings, parts);
+        if (scanJob == null || scanJob.layer != layer || scanJob.top != layerTop || !scanJob.areas.equals(areas)) {
+            scanJob = new ScanJob(layer, layerTop, areas, new Parts(seenFinished));
         }
+        if (!scanJob.run(mc.level, schematic, SCAN_BUDGET_NS)) {
+            return true;
+        }
+        ScanJob scanned = scanJob;
+        scanJob = null;
+        Findings findings = scanned.findings;
+        Parts parts = scanned.parts;
+        List<BlockPos> left = scanned.left;
+        int remaining = scanned.remaining;
         for (long part : parts.loaded) {
             if (parts.unfinished.contains(part)) {
                 seenFinished.remove(part);
@@ -1639,8 +1654,73 @@ public class LayerManager {
         return scan(level, schematic, areas, y, examples, findings, null);
     }
 
+    /** Time a layer check may take in one tick; the rest goes on in the next ticks. */
+    private static final long SCAN_BUDGET_NS = 3_000_000L;
+    @Nullable
+    private ScanJob scanJob;
+
+    /** A layer check read row by row, a few milliseconds a tick. */
+    private static final class ScanJob {
+        final int layer;
+        final int top;
+        final List<SchematicHelper.Area> areas;
+        final Parts parts;
+        final Findings findings = new Findings();
+        final List<BlockPos> left = new ArrayList<>();
+        int remaining;
+        private int y;
+        private int areaIndex;
+        private int x = Integer.MIN_VALUE;
+
+        ScanJob(int layer, int top, List<SchematicHelper.Area> areas, Parts parts) {
+            this.layer = layer;
+            this.top = top;
+            this.areas = areas;
+            this.parts = parts;
+            this.y = layer;
+        }
+
+        /** Reads on until done (true) or the time is up (false: more next tick). */
+        boolean run(Level level, WorldSchematic schematic, long budgetNs) {
+            long until = System.nanoTime() + budgetNs;
+            while (y <= top) {
+                if (areaIndex >= areas.size()) {
+                    y++;
+                    areaIndex = 0;
+                    x = Integer.MIN_VALUE;
+                    continue;
+                }
+                SchematicHelper.Area area = areas.get(areaIndex);
+                if (y < area.minY() || y > area.maxY()) {
+                    areaIndex++;
+                    continue;
+                }
+                if (x == Integer.MIN_VALUE) {
+                    x = area.minX();
+                }
+                if (x > area.maxX()) {
+                    areaIndex++;
+                    x = Integer.MIN_VALUE;
+                    continue;
+                }
+                remaining += scan(level, schematic, List.of(area), y, left, findings, parts, x, x);
+                x++;
+                if (System.nanoTime() > until) {
+                    return false;
+                }
+            }
+            return true;
+        }
+    }
+
     private static int scan(Level level, WorldSchematic schematic, List<SchematicHelper.Area> areas, int y,
                             @Nullable List<BlockPos> examples, @Nullable Findings findings, @Nullable Parts parts) {
+        return scan(level, schematic, areas, y, examples, findings, parts, Integer.MIN_VALUE, Integer.MAX_VALUE);
+    }
+
+    private static int scan(Level level, WorldSchematic schematic, List<SchematicHelper.Area> areas, int y,
+                            @Nullable List<BlockPos> examples, @Nullable Findings findings, @Nullable Parts parts,
+                            int xFrom, int xTo) {
         boolean extraCounts = Configs.Layers.EXTRA_BLOCKS_BLOCK_LAYER.getBooleanValue();
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
         int remaining = 0;
@@ -1650,7 +1730,7 @@ public class LayerManager {
                 continue;
             }
 
-            for (int x = area.minX(); x <= area.maxX(); x++) {
+            for (int x = Math.max(xFrom, area.minX()); x <= Math.min(xTo, area.maxX()); x++) {
                 for (int z = area.minZ(); z <= area.maxZ(); z++) {
                     pos.set(x, y, z);
                     BlockCheck.Result result = BlockCheck.check(level, schematic, pos);

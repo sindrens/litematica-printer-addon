@@ -26,3 +26,8 @@ Send `default` on the same channel to go back to the normal rules.
 - It never reaches farther than vanilla.
 - It never hides from mod lists. Its mod id is `printer_addon`.
 - It never sends a command the player didn't set for your server.
+
+## AutoSell
+AutoSell (official build) can be turned off the same way:
+- the MOTD tag `[autosell:disable]`, or
+- the text `disable` on the plugin channel `autosell:policy`.

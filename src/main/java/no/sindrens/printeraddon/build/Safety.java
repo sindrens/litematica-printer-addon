@@ -15,7 +15,15 @@ public class Safety {
     /** The last check found damage from a cactus or berry bush (the build goes on, the player gets out of it). */
     private boolean plantHurt;
 
+    /** Health this low stops the build whatever hurt the player (also with "Stop on damage" off). */
+    private static final float LOW_HEALTH = 6;
+    /** The inventory full (no free slot) for this long with nothing put away: stop instead of going on blind. */
+    private static final long FULL_INVENTORY_MS = 90_000;
+    private long fullSince = -1;
+    private int placedAtFull = -1;
+
     public void reset() {
+        fullSince = -1;
         lastHealth = -1;
         plantHurt = false;
     }
@@ -69,6 +77,34 @@ public class Safety {
                     + (harm != null ? " block=" + harm.toShortString().replace(" ", "") : "") + String.format(java.util.Locale.ROOT, " lost=%.1f health=%.1f", lost, health));
         }
 
+        // Always, whatever the settings: lava, a fall into the void, very low health
+        if (player.isInLava()) {
+            BuildLog.line("SAFETY", String.format(java.util.Locale.ROOT, "in lava at %.1f %.1f %.1f: stopping", player.getX(), player.getY(), player.getZ()));
+            return "you're in lava";
+        }
+        if (!player.getAbilities().flying && (player.getY() < mc.level.getMinY() + 4 || player.fallDistance > 12 && noGroundBelow(mc, player))) {
+            BuildLog.line("SAFETY", String.format(java.util.Locale.ROOT, "falling at %.1f %.1f %.1f (fell %.1f, nothing below): stopping",
+                    player.getX(), player.getY(), player.getZ(), player.fallDistance));
+            return "you're falling with nothing under you (the void)";
+        }
+        if (health > 0 && health <= LOW_HEALTH) {
+            return String.format(java.util.Locale.ROOT, "your health is low (%.1f)", health);
+        }
+        // Full and nothing placed meanwhile (a full inventory of building blocks that get placed is normal)
+        int placedNow = AutoBuild.INSTANCE.isRunning() ? AutoBuild.INSTANCE.stats.totalPlaced() : 0;
+        if (AutoBuild.INSTANCE.isRunning() && InventoryCleaner.freeSlots(player.getInventory()) == 0 && placedNow == placedAtFull) {
+            long now = System.currentTimeMillis();
+            if (fullSince < 0) {
+                fullSince = now;
+            } else if (now - fullSince > FULL_INVENTORY_MS) {
+                fullSince = -1;
+                return "your inventory has been full for 90 seconds with nothing placed (link a chest, or make room)";
+            }
+        } else {
+            fullSince = -1;
+            placedAtFull = placedNow;
+        }
+
         if (Configs.Safety.STOP_NEAR_PLAYERS.getBooleanValue()) {
             double distance = Configs.Safety.NEAR_PLAYER_DISTANCE.getIntegerValue();
             for (Player other : mc.level.players()) {
@@ -80,6 +116,17 @@ public class Safety {
         }
 
         return null;
+    }
+
+    private static boolean noGroundBelow(Minecraft mc, LocalPlayer player) {
+        net.minecraft.core.BlockPos.MutableBlockPos pos = player.blockPosition().mutable();
+        for (int i = 0; i < 64 && pos.getY() > mc.level.getMinY(); i++) {
+            pos.move(0, -1, 0);
+            if (!mc.level.getBlockState(pos).isAir() || !mc.level.getFluidState(pos).isEmpty()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** A player on the "Players who don't stop it" list (names, any case, comma or space separated). */

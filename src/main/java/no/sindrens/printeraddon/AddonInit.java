@@ -46,7 +46,10 @@ public class AddonInit implements IInitializationHandler {
         // What the server allows (official build), and the server commands kept per server
         ServerPolicy.register();
         net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents.JOIN.register((handler, sender, mc) ->
-                mc.execute(() -> no.sindrens.printeraddon.config.ServerProfiles.onJoin(mc)));
+                mc.execute(() -> {
+                    no.sindrens.printeraddon.config.ServerProfiles.onJoin(mc);
+                    no.sindrens.printeraddon.compat.Compat.checkOnce();
+                }));
         net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents.DISCONNECT.register((handler, mc) ->
                 no.sindrens.printeraddon.config.ServerProfiles.onLeave());
 

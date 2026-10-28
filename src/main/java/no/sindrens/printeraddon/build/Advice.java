@@ -36,6 +36,21 @@ public final class Advice {
         if (w.contains("schedule") || w.contains("paused") || w.contains("finished") || w.contains("by you")) {
             return "";
         }
+        if (w.contains("lava")) {
+            return "Get out of the lava and check the build for lava nearby before starting again.";
+        }
+        if (w.contains("falling") || w.contains("void")) {
+            return "Something gave way under you. Check where you were (build log SAFETY line) before starting again.";
+        }
+        if (w.contains("health is low")) {
+            return "Eat and heal first (turn on 'Eat when hungry'), then start again.";
+        }
+        if (w.contains("inventory has been full")) {
+            return "Link a chest (J+B), set your vaults, or make room, then start again.";
+        }
+        if (w.contains("not allowed on this server") || w.contains("doesn't allow")) {
+            return "The server switched Printer Addon off. Ask the server's staff; don't try to get around it.";
+        }
         if (w.contains("switched off")) {
             return "Switch the add-on on again (J+A).";
         }

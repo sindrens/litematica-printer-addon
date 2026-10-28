@@ -362,7 +362,18 @@ public final class LogShare {
      * Every client tick, also out of a world: once after the game starts, the outbox is read (what didn't go last time,
      * and the log of a run that never ended); once in a world, the player is told that logs go by themselves.
      */
+    private static boolean reportWanted;
+
+    /** /printeraddon report: the report screen, once the chat has closed. Nothing is sent before you press Send there. */
+    public static void reportProblem(Minecraft mc) {
+        reportWanted = true;
+    }
+
     public static void tick(Minecraft mc) {
+        if (reportWanted && mc.gui.screen() == null && mc.player != null) {
+            reportWanted = false;
+            fi.dy.masa.malilib.gui.GuiBase.openGui(new no.sindrens.printeraddon.gui.ShareLogGui(null));
+        }
         if (TEST_RUN) {
             return;
         }
