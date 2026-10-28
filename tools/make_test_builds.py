@@ -110,7 +110,7 @@ def small_house():
         b.set(x, 4, 0, "minecraft:oak_stairs", facing="south", half="bottom", shape="straight", waterlogged="false")
         b.set(x, 4, 8, "minecraft:oak_stairs", facing="north", half="bottom", shape="straight", waterlogged="false")
     b.fill(0, 4, 1, 8, 4, 7, "minecraft:oak_slab", type="bottom", waterlogged="false")
-    b.set(4, 2, 1, "minecraft:wall_torch", facing="south")
+    b.set(1, 2, 1, "minecraft:wall_torch", facing="south")  # hangs on the wall plank north of it
     return b
 
 

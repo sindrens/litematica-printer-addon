@@ -149,9 +149,6 @@ public final class TestRunner {
         command(mc, "gamerule random_tick_speed 0");
         command(mc, "time set noon");
         command(mc, "gamerule advance_time false");
-        for (String tool : List.of("diamond_pickaxe", "diamond_axe", "diamond_shovel", "diamond_hoe")) {
-            command(mc, "give @s " + tool);
-        }
         startedAt = System.currentTimeMillis();
         line("=== Test run " + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")) + ", Printer Addon "
                 + no.sindrens.printeraddon.compat.Compat.version(PrinterAddon.MOD_ID) + " (" + no.sindrens.printeraddon.Edition.name()
@@ -187,11 +184,12 @@ public final class TestRunner {
         phase = Phase.IDLE;
         current = null;
         long passed = results.stream().filter(r -> r.contains(" PASS ")).count();
-        String summary = "Tests done: " + passed + " of " + results.size() + " passed, "
+        long skipped = results.stream().filter(r -> r.contains(" SKIP ")).count();
+        String summary = "Tests done: " + passed + " of " + (results.size() - skipped) + " passed" + (skipped > 0 ? " (" + skipped + " skipped)" : "") + ", "
                 + (System.currentTimeMillis() - startedAt) / 60_000 + " min. Results: config/printer_addon/test-results.txt";
         line(summary);
         status = summary;
-        Chat.announce("Tests done", passed + " of " + results.size() + " passed", passed == results.size());
+        Chat.announce("Tests done", passed + " of " + (results.size() - skipped) + " passed", passed == results.size() - skipped);
         Chat.info(summary);
     }
 
@@ -246,6 +244,17 @@ public final class TestRunner {
 
     private void clear(Minecraft mc) {
         TestBuild build = build(current);
+        // A floating build needs air place: without it nothing of it can be placed (a player can't either)
+        if (build != null && build.lift() > 0 && !Configs.Layers.USE_AIR_PLACE.getBooleanValue()) {
+            result(mc, "SKIP", "needs 'Air place floating blocks' on (Layers settings)");
+            phase = Phase.NEXT;
+            return;
+        }
+        // An empty inventory for each test (the last test's leftovers filled it), then the tools
+        command(mc, "clear @s");
+        for (String tool : List.of("diamond_pickaxe", "diamond_axe", "diamond_shovel", "diamond_hoe")) {
+            command(mc, "give @s " + tool);
+        }
         if (build == null) {
             // Auto break: a 16 x 8 stone wall put there with /fill
             size = new BlockPos(16, 8, 1);
@@ -259,6 +268,16 @@ public final class TestRunner {
             net.minecraft.core.Vec3i s = schematic.getTotalSize();
             size = new BlockPos(Math.abs(s.getX()), Math.abs(s.getY()), Math.abs(s.getZ()));
         }
+        // On the ground where it goes (the first test's spot is where you stand: on a block, on the floor...)
+        int gx = nextOrigin.getX() + size.getX() / 2;
+        int gz = nextOrigin.getZ() + size.getZ() / 2;
+        int ground = mc.level.hasChunk(gx >> 4, gz >> 4)
+                ? mc.level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, gx, gz)
+                : nextOrigin.getY();
+        if (ground <= mc.level.getMinY() + 1) {
+            ground = nextOrigin.getY();
+        }
+        nextOrigin = new BlockPos(nextOrigin.getX(), ground, nextOrigin.getZ());
         origin = nextOrigin.above(build == null ? 0 : build.lift());
         nextOrigin = nextOrigin.east(size.getX() + GAP);
         // Room for it: air from the ground up (and a little around), in pieces /fill takes
@@ -377,7 +396,7 @@ public final class TestRunner {
                 done, total, ticks / 20, done / minutes, why.isEmpty() ? "" : " | " + why);
         results.add(text);
         line(text);
-        String color = verdict.equals("PASS") ? "§a" : "§c";
+        String color = verdict.equals("PASS") ? "§a" : verdict.equals("SKIP") ? "§e" : "§c";
         Chat.info(color + verdict + "§r " + current + ": " + done + "/" + total + (why.isEmpty() ? "" : " (" + why + ")"));
         current = null;
     }

@@ -296,3 +296,8 @@
   - "Fly only" walks instead of standing still when flying isn't allowed.
   - The movement mode and the fly command are saved per server, in the Commands tab, with everything else you have permission for.
 - Your camera is yours again: it no longer jumps to every block clicked. The server still gets the right direction for each click. The new setting "Turn my camera to blocks" brings back the camera turning if you want it.
+- In-game tests:
+  - Each build is placed on the ground instead of at your feet height.
+  - The inventory is emptied between tests.
+  - Floating builds are skipped unless "Air place floating blocks" is on.
+  - The house's torch hangs on a wall instead of the door.
