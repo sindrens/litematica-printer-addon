@@ -34,8 +34,8 @@ public final class ServerProfiles {
     }
 
     /** The settings kept per server. */
-    public static List<IConfigValue> settings() {
-        return List.of(Configs.Movement.FLY_COMMAND, Configs.Shop.SHOP_COMMAND, Configs.Shop.AUTO_BUY, Configs.Shop.VAULT_COMMAND,
+    public static List<fi.dy.masa.malilib.config.options.ConfigBase<?>> settings() {
+        return List.<fi.dy.masa.malilib.config.options.ConfigBase<?>>of(Configs.Movement.MOVE_MODE, Configs.Movement.FLY_COMMAND, Configs.Shop.SHOP_COMMAND, Configs.Shop.AUTO_BUY, Configs.Shop.VAULT_COMMAND,
                 Configs.Shop.VAULTS, Configs.Shop.USE_CRAFT_COMMAND, Configs.Shop.CRAFT_COMMAND, Configs.Safety.USE_FEED_COMMAND,
                 Configs.Safety.FEED_COMMAND, Configs.Generic.BACK_COMMANDS, Configs.Generic.RECONNECT);
     }
@@ -59,7 +59,7 @@ public final class ServerProfiles {
             applying = true;
             Configs.loading = true;
             try {
-                for (IConfigValue setting : settings()) {
+                for (fi.dy.masa.malilib.config.options.ConfigBase<?> setting : settings()) {
                     setting.resetToDefault();
                 }
             } finally {
@@ -98,9 +98,9 @@ public final class ServerProfiles {
         applying = true;
         Configs.loading = true;
         try {
-            for (IConfigValue setting : settings()) {
+            for (fi.dy.masa.malilib.config.options.ConfigBase<?> setting : settings()) {
                 if (profile.has(setting.getName())) {
-                    setting.setValueFromString(profile.get(setting.getName()).getAsString());
+                    str(setting).setValueFromString(profile.get(setting.getName()).getAsString());
                 } else if (Edition.OFFICIAL) {
                     setting.resetToDefault();
                 }
@@ -118,11 +118,15 @@ public final class ServerProfiles {
         }
         load();
         JsonObject profile = new JsonObject();
-        for (IConfigValue setting : settings()) {
-            profile.addProperty(setting.getName(), setting.getStringValue());
+        for (fi.dy.masa.malilib.config.options.ConfigBase<?> setting : settings()) {
+            profile.addProperty(setting.getName(), str(setting).getStringValue());
         }
         servers().add(current, profile);
         save();
+    }
+
+    private static fi.dy.masa.malilib.config.IStringRepresentable str(fi.dy.masa.malilib.config.options.ConfigBase<?> c) {
+        return (fi.dy.masa.malilib.config.IStringRepresentable) c;
     }
 
     private static JsonObject servers() {

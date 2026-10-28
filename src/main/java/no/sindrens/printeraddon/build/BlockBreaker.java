@@ -846,8 +846,8 @@ public class BlockBreaker {
             Vec3 d = Vec3.atCenterOf(pos).subtract(player.getEyePosition());
             float yaw = (float) (Math.toDegrees(Math.atan2(d.z, d.x)) - 90.0);
             float pitch = (float) -Math.toDegrees(Math.atan2(d.y, Math.sqrt(d.x * d.x + d.z * d.z)));
-            if (no.sindrens.printeraddon.Edition.OFFICIAL) {
-                // Official build: the camera really looks at the block being broken
+            if (Configs.Generic.TURN_CAMERA.getBooleanValue()) {
+                // The camera really looks at the block being broken
                 player.setYRot(yaw);
                 player.setXRot(pitch);
             }

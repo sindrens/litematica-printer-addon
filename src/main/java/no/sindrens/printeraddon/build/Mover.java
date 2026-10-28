@@ -581,6 +581,7 @@ public class Mover {
         ticksUntilScan = 0;
         flyCommandSent = false;
         flyUnavailable = false;
+        Configs.Movement.flyDenied = false;
         workTicksWithoutProgress = 0;
         lastInReach = -1;
         velocity = Vec3.ZERO;
@@ -3521,6 +3522,7 @@ public class Mover {
         }
 
         flyUnavailable = true;
+        Configs.Movement.flyDenied = true;
         state = State.IDLE;
         // Once in a while only: it was said 18 times in a second
         if (tick - lastCantFlyNote > 20 * 120) {

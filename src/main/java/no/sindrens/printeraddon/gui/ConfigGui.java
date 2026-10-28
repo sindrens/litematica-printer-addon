@@ -96,9 +96,9 @@ public class ConfigGui extends GuiConfigsBase {
             addTestsTab(10, 52);
         } else if (tab == Tab.COMMANDS) {
             String server = no.sindrens.printeraddon.config.ServerProfiles.current();
-            this.addLabel(this.width - 330, 30, 320, 10, 0xFFAAAAAA, server.isEmpty()
+            this.addLabel(this.width - 430, 30, 420, 10, 0xFFAAAAAA, server.isEmpty()
                     ? "Kept per server: join a server to set its commands"
-                    : "Kept for " + server + " only (" + no.sindrens.printeraddon.ServerPolicy.describe() + ")");
+                    : "For " + server + ": set only what you have permission for here (kept for this server only)");
         } else if (tab != Tab.HOTKEYS) {
             // Where the search is (MaLiLib's: the magnifier at the top left of the list)
             this.addLabel(this.width - 230, 30, 220, 10, 0xFFAAAAAA, tab == Tab.ALL

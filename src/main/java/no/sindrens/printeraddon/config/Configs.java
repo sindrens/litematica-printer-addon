@@ -69,9 +69,13 @@ public class Configs implements IConfigHandler {
 
         public static final ConfigBoolean TURN_VIEW_FOR_PRINTER = new ConfigBoolean("turnViewForPrinter", true,
                 "Give the server the printer's direction when it clicks, so observers, pistons, hoppers, stairs etc. face\n"
-                        + "the right way (in 26.2 the server takes the direction you look in). Mythian build: the camera only faces\n"
-                        + "that way during the click itself. Official build: the camera really turns to each block clicked.",
+                        + "the right way (in 26.2 the server takes the direction you look in). The camera only faces that way during\n"
+                        + "the click itself (see 'Turn my camera to blocks' to have it really turn).",
                 "Right direction for printer");
+        public static final ConfigBoolean TURN_CAMERA = new ConfigBoolean("turnCameraToBlocks", false,
+                "Turn your camera to each block clicked or broken, and leave it there. Off (default): your camera stays\n"
+                        + "yours; only the server is told the direction of each click (needed for stairs, observers...).",
+                "Turn my camera to blocks");
         public static final ConfigBoolean SHOW_ADVANCED_TABS = new ConfigBoolean("showAdvancedTabs",
                 !no.sindrens.printeraddon.Edition.OFFICIAL,
                 "Show every tab of settings (Advanced) instead of only Controls, Build, Auto break, Basic settings and\n"
@@ -121,7 +125,7 @@ public class Configs implements IConfigHandler {
                 "Stop at (time of day)");
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                ADDON_ENABLED, AUTO_BUILD, STOP_AT, SHOW_HUD, RESUME_AFTER_REJOIN, RECONNECT, BACK_COMMANDS, BUILD_RENDER_DISTANCE, SPEED_PRESET, APPLY_SPEED_TO_PRINTER, TURN_VIEW_FOR_PRINTER, OPEN_INVENTORY_FOR_MOVES, SHOW_ADVANCED_TABS, CHAT_MESSAGES, DETAILED_CHAT, STATUS_FILE, DEBUG_LOG, TEXT_LOG, SHARE_LOGS, LOG_CHANNEL, DISCORD_SYNC, DISCORD_API);
+                ADDON_ENABLED, AUTO_BUILD, STOP_AT, SHOW_HUD, RESUME_AFTER_REJOIN, RECONNECT, BACK_COMMANDS, BUILD_RENDER_DISTANCE, SPEED_PRESET, APPLY_SPEED_TO_PRINTER, TURN_VIEW_FOR_PRINTER, TURN_CAMERA, OPEN_INVENTORY_FOR_MOVES, SHOW_ADVANCED_TABS, CHAT_MESSAGES, DETAILED_CHAT, STATUS_FILE, DEBUG_LOG, TEXT_LOG, SHARE_LOGS, LOG_CHANNEL, DISCORD_SYNC, DISCORD_API);
     }
 
     public static class Breaking {
@@ -241,13 +245,16 @@ public class Configs implements IConfigHandler {
     }
 
     public static class Movement {
-        public static final ConfigOptionList MOVE_MODE = new ConfigOptionList("movementMode", MoveMode.FLY,
+        public static final ConfigOptionList MOVE_MODE = new ConfigOptionList("movementMode",
+                no.sindrens.printeraddon.Edition.OFFICIAL ? MoveMode.WALK_AND_FLY : MoveMode.FLY,
                 "How auto build gets you to the next unfinished blocks: fly (fastest: always above the blocks being built),\n"
-                        + "walk, walk and fly when needed, or not at all.",
+                        + "walk, walk and fly when needed, or not at all. Flying only where you may fly (creative, or the server\n"
+                        + "allowed it, or the fly command below did): where you can't, it walks by itself. Kept per server.",
                 "Movement (fly is fastest)");
         public static final ConfigString FLY_COMMAND = new ConfigString("flyCommand", no.sindrens.printeraddon.Edition.OFFICIAL ? "" : "fly",
-                "Command (without the slash) sent once if flying is needed but not allowed yet. Empty: never send one.",
-                "Fly command");
+                "Your server's fly command (without the slash), if you have permission to use it: sent once when flying\n"
+                        + "is needed but not allowed yet. Empty: never sent (it flies only if you already may, else walks).",
+                "Fly command (if you have /fly)");
         public static final ConfigBoolean KEEP_MOVING = new ConfigBoolean("keepMoving", true,
                 "Flying: when only a few blocks are left to place where you are, already fly on to the next spot (the printer\n"
                         + "places the last ones on the way) instead of stopping until everything around is done.",
@@ -271,8 +278,12 @@ public class Configs implements IConfigHandler {
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
                 MOVE_MODE, FLY_COMMAND, KEEP_MOVING, LANES, HOVER_HEIGHT, WORK_WAIT_SECONDS, MAX_WALK_DISTANCE);
 
+        /** Set when flying turned out not to be allowed here: "Fly only" walks then too (else it stood still). */
+        public static boolean flyDenied;
+
         public static MoveMode mode() {
-            return (MoveMode) MOVE_MODE.getOptionListValue();
+            MoveMode mode = (MoveMode) MOVE_MODE.getOptionListValue();
+            return mode == MoveMode.FLY && flyDenied ? MoveMode.WALK : mode;
         }
     }
 

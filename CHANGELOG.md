@@ -291,3 +291,8 @@
 - Checks the versions of Litematica, Litematica Printer and MaLiLib, and warns about mods that move the player too (Baritone, Freecam). Sodium and Iris are supported.
 - Test library: 14 test builds in testdata/library, made by tools/make_test_builds.py and run by tools/run_library.sh.
 - In-game tests: a new Tests tab (and /printeraddon test all) runs the 14 test builds plus an Auto break test in a singleplayer world. Each build is placed next to you, built while you watch with the items given as it goes, and marked PASS or FAIL with its speed. Results are saved to config/printer_addon/test-results.txt. In the official build, "Server rules in singleplayer" lets you test the server movement in singleplayer.
+- Walking and /fly both work in the official build:
+  - "Walk, fly when needed" is the default. It flies only where you may (creative, the server allows it, or your fly command works), and walks everywhere else.
+  - "Fly only" walks instead of standing still when flying isn't allowed.
+  - The movement mode and the fly command are saved per server, in the Commands tab, with everything else you have permission for.
+- Your camera is yours again: it no longer jumps to every block clicked. The server still gets the right direction for each click. The new setting "Turn my camera to blocks" brings back the camera turning if you want it.

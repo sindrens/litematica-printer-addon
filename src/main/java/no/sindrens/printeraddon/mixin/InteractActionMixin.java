@@ -260,8 +260,8 @@ public class InteractActionMixin {
             return;
         }
         printer_addon$turned = false;
-        if (no.sindrens.printeraddon.Edition.OFFICIAL) {
-            // Official build: the camera stays turned to the block clicked
+        if (Configs.Generic.TURN_CAMERA.getBooleanValue()) {
+            // The camera stays turned to the block clicked
             return;
         }
         player.setYRot(printer_addon$yaw);
