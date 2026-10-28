@@ -43,7 +43,7 @@ public class AddonInit implements IInitializationHandler {
         // preset was picked); picking Custom starts from the preset that was picked before
         no.sindrens.printeraddon.config.Configs.Speed.linkCustomToPreset();
 
-        // What the server allows (official build), and the server commands kept per server
+        // What the server allows, and the server commands kept per server
         ServerPolicy.register();
         net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents.JOIN.register((handler, sender, mc) ->
                 mc.execute(() -> {

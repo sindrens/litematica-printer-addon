@@ -10,7 +10,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * Official build: auto build and Auto break move with the movement keys (see {@code Motion}), set right after the game
+ * Auto build and Auto break move with the movement keys (see {@code Motion}), set right after the game
  * read the keyboard, so the game moves the player by its own rules, at a player's speed.
  */
 @Mixin(KeyboardInput.class)

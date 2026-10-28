@@ -25,7 +25,7 @@ Commands like /fly, /shop, /pv, /craft and /feed are **off** on every server unt
 Nothing is uploaded by default.
 - You can send a run's log yourself after a run.
 - Or you can turn on "Always send logs".
-- The Discord link is opt-in and only works over https.
+- The Discord link sends nothing until you link your account yourself (J+L).
 
 ## Requires
 - Fabric API

@@ -15,7 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 
 /**
- * What the server allows (official build). A server can switch the add-on off for its players, or allow movement faster
+ * What the server allows. A server can switch the add-on off for its players, or allow movement faster
  * than vanilla (Modrinth's rules: movement changes only with the server's opt-in), in two ways:
  * <ul>
  *   <li>a plugin message on the channel {@code printer_addon:policy} with the text {@code disable},
@@ -23,7 +23,7 @@ import java.util.Locale;
  *   <li>a tag in the server's MOTD: {@code [printer_addon:disable]} or {@code [printer_addon:allow-fast-movement]}
  *   (color codes around it are fine, so it can be hidden).</li>
  * </ul>
- * Singleplayer and LAN games allow everything (no other players). Nothing here does anything in the Mythian build.
+ * Singleplayer and LAN games allow everything (no other players).
  */
 public final class ServerPolicy {
     public static final String DISABLE_TAG = "[printer_addon:disable]";
@@ -89,9 +89,6 @@ public final class ServerPolicy {
     }
 
     private static void apply(String value, String from) {
-        if (!Edition.OFFICIAL) {
-            return;
-        }
         switch (value) {
             case "disable" -> {
                 disabled = true;
@@ -115,22 +112,18 @@ public final class ServerPolicy {
         }
     }
 
-    /** The server switched the add-on off (official build only). */
+    /** The server switched the add-on off. */
     public static boolean disabled() {
-        return Edition.OFFICIAL && disabled;
+        return disabled;
     }
 
     /**
-     * Movement faster than vanilla may be used: always in the Mythian build; in the official build in singleplayer or LAN,
-     * or when the server allows it.
+     * Movement faster than vanilla may be used: in singleplayer or LAN, or when the server allows it.
      */
     /** In-game tests: play by the server rules in singleplayer too (movement keys), to test them. */
     public static boolean serverRulesInSingleplayer;
 
     public static boolean fastMovementAllowed() {
-        if (!Edition.OFFICIAL) {
-            return true;
-        }
         if (serverRulesInSingleplayer && !fastMovement) {
             return false;
         }
@@ -139,9 +132,6 @@ public final class ServerPolicy {
     }
 
     public static String describe() {
-        if (!Edition.OFFICIAL) {
-            return "Mythian build: no limits";
-        }
         return disabled ? "off on this server (" + source + ")"
                 : fastMovementAllowed() ? "faster movement allowed" + (source.isEmpty() ? " (singleplayer)" : " (" + source + ")")
                 : "vanilla movement limits";

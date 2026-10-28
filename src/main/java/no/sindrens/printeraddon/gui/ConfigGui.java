@@ -217,7 +217,7 @@ public class ConfigGui extends GuiConfigsBase {
             runner.stop(mc, "stopped by you");
             this.initGui();
         });
-        if (no.sindrens.printeraddon.Edition.OFFICIAL) {
+        {
             boolean rules = no.sindrens.printeraddon.ServerPolicy.serverRulesInSingleplayer;
             this.addButton(new ButtonGeneric(x + 368, y, 260, 20, "Server rules in singleplayer: " + (rules ? "\u00a7aON" : "\u00a7cOFF")),
                     (button, mouse) -> {

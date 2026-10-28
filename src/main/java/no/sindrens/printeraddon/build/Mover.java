@@ -98,6 +98,21 @@ public class Mover {
 
     private boolean flyCommandSent;
     private int flyCommandWait;
+    /** /fly sent twice at most: it toggles, and one sent while flying was already on turned it off. */
+    private int flySends;
+    private static long flyAskedAt;
+    private static String flyReply = "";
+
+    /** A server line right after /fly: its answer (on or off). */
+    public static void flyAnswer(String text) {
+        if (flyAskedAt > 0 && System.currentTimeMillis() - flyAskedAt < 3000 && flyReply.isEmpty()) {
+            String t = text.toLowerCase(java.util.Locale.ROOT);
+            if (t.contains("fly") || t.contains("flight") || t.contains("flying")) {
+                flyReply = t;
+                BuildLog.line("FLY", "server: " + (text.length() > 120 ? text.substring(0, 120) : text));
+            }
+        }
+    }
     private boolean flyUnavailable;
 
     /** What the mover is doing, in words, for the status line. */
@@ -580,6 +595,7 @@ public class Mover {
         flyTarget = null;
         ticksUntilScan = 0;
         flyCommandSent = false;
+        flySends = 0;
         flyUnavailable = false;
         Configs.Movement.flyDenied = false;
         workTicksWithoutProgress = 0;
@@ -2990,6 +3006,39 @@ public class Mover {
         }
     }
 
+    /** Every point of the straight line has room for the body and ground under it, on the same level. */
+    private static boolean straightWalkable(net.minecraft.world.level.Level level, Vec3 from, BlockPos to) {
+        double tx = to.getX() + 0.5;
+        double tz = to.getZ() + 0.5;
+        double dx = tx - from.x;
+        double dz = tz - from.z;
+        double length = Math.sqrt(dx * dx + dz * dz);
+        int steps = Math.max(1, (int) Math.ceil(length / 0.4));
+        int y = to.getY();
+        BlockPos.MutableBlockPos p = new BlockPos.MutableBlockPos();
+        for (int i = 1; i <= steps; i++) {
+            double x = from.x + dx * i / steps;
+            double z = from.z + dz * i / steps;
+            for (double ox : new double[]{-0.3, 0.3}) {
+                for (double oz : new double[]{-0.3, 0.3}) {
+                    int bx = (int) Math.floor(x + ox);
+                    int bz = (int) Math.floor(z + oz);
+                    for (int dy = 0; dy <= 1; dy++) {
+                        p.set(bx, y + dy, bz);
+                        if (!level.getBlockState(p).getCollisionShape(level, p).isEmpty() || PathFinder.hurts(level.getBlockState(p))) {
+                            return false;
+                        }
+                    }
+                    p.set(bx, y - 1, bz);
+                    if (level.getBlockState(p).getCollisionShape(level, p).isEmpty() || PathFinder.hurts(level.getBlockState(p))) {
+                        return false;
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
     private void walk(Minecraft mc, LocalPlayer player, MoveMode mode) {
         if (path == null || pathIndex >= path.size()) {
             halt(player);
@@ -2997,6 +3046,17 @@ public class Mover {
             return;
         }
 
+        // A straight line to a node further on when nothing's in the way (no zig-zag over every block corner)
+        for (int ahead = Math.min(path.size() - 1, pathIndex + 6); ahead > pathIndex; ahead--) {
+            BlockPos far = path.get(ahead);
+            if (far.getY() == path.get(pathIndex).getY() && Math.abs(far.getY() - player.getY()) < 0.6
+                    && straightWalkable(mc.level, player.position(), far)) {
+                pathIndex = ahead;
+                lastDistance = Double.MAX_VALUE;
+                stuckTicks = 0;
+                break;
+            }
+        }
         BlockPos node = path.get(pathIndex);
         Vec3 pos = player.position();
         double dx = node.getX() + 0.5 - pos.x;
@@ -3510,10 +3570,16 @@ public class Mover {
         }
 
         String command = Configs.Movement.FLY_COMMAND.getStringValue().trim();
-        if (!flyCommandSent && !command.isEmpty()) {
+        // Sent once; once more when the server said it turned flying off (the command toggles)
+        boolean saidOff = flyReply.contains("disabled") || flyReply.contains(" off") || flyReply.contains("deaktiv");
+        if (!command.isEmpty() && (!flyCommandSent || flyCommandWait <= 0 && saidOff && flySends < 2)) {
             flyCommandSent = true;
+            flySends++;
             flyCommandWait = 40;
+            flyAskedAt = System.currentTimeMillis();
+            flyReply = "";
             player.connection.sendCommand(command.startsWith("/") ? command.substring(1) : command);
+            BuildLog.line("FLY", "sent /" + command + (flySends > 1 ? " again (the server said flying is off)" : ""));
             return false;
         }
         if (flyCommandWait > 0) {

@@ -6,16 +6,14 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.entity.player.Input;
 import net.minecraft.world.phys.Vec2;
 import net.minecraft.world.phys.Vec3;
-import no.sindrens.printeraddon.Edition;
 import no.sindrens.printeraddon.ServerPolicy;
 
 /**
  * Every movement of auto build and Auto break goes through here.
  * <p>
- * Mythian build (and the official one where the server allows faster movement, or in singleplayer): the wanted motion is
- * set on the player directly, as before.
+ * In singleplayer, or where the server allows faster movement: the wanted motion is set on the player directly.
  * <p>
- * Official build on a server: the wanted motion becomes key presses (forward, back, left, right, jump, sneak, sprint),
+ * On a server: the wanted motion becomes key presses (forward, back, left, right, jump, sneak, sprint),
  * which the game then moves with by its own rules, so never faster than a player holding those keys
  * (see {@code KeyboardInputMixin}). The keys are what the server is told too, like a player's own.
  */
@@ -34,13 +32,44 @@ public final class Motion {
     private Motion() {
     }
 
-    /** True when movement is done with keys (official build, on a server that didn't allow faster movement). */
+    /** True when movement is done with keys (on a server that didn't allow faster movement). */
     public static boolean keys() {
-        return Edition.OFFICIAL && !ServerPolicy.fastMovementAllowed();
+        return !ServerPolicy.fastMovementAllowed();
+    }
+
+    /** Turning towards where it goes, at most this much a tick (degrees): smooth, like a player's mouse. */
+    private static final float TURN_PER_TICK = 14f;
+
+    /**
+     * Looks where it walks or flies, turning smoothly (setting "Look where it goes"): the way a player moves, mostly
+     * forward (and sprinting), not sideways with the head fixed. Not for short steps (lining up at a spot).
+     */
+    private static void faceTravel(LocalPlayer player, Vec3 motion) {
+        if (!no.sindrens.printeraddon.config.Configs.Movement.FACE_TRAVEL.getBooleanValue()) {
+            return;
+        }
+        double h = Math.sqrt(motion.x * motion.x + motion.z * motion.z);
+        if (h < 0.12) {
+            return;
+        }
+        float want = (float) (Math.toDegrees(Math.atan2(motion.z, motion.x)) - 90.0);
+        float yaw = player.getYRot();
+        float diff = net.minecraft.util.Mth.wrapDegrees(want - yaw);
+        // Eased: a big turn starts quick and ends slow
+        float step = Math.max(-TURN_PER_TICK, Math.min(TURN_PER_TICK, diff * 0.35f));
+        if (Math.abs(diff) < 0.5f) {
+            return;
+        }
+        player.setYRot(yaw + step);
+        // The head a little down, towards the ground ahead (as when walking): eased too
+        float pitch = player.getXRot();
+        float wantPitch = 20f;
+        player.setXRot(pitch + Math.max(-4f, Math.min(4f, (wantPitch - pitch) * 0.15f)));
     }
 
     /** Moves the player with this motion (blocks a tick) this tick. */
     public static void set(LocalPlayer player, Vec3 motion) {
+        faceTravel(player, motion);
         if (keys()) {
             wanted = motion;
             wantedLeft = HOLD_TICKS;
@@ -96,7 +125,7 @@ public final class Motion {
         if (!keys()) {
             wanted = null;
             jump = false;
-            if (sneakNow && Edition.OFFICIAL) {
+            if (sneakNow) {
                 Input k = input.keyPresses;
                 input.keyPresses = new Input(k.forward(), k.backward(), k.left(), k.right(), k.jump(), true, k.sprint());
             }

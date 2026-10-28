@@ -47,6 +47,14 @@ public class Safety {
         float lost = lastHealth - health;
         lastHealth = health;
 
+        // A little health gone with no cause at all (no attacker, no block: the server's health sync, an effect running
+        // out): Pouched's builds stopped 3 times for 0.4 of it with over 20 health left
+        net.minecraft.world.damagesource.DamageSource lastSource = player.getLastDamageSource();
+        if (tookDamage && lost < 1.0f && health >= PLANT_DAMAGE_STOP
+                && (lastSource == null || lastSource.getEntity() == null && "generic".equals(lastSource.getMsgId()))) {
+            BuildLog.line("SAFETY", String.format(java.util.Locale.ROOT, "lost %.1f health, no cause known (health %.1f): building on", lost, health));
+            tookDamage = false;
+        }
         if (tookDamage && Configs.Safety.STOP_ON_DAMAGE.getBooleanValue()) {
             // A cactus (or berry bush) of the build brushed on the way: half a heart, nobody attacking. Building goes on
             // while there's plenty of health left

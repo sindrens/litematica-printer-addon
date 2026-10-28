@@ -6,7 +6,7 @@ import net.minecraft.client.gui.screens.inventory.InventoryScreen;
 import no.sindrens.printeraddon.config.Configs;
 
 /**
- * Official build: items are moved in the inventory (hotbar refills, tool swaps, stacks put together) with the inventory
+ * Items are moved in the inventory (hotbar refills, tool swaps, stacks put together) with the inventory
  * open, as a player has to, and never while moving (the movement keys are let go while a screen is open, see Motion).
  * The inventory closes again by itself after half a second without moves.
  */

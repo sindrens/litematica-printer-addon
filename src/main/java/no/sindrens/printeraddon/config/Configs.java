@@ -19,7 +19,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 public class Configs implements IConfigHandler {
-    private static final String CONFIG_FILE_NAME = PrinterAddon.MOD_ID + ".json";
+    public static final String CONFIG_FILE_NAME = PrinterAddon.MOD_ID + ".json";
     /** 2: the fastest automatic interval went from 2 to 1. */
     private static final int CONFIG_VERSION = 7;
     /** The one-time note in chat that every run's log goes to the developer by itself was shown (see LogShare). */
@@ -47,17 +47,17 @@ public class Configs implements IConfigHandler {
                 "If auto build was running when you logged out or lost the connection, start it again 10 seconds after\n"
                         + "rejoining the same server with the same schematic. It goes on from the first unfinished layer.",
                 "Go on after a restart or disconnect");
-        public static final ConfigBoolean RECONNECT = new ConfigBoolean("reconnect", !no.sindrens.printeraddon.Edition.OFFICIAL,
+        public static final ConfigBoolean RECONNECT = new ConfigBoolean("reconnect", true,
                 "If the server kicks you or restarts while auto build runs, join it again by itself: 10 s after the\n"
                         + "'Disconnected' screen, then 20 s, 30 s and every minute, for half an hour. Click 'Back to server list'\n"
                         + "to cancel. Never after a ban, nor when you leave yourself; it stops after 3 kicks in 10 minutes.\n"
                         + "Once back at the build, it goes on (see 'Go on after a restart or disconnect').",
                 "Join again after a kick or restart");
-        public static final ConfigString BACK_COMMANDS = new ConfigString("backToBuildCommands", no.sindrens.printeraddon.Edition.OFFICIAL ? "" : "server Skyblock",
+        public static final ConfigString BACK_COMMANDS = new ConfigString("backToBuildCommands", "",
                 "Commands that take you back to the build after joining again, or when the server moved you away (to a\n"
                         + "hub): run one by one, 8 seconds apart, then again every minute until you're back at the build (for\n"
-                        + "half an hour). Comma between them, no /. Empty: none. On mythian, /server Skyblock puts you back\n"
-                        + "exactly where you logged out. Stop auto build first (J+Q) when you leave on purpose, or it brings you back.",
+                        + "half an hour). Comma between them, no /. Empty: none. Example: server Skyblock. Kept per server.\n"
+                        + "Stop auto build first (J+Q) when you leave on purpose, or it brings you back.",
                 "Commands back to the build");
         public static final ConfigInteger BUILD_RENDER_DISTANCE = new ConfigInteger("buildRenderDistance", 0, 0, 32,
                 "Render distance (chunks) while auto build runs, for less lag on a slow computer. Your own setting comes\n"
@@ -77,12 +77,12 @@ public class Configs implements IConfigHandler {
                         + "yours; only the server is told the direction of each click (needed for stairs, observers...).",
                 "Turn my camera to blocks");
         public static final ConfigBoolean SHOW_ADVANCED_TABS = new ConfigBoolean("showAdvancedTabs",
-                !no.sindrens.printeraddon.Edition.OFFICIAL,
+                false,
                 "Show every tab of settings (Advanced) instead of only Controls, Build, Auto break, Basic settings and\n"
                         + "Commands. The 'Advanced' button at the end of the tabs switches it too.",
                 "Show advanced tabs");
         public static final ConfigBoolean OPEN_INVENTORY_FOR_MOVES = new ConfigBoolean("openInventoryForItemMoves",
-                no.sindrens.printeraddon.Edition.OFFICIAL,
+                true,
                 "Open the inventory to move items in it (hotbar refills, tools, stacks), and stand still meanwhile, as a\n"
                         + "player has to. It closes again by itself. Off: items are moved without it (faster, less like a player).",
                 "Open inventory to move items");
@@ -97,7 +97,7 @@ public class Configs implements IConfigHandler {
                 "Write every step (which block is broken, why it stopped...) to the game log (logs/latest.log).\n"
                         + "Useful when something doesn't work.",
                 "Debug log");
-        public static final ConfigBoolean SHARE_LOGS = new ConfigBoolean("shareLogsAutomatically", !no.sindrens.printeraddon.Edition.OFFICIAL,
+        public static final ConfigBoolean SHARE_LOGS = new ConfigBoolean("shareLogsAutomatically", false,
                 "Off by default. On: every auto build and Auto break run's log goes to the add-on's developer (a Discord channel)\n"
                         + "when the run ends, however it ended, to find bugs and make it faster. With it the debug: versions, mods,\n"
                         + "settings, PC, the game log without chat. The log has the build's coordinates, your inventory and\n"
@@ -111,11 +111,11 @@ public class Configs implements IConfigHandler {
                         + "The .jsonl has the same lines; send that one when something went wrong.",
                 "Text build log");
 
-        public static final ConfigBoolean DISCORD_SYNC = new ConfigBoolean("discordSync", !no.sindrens.printeraddon.Edition.OFFICIAL,
+        public static final ConfigBoolean DISCORD_SYNC = new ConfigBoolean("discordSync", true,
                 "Linked with Discord (J+L): send live status and alerts to your control room on the Printer Addon Discord,\n"
                         + "and take Pause / Resume / Stop from there. Never sends chat, coordinates, chests or vaults.",
                 "Discord sync");
-        public static final ConfigString DISCORD_API = new ConfigString("discordApi", no.sindrens.printeraddon.Edition.OFFICIAL ? "" : no.sindrens.printeraddon.discord.DiscordLink.DEFAULT_API,
+        public static final ConfigString DISCORD_API = new ConfigString("discordApi", no.sindrens.printeraddon.discord.DiscordLink.DEFAULT_API,
                 "The Printer Addon bot's address. Leave it as it is unless the developer says otherwise.",
                 "Discord bot address");
 
@@ -159,7 +159,7 @@ public class Configs implements IConfigHandler {
         public static final ConfigInteger MAX_BREAKS_PER_BLOCK = new ConfigInteger("maxBreaksPerBlock", 3, 1, 50,
                 "Stop breaking a spot after this many tries if it keeps coming back wrong, and say so in chat.",
                 "Max breaks per spot");
-        public static final ConfigBoolean LOOK_AT_BLOCKS = new ConfigBoolean("lookAtBlocks", no.sindrens.printeraddon.Edition.OFFICIAL,
+        public static final ConfigBoolean LOOK_AT_BLOCKS = new ConfigBoolean("lookAtBlocks", true,
                 "Tell the server you look at the block being broken (your camera stays free). For servers with strict anticheat.",
                 "Look at blocks when breaking");
         public static final ConfigString ALWAYS_BREAK = new ConfigString("alwaysBreakBlocks", "cactus_flower",
@@ -221,12 +221,28 @@ public class Configs implements IConfigHandler {
                         + "minecarts. Off: the printer places every block and the add-on only moves, breaks wrong blocks, gets the\n"
                         + "items and sets the printer's settings. Water (waterlogged blocks) is always put in with a bucket.",
                 "Add-on places blocks itself");
-        public static final ConfigBoolean USE_AIR_PLACE = new ConfigBoolean("useAirPlaceForFloatingBlocks", !no.sindrens.printeraddon.Edition.OFFICIAL,
+        public static final ConfigBoolean USE_AIR_PLACE = new ConfigBoolean("useAirPlaceForFloatingBlocks", false,
                 "Blocks with nothing beside or under them to place them against (the string at the bottom of a cactus farm)\n"
                         + "are placed in the air with the printer's 'printInAir': for the whole layer when all its blocks come out\n"
                         + "right that way (string, sand, cactus, plain blocks), else one block at a time. Only while such blocks are\n"
                         + "left. If the server doesn't keep blocks placed in the air, it stops by itself and says so.",
                 "Air place floating blocks");
+
+        public static final ConfigBoolean TEMP_BLOCKS = new ConfigBoolean("useTempBlocks", true,
+                "Blocks of the schematic that float (nothing beside or under them to place them against) are reached with\n"
+                        + "temporary blocks when air place is off: a few are put from the nearest solid block towards them, as a\n"
+                        + "player would, and broken again once nothing needs them. Only where the schematic has air.",
+                "Temporary blocks for floating parts");
+        public static final ConfigString TEMP_BLOCK_ITEM = new ConfigString("tempBlockItem", "dirt, cobblestone, cobbled_deepslate, netherrack",
+                "The blocks used for temporary blocks, first one you have is used (ids, comma between them). Sand and\n"
+                        + "gravel are left out (they fall). The first one is bought or fetched when you have none of them.",
+                "Temp blocks (first you have)");
+        public static final ConfigBoolean TEMP_BLOCKS_REMOVE = new ConfigBoolean("removeTempBlocks", true,
+                "Break the temporary blocks again once the blocks around them are placed.",
+                "Remove temp blocks after");
+        public static final ConfigInteger TEMP_MAX_CHAIN = new ConfigInteger("tempBlocksMaxChain", 8, 1, 32,
+                "At most this many temporary blocks in a row to reach one floating block (from the nearest solid block).",
+                "Temp blocks: most in a row");
 
         public static final ConfigBoolean CAP_BEFORE_STOP = new ConfigBoolean("capBeforeStop", true,
                 "When you stop the build, the sand beside cactus left open on top goes in first (a few seconds; at most\n"
@@ -235,7 +251,7 @@ public class Configs implements IConfigHandler {
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
                 AUTO_LAYER, LAYERS_TOGETHER, CAP_BEFORE_STOP, ADDON_PLACES, LAYER_CHECK_INTERVAL, STUCK_REPORT_SECONDS, SKIP_STUCK_SECONDS, EXTRA_BLOCKS_BLOCK_LAYER,
-                USE_AIR_PLACE);
+                USE_AIR_PLACE, TEMP_BLOCKS, TEMP_BLOCK_ITEM, TEMP_BLOCKS_REMOVE, TEMP_MAX_CHAIN);
     }
 
 
@@ -246,15 +262,19 @@ public class Configs implements IConfigHandler {
 
     public static class Movement {
         public static final ConfigOptionList MOVE_MODE = new ConfigOptionList("movementMode",
-                no.sindrens.printeraddon.Edition.OFFICIAL ? MoveMode.WALK_AND_FLY : MoveMode.FLY,
+                MoveMode.WALK_AND_FLY,
                 "How auto build gets you to the next unfinished blocks: fly (fastest: always above the blocks being built),\n"
                         + "walk, walk and fly when needed, or not at all. Flying only where you may fly (creative, or the server\n"
                         + "allowed it, or the fly command below did): where you can't, it walks by itself. Kept per server.",
                 "Movement (fly is fastest)");
-        public static final ConfigString FLY_COMMAND = new ConfigString("flyCommand", no.sindrens.printeraddon.Edition.OFFICIAL ? "" : "fly",
+        public static final ConfigString FLY_COMMAND = new ConfigString("flyCommand", "",
                 "Your server's fly command (without the slash), if you have permission to use it: sent once when flying\n"
                         + "is needed but not allowed yet. Empty: never sent (it flies only if you already may, else walks).",
                 "Fly command (if you have /fly)");
+        public static final ConfigBoolean FACE_TRAVEL = new ConfigBoolean("lookWhereItGoes", true,
+                "While auto build walks or flies somewhere, your view turns smoothly towards where it goes, like a\n"
+                        + "player moving (and it can sprint). Off: the view stays where you left it and it moves sideways too.",
+                "Look where it goes");
         public static final ConfigBoolean KEEP_MOVING = new ConfigBoolean("keepMoving", true,
                 "Flying: when only a few blocks are left to place where you are, already fly on to the next spot (the printer\n"
                         + "places the last ones on the way) instead of stopping until everything around is done.",
@@ -276,7 +296,7 @@ public class Configs implements IConfigHandler {
                 "Max walk distance");
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-                MOVE_MODE, FLY_COMMAND, KEEP_MOVING, LANES, HOVER_HEIGHT, WORK_WAIT_SECONDS, MAX_WALK_DISTANCE);
+                MOVE_MODE, FLY_COMMAND, FACE_TRAVEL, KEEP_MOVING, LANES, HOVER_HEIGHT, WORK_WAIT_SECONDS, MAX_WALK_DISTANCE);
 
         /** Set when flying turned out not to be allowed here: "Fly only" walks then too (else it stood still). */
         public static boolean flyDenied;
@@ -309,11 +329,11 @@ public class Configs implements IConfigHandler {
                 "Eat when the food bar is at this or lower (20 is full, every drumstick is 2).",
                 "Eat at food level");
 
-        public static final ConfigBoolean USE_FEED_COMMAND = new ConfigBoolean("useFeedCommand", !no.sindrens.printeraddon.Edition.OFFICIAL,
+        public static final ConfigBoolean USE_FEED_COMMAND = new ConfigBoolean("useFeedCommand", false,
                 "Fill the food bar with the server's feed command instead of eating (if you're allowed to use it).\n"
                         + "If the command does nothing (no permission), food from the inventory is eaten instead.",
                 "Eat with /feed");
-        public static final ConfigString FEED_COMMAND = new ConfigString("feedCommand", no.sindrens.printeraddon.Edition.OFFICIAL ? "" : "feed",
+        public static final ConfigString FEED_COMMAND = new ConfigString("feedCommand", "",
                 "The feed command, without the slash.",
                 "Feed command");
 
@@ -322,14 +342,14 @@ public class Configs implements IConfigHandler {
     }
 
     public static class Shop {
-        public static final ConfigString SHOP_COMMAND = new ConfigString("shopCommand", no.sindrens.printeraddon.Edition.OFFICIAL ? "" : "shop",
+        public static final ConfigString SHOP_COMMAND = new ConfigString("shopCommand", "",
                 "Command that opens the shop, without the slash.",
                 "Shop command");
         public static final ConfigBoolean FETCH_FROM_CHESTS = new ConfigBoolean("fetchFromChests", true,
                 "Before buying, take missing items from the chests, barrels and shulker boxes you linked (J+B, Build tab:\n"
                         + "look at one and press 'Link chest'). No other chest is ever opened. They have to be loaded (in view distance).",
                 "Use linked chests and vaults first");
-        public static final ConfigString VAULTS = new ConfigString("playerVaultNumbers", no.sindrens.printeraddon.Edition.OFFICIAL ? "" : "1,2",
+        public static final ConfigString VAULTS = new ConfigString("playerVaultNumbers", "",
                 "Your player vaults to use as storage, like chests: items are taken from them before buying (pumpkins to\n"
                         + "craft seeds from, for example) and leftovers are put in them. Numbers, e.g. 1-6 or 1,2,3. Empty = none.",
                 "Your vaults (/pv numbers)");
@@ -339,10 +359,10 @@ public class Configs implements IConfigHandler {
                         + "again (or buys it). Never buckets, food, armor, weapons, nor anything renamed or enchanted. If it doesn't\n"
                         + "all fit, it says so: link a chest for the rest (J+B).",
                 "Put items away when stopping");
-        public static final ConfigString VAULT_COMMAND = new ConfigString("vaultCommand", no.sindrens.printeraddon.Edition.OFFICIAL ? "" : "pv",
+        public static final ConfigString VAULT_COMMAND = new ConfigString("vaultCommand", "",
                 "Command that opens a player vault, without the slash (the vault number is added).",
                 "Vault command");
-        public static final ConfigBoolean AUTO_BUY = new ConfigBoolean("autoBuy", !no.sindrens.printeraddon.Edition.OFFICIAL,
+        public static final ConfigBoolean AUTO_BUY = new ConfigBoolean("autoBuy", false,
                 "During auto build, buy what the current layer is missing from the shop (as much as fits in the inventory).\n"
                         + "Needs a shop scan of the server first (J+S). When auto build starts it asks how much it may spend.",
                 "Buy what's missing in the shop");
@@ -387,11 +407,11 @@ public class Configs implements IConfigHandler {
                         + "blocks). On: when the prices aren't known, or cost the same, blocks are bought and crafted back (fewer\n"
                         + "purchases). The blocks are always bought when the item itself can't be (not sold, or not delivered).",
                 "Buy blocks and craft them back");
-        public static final ConfigBoolean USE_CRAFT_COMMAND = new ConfigBoolean("useCraftCommand", !no.sindrens.printeraddon.Edition.OFFICIAL,
+        public static final ConfigBoolean USE_CRAFT_COMMAND = new ConfigBoolean("useCraftCommand", false,
                 "Open a crafting table with the server's craft command when a recipe needs one (rails, hoes), instead of\n"
                         + "placing one. If the command does nothing (no permission), a crafting table is used as before.",
                 "Craft with /craft");
-        public static final ConfigString CRAFT_COMMAND = new ConfigString("craftCommand", no.sindrens.printeraddon.Edition.OFFICIAL ? "" : "craft",
+        public static final ConfigString CRAFT_COMMAND = new ConfigString("craftCommand", "",
                 "The command that opens a crafting table, without the slash.",
                 "Craft command");
 
@@ -453,19 +473,19 @@ public class Configs implements IConfigHandler {
         public static final double VANILLA_FLY = 0.55;
 
         public static final ConfigInteger MIN_TICKS_BETWEEN_PLACEMENTS = new ConfigInteger("minTicksBetweenPlacements",
-                no.sindrens.printeraddon.Edition.OFFICIAL ? 4 : 0, 0, 20,
+                4, 0, 20,
                 "Ticks between two blocks placed (0: no wait, the printer's interval decides). 4 is as fast as holding\n"
                         + "right-click in vanilla (5 blocks a second). Below 4 is faster than a player: many servers' anticheats\n"
                         + "notice it and their rules may forbid it. Your choice, at your own risk.",
                 "Ticks between placements");
         public static final ConfigInteger MAX_PLACEMENTS_PER_SECOND = new ConfigInteger("maxPlacementsPerSecond",
-                no.sindrens.printeraddon.Edition.OFFICIAL ? 5 : 0, 0, 40,
+                5, 0, 40,
                 "For servers with a strict anticheat: the printer places at most this many blocks per second. 0 = no limit\n"
                         + "(the printer's interval decides). More than 5 is faster than a player holding right-click.",
                 "Max placements per second");
         public static final ConfigBoolean WAIT_AFTER_SWITCH = new ConfigBoolean("waitAfterSwitch", true,
                 "A click never in the same tick as the switch to its item: it goes a tick later. Some servers refuse such\n"
-                        + "clicks (on play.mythian.net 7 % of the clicks right after a switch, against 0.5 % of the others).\n"
+                        + "clicks (on one server 7 % of the clicks right after a switch, against 0.5 % of the others).\n"
                         + "Off: a little faster on servers that don't.",
                 "Wait a tick after switching items");
         public static final ConfigBoolean CLICK_SEEN_FACE = new ConfigBoolean("clickSeenFace", true,
@@ -484,7 +504,7 @@ public class Configs implements IConfigHandler {
                 "Custom preset: the printer's printing interval (lower is faster). Below 12 the printer often places blocks wrong.",
                 "Custom: printer interval");
         public static final ConfigInteger BREAK_COOLDOWN = new ConfigInteger("customBreakCooldownTicks",
-                no.sindrens.printeraddon.Edition.OFFICIAL ? 5 : 2, 0, 100,
+                5, 0, 100,
                 "Custom preset: ticks to wait after breaking a block before the next one. 5 is vanilla's own wait;\n"
                         + "below 5 is faster than a player (anticheats may notice it).",
                 "Custom: break cooldown (ticks)");
@@ -493,12 +513,12 @@ public class Configs implements IConfigHandler {
                 "Custom: shop click delay (ticks)");
         public static final ConfigDouble WALK_SPEED = new ConfigDouble("customWalkSpeed", 0.21, 0.05,
                 0.4,
-                "Custom preset: walking speed in blocks per tick (vanilla walking is about 0.21). Official build: above\n"
+                "Custom preset: walking speed in blocks per tick (vanilla walking is about 0.21). Faster than\n"
                         + "vanilla only in singleplayer or where the server allows it (MOTD tag [printer_addon:allow-fast-movement]).",
                 "Custom: walk speed");
         public static final ConfigDouble FLY_SPEED = new ConfigDouble("customFlySpeed", 0.55, 0.1,
                 2.0,
-                "Custom preset: flying speed in blocks per tick (vanilla flying is about 0.55). Official build: above\n"
+                "Custom preset: flying speed in blocks per tick (vanilla flying is about 0.55). Faster than\n"
                         + "vanilla only in singleplayer or where the server allows it (MOTD tag [printer_addon:allow-fast-movement]).",
                 "Custom: fly speed");
 
@@ -508,7 +528,7 @@ public class Configs implements IConfigHandler {
         public static double walkSpeed() {
             SpeedPreset preset = preset();
             double speed = preset == SpeedPreset.CUSTOM ? WALK_SPEED.getDoubleValue() : preset.walkSpeed;
-            // Official build: faster than a player only where the server allowed it (or singleplayer)
+            // faster than a player only where the server allowed it (or singleplayer)
             return no.sindrens.printeraddon.ServerPolicy.fastMovementAllowed() ? speed : Math.min(speed, VANILLA_WALK);
         }
 
@@ -554,12 +574,9 @@ public class Configs implements IConfigHandler {
 
         private static String lastWarning = "";
 
-        /** Settings faster than a vanilla player (official build): said once in chat when one is set. */
+        /** Settings faster than a vanilla player: said once in chat when one is set. */
         public static java.util.List<String> risky() {
             java.util.List<String> out = new java.util.ArrayList<>();
-            if (!no.sindrens.printeraddon.Edition.OFFICIAL) {
-                return out;
-            }
             int spacing = MIN_TICKS_BETWEEN_PLACEMENTS.getIntegerValue();
             int perSecond = MAX_PLACEMENTS_PER_SECOND.getIntegerValue();
             if (spacing < 4 && (perSecond == 0 || perSecond > 5)) {
@@ -675,21 +692,12 @@ public class Configs implements IConfigHandler {
                     // At intervals 1 and 2 the player's server kicked the player (too many clicks)
                     Speed.AUTO_SPEED_MIN_INTERVAL.setIntegerValue(Math.max(3, Speed.AUTO_SPEED_MIN_INTERVAL.getIntegerValue()));
                     Speed.PRINTER_INTERVAL.setIntegerValue(Math.max(3, Speed.PRINTER_INTERVAL.getIntegerValue()));
-                    // Air place was off: the floating string at the bottom of a cactus farm was never placed
-                    if (!no.sindrens.printeraddon.Edition.OFFICIAL) {
-                        Layers.USE_AIR_PLACE.setBooleanValue(true);
-                    }
                 }
                 if (version < 6) {
                     // 2 is the fastest again (the speed guard slows down when the server can't keep up)
                     if (Speed.AUTO_SPEED_MIN_INTERVAL.getIntegerValue() == 3) {
                         Speed.AUTO_SPEED_MIN_INTERVAL.setIntegerValue(2);
                     }
-                }
-                if (version < 7 && !no.sindrens.printeraddon.Edition.OFFICIAL) {
-                    // Every run's log goes to the developer by itself now, the default (the player is told once in chat,
-                    // with how to turn it off): the logs show what goes wrong
-                    Generic.SHARE_LOGS.setBooleanValue(true);
                 }
                 logsNoticeShown = root.has("logsNoticeShown") && root.get("logsNoticeShown").getAsBoolean();
             }

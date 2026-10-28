@@ -248,13 +248,9 @@ public class InteractActionMixin {
             // Back to what the keyboard says
             printer_addon$sneaked = false;
             player.input.keyPresses = printer_addon$keys;
-            if (no.sindrens.printeraddon.Edition.OFFICIAL) {
-                // Official build: the sneak key stays held a moment, so the player really crouches and lets go as
-                // a player does (the game tells the server when the keys change)
-                no.sindrens.printeraddon.build.Motion.sneak(3);
-            } else {
-                player.connection.send(new net.minecraft.network.protocol.game.ServerboundPlayerInputPacket(printer_addon$keys));
-            }
+            // The sneak key stays held a moment, so the player really crouches and lets go as a player does (the
+            // game tells the server when the keys change)
+            no.sindrens.printeraddon.build.Motion.sneak(3);
         }
         if (!printer_addon$turned) {
             return;

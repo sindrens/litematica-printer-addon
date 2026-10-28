@@ -11,8 +11,8 @@ public enum SpeedPreset implements IConfigOptionListEntry {
     // Official (Modrinth) build: Safe and Normal are as fast as a vanilla player; Fast breaks with no wait (the player's
     // own choice, with a warning). Movement past vanilla only where the server allows it (see ServerPolicy)
     SAFE("safe", "Safe", 12, 6, 10, 0.18, 0.4),
-    NORMAL("normal", "Normal", 12, no.sindrens.printeraddon.Edition.OFFICIAL ? 5 : 2, 6, 0.21, 0.55),
-    FAST("fast", no.sindrens.printeraddon.Edition.OFFICIAL ? "Fast (faster than a player, risky)" : "Fast", 12, 0, 3, 0.27, 0.9),
+    NORMAL("normal", "Normal", 12, 5, 6, 0.21, 0.55),
+    FAST("fast", "Fast (faster than a player, risky)", 12, 0, 3, 0.27, 0.9),
     CUSTOM("custom", "Custom", -1, -1, -1, -1, -1);
 
     private final String id;

@@ -159,7 +159,7 @@ public final class PrinterBridge {
         // Never farther than the player can reach in vanilla (the printer's own range setting goes up to 6): clicks
         // past it are what anticheats look for
         double reach = player.blockInteractionRange();
-        if (no.sindrens.printeraddon.Edition.OFFICIAL && Configs.PRINTING_RANGE.getDoubleValue() > reach) {
+        if (Configs.PRINTING_RANGE.getDoubleValue() > reach) {
             Configs.PRINTING_RANGE.setDoubleValue(reach);
         }
         if (!Generic.APPLY_SPEED_TO_PRINTER.getBooleanValue()) {

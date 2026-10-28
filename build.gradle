@@ -48,18 +48,14 @@ fabricApi {
 
 base {
     archivesName = "${project.mod_id}-${project.minecraft_version}"
-    // Two editions from one source: "mythian" (default, for the Mythian server: every speed setting open) and
-    // "official" (Modrinth: moves and clicks like a player; faster speeds only by choice, with warnings). -Pedition=official
-    version = project.mod_version + (project.findProperty('edition') == 'official' ? '' : '+mythian')
+    version = project.mod_version
     group = project.maven_group
 }
 
 processResources {
-    def edition = project.findProperty('edition') ?: 'mythian'
     inputs.property 'mod_version', project.mod_version
-    inputs.property 'edition', edition
     filesMatching('fabric.mod.json') {
-        expand 'mod_version': project.mod_version + (edition == 'official' ? '' : '+mythian'), 'edition': edition
+        expand 'mod_version': project.mod_version
     }
     // The test build library, for the in-game tests (Tests tab)
     from('testdata/library') {

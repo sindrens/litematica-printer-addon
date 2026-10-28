@@ -2081,6 +2081,7 @@ public class AutoBuild {
             return;
         }
         Configs.Speed.warnIfRisky();
+        TempBlocks.INSTANCE.reset();
         remotePaused = false;
         if (AreaBreaker.INSTANCE.isRunning()) {
             Chat.warn("Auto break is running: stop it first (J+B, Auto break tab), then start auto build.");
@@ -2418,6 +2419,7 @@ public class AutoBuild {
                     + " is stopped, and have to be broken one by one after. Start it again soon to cap them.");
         }
         layers.stop();
+        TempBlocks.INSTANCE.stopped();
         breaker.stop(mc);
         mover.stop(mc);
         airPlace.stop();
@@ -3029,7 +3031,8 @@ public class AutoBuild {
             }
         }
 
-        boolean breakSomething = Configs.Breaking.BREAK_WRONG_BLOCKS.getBooleanValue() || !airPlace.misplaced().isEmpty();
+        boolean breakSomething = Configs.Breaking.BREAK_WRONG_BLOCKS.getBooleanValue() || !airPlace.misplaced().isEmpty()
+                || TempBlocks.INSTANCE.hasRemovals();
         if (breakSomething && PrinterBridge.isIdle() && !airPlace.isActive()) {
             breaker.tick(mc, BlockBreaker.Mode.WRONG);
         } else if (breaker.isBusy()) {
@@ -3037,6 +3040,9 @@ public class AutoBuild {
         }
 
         airPlace.tick(mc, breaker.isBusy());
+        if (running) {
+            TempBlocks.INSTANCE.tick(mc, breaker.isBusy());
+        }
 
         // Buckets (water in waterlogged blocks, so farmland is wet before it's tilled) always: the printer has no
         // buckets. The add-on's own placing of rails and minecarts only when switched on

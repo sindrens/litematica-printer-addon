@@ -676,6 +676,10 @@ public class LayerManager {
                 findings.needs.put(tool, 1);
             }
         }
+        // Floating blocks with air place off: temporary blocks to reach them (see TempBlocks), got like the build's own
+        if (findings.floating > 0 && TempBlocks.INSTANCE.enabled()) {
+            findings.needs.merge(TempBlocks.INSTANCE.item(), Math.min(64, 4 + findings.floating), Math::max);
+        }
         updateShoppingList(mc, findings.needs);
         layerNeeds = findings.needs;
         // Also a layer that floats as a whole (a floor with air under it, none of it in yet): nothing of it can be
@@ -1001,6 +1005,10 @@ public class LayerManager {
         tillingLeft = findings.tilling;
         if (findings.tilling > 0 && mc.player != null && !Tools.covered(Tools.HOE, mc.player.getInventory())) {
             findings.needs.put(Tools.HOE, Tools.hoesFor(findings.tilling - Tools.hoeUses(mc.player.getInventory()), mc.player.getInventory()));
+        }
+        // Floating blocks with air place off: temporary blocks to reach them (see TempBlocks), got like the build's own
+        if (findings.floating > 0 && TempBlocks.INSTANCE.enabled()) {
+            findings.needs.merge(TempBlocks.INSTANCE.item(), Math.min(64, 4 + findings.floating), Math::max);
         }
         updateShoppingList(mc, findings.needs);
         layerNeeds = findings.needs;

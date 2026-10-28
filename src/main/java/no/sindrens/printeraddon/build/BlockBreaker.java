@@ -415,6 +415,7 @@ public class BlockBreaker {
         if (quickTarget && !standing && mc.level.getBlockState(target).isAir()) {
             forced.remove(target);
             columnBases.remove(target);
+            TempBlocks.INSTANCE.removed(target);
             breaks++;
             brokenCount++;
             target = null;
@@ -425,7 +426,7 @@ public class BlockBreaker {
     private void continueBreaking(Minecraft mc, LocalPlayer player, @Nullable WorldSchematic schematic, Mode mode) {
         BlockPos pos = target;
         BlockCheck.Result result = schematic == null ? null : BlockCheck.check(mc.level, schematic, pos);
-        boolean isForced = forced.contains(pos) || columnBases.contains(pos);
+        boolean isForced = forced.contains(pos) || columnBases.contains(pos) || TempBlocks.INSTANCE.toRemove(pos);
 
         boolean gone = mode == Mode.AREA ? !AreaBreaker.stillThere(mc.level, pos)
                 : isForced ? mc.level.getBlockState(pos).isAir() : !shouldBreak(result, mode, pos);
@@ -433,6 +434,7 @@ public class BlockBreaker {
             if (isForced) {
                 forced.remove(pos);
                 columnBases.remove(pos);
+                TempBlocks.INSTANCE.removed(pos);
             }
             // Gone (or fixed): done
             PrinterAddon.debug("Done with {} after {} ticks ({}{})", pos.toShortString(), ticksOnTarget, result, standing ? ", standing" : "");
@@ -616,7 +618,7 @@ public class BlockBreaker {
             if (distance > range * range || distance >= bestDistance) {
                 continue;
             }
-            if (forced.contains(pos) && !mc.level.getBlockState(pos).isAir()) {
+            if ((forced.contains(pos) || TempBlocks.INSTANCE.toRemove(pos)) && !mc.level.getBlockState(pos).isAir()) {
                 best = pos.immutable();
                 bestDistance = distance;
                 continue;
@@ -626,7 +628,7 @@ public class BlockBreaker {
                 continue;
             }
             // A temporary rail stays until the rail helper releases it
-            if (AutoBuild.INSTANCE.rails.isTemp(pos)) {
+            if (AutoBuild.INSTANCE.rails.isTemp(pos) || TempBlocks.INSTANCE.isTemp(pos)) {
                 continue;
             }
             if (!SchematicHelper.isInAnyArea(areas, pos)) {

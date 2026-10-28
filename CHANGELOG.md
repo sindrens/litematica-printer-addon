@@ -270,34 +270,27 @@
 - The on-screen status says "(stops after this layer)" while that's on.
 
 ## 26.2-0.18.0
-- Two builds now: the official one (for Modrinth) and the Mythian one. The Mythian build works as before.
-- Official build: moves with the real movement keys (forward, back, left, right, jump, sneak, sprint), so the game moves you at a normal player's speed. Faster movement only works in singleplayer or where the server allows it.
-- Official build: the camera really turns to each block it clicks or breaks, and the sneak key is really held for clicks on chests and hoppers.
-- Official build: the inventory opens before items are moved in it, and you stand still while it's open. The setting "Open inventory to move items" turns this on or off.
-- Official build: placement speed, break speed and the Fast preset can all be set by you. Anything faster than a vanilla player gives a warning in chat. Reach is never more than vanilla.
-- Server commands (fly, shop, vaults, craft, feed, back-to-build) and auto reconnect are saved for each server. In the official build they're all off on a new server until you turn them on in the new "Commands (this server)" tab.
-- Servers can turn the add-on off with the MOTD tag [printer_addon:disable] or the plugin message printer_addon:policy "disable". They can allow faster movement with [printer_addon:allow-fast-movement].
-- Official build: log sharing and the Discord link are off by default. The Discord link only works over https. Air place is off by default.
-- A short guide in chat the first time you join a world (official build).
-- Big layers are checked a little each tick instead of all at once, so 200 x 200 builds don't stutter.
-- New safety stops in both editions:
-  - It stops in lava, when falling into the void, and when health is low.
-  - It stops when the inventory has been full for 90 seconds with nothing placed.
-  - Breaking never goes outside the schematic (or Auto break's selected area).
-- "Why did it stop?": the Controls tab shows the last stop and what to do about it. You can also type /printeraddon why.
-- "Report a problem..." button in Controls, and /printeraddon report. Nothing is sent until you press Send.
-- The settings start in Basic view (Controls, Build, Auto break, Basic settings, Commands). The "Advanced" button shows every tab.
-- The settings are translated into Norwegian (Bokmål) when the game is set to Norwegian.
-- Checks the versions of Litematica, Litematica Printer and MaLiLib, and warns about mods that move the player too (Baritone, Freecam). Sodium and Iris are supported.
-- Test library: 14 test builds in testdata/library, made by tools/make_test_builds.py and run by tools/run_library.sh.
-- In-game tests: a new Tests tab (and /printeraddon test all) runs the 14 test builds plus an Auto break test in a singleplayer world. Each build is placed next to you, built while you watch with the items given as it goes, and marked PASS or FAIL with its speed. Results are saved to config/printer_addon/test-results.txt. In the official build, "Server rules in singleplayer" lets you test the server movement in singleplayer.
-- Walking and /fly both work in the official build:
-  - "Walk, fly when needed" is the default. It flies only where you may (creative, the server allows it, or your fly command works), and walks everywhere else.
-  - "Fly only" walks instead of standing still when flying isn't allowed.
-  - The movement mode and the fly command are saved per server, in the Commands tab, with everything else you have permission for.
-- Your camera is yours again: it no longer jumps to every block clicked. The server still gets the right direction for each click. The new setting "Turn my camera to blocks" brings back the camera turning if you want it.
-- In-game tests:
-  - Each build is placed on the ground instead of at your feet height.
-  - The inventory is emptied between tests.
-  - Floating builds are skipped unless "Air place floating blocks" is on.
-  - The house's torch hangs on a wall instead of the door.
+One version for everyone now (the one going to Modrinth). Updating keeps all your settings: the server commands you set
+(fly, shop, vaults...) are kept for the first server you join.
+
+Plays like a player:
+- Moves with the movement keys at a player's speed on servers, and looks where it goes, turning smoothly ("Look where it goes").
+- Walks along straight lines where nothing's in the way, instead of zig-zagging over every block.
+- Walk and /fly both work: "Walk, fly when needed" flies only where you may and walks everywhere else. "Fly only" walks too when flying isn't allowed. A /fly that turned flying off is sent once more.
+- Opens the inventory to move items, and holds the sneak key for chest and hopper clicks.
+- Your camera stays yours. "Turn my camera to blocks" makes it turn to each block clicked, if you want that.
+- Reach is never more than vanilla. Placement and break speed are your choice, with a warning in chat when they're faster than a player.
+
+New:
+- Temporary blocks for floating parts: blocks of the schematic with nothing to place them against are reached with temporary blocks put from the nearest solid block, and broken again after. Uses the first of dirt, cobblestone, cobbled deepslate or netherrack you have (your choice in the Layers settings). On by default when air place is off.
+- Server commands are kept per server, in the "Commands (this server)" tab, together with the movement mode.
+- Servers can switch it off (MOTD tag [printer_addon:disable] or the plugin channel printer_addon:policy) or allow faster movement ([printer_addon:allow-fast-movement]). See docs/SERVER_ADMINS.md.
+- Safety stops: lava, the void, low health, a full inventory with nothing placed for 90 s. Never breaks outside the schematic or Auto break's area.
+- "Why did it stop?" in the Controls tab and /printeraddon why. "Report a problem..." button and /printeraddon report.
+- Tests tab: 14 test builds and an Auto break test run in a singleplayer world, with PASS/FAIL and speed (config/printer_addon/test-results.txt).
+- Basic and Advanced settings views, settings in Norwegian, version checks for Litematica / Printer / MaLiLib, warnings for mods that also move the player.
+- Big layers are checked a little each tick (no stutter on 200 x 200).
+
+Fixed:
+- Builds stopped for "you took damage (unknown)" when a little health went with nothing hitting you.
+- Log sharing is off until you turn it on or press Send after a run.

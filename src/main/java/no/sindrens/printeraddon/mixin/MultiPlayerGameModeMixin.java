@@ -20,7 +20,7 @@ public abstract class MultiPlayerGameModeMixin {
     @Final
     private Minecraft minecraft;
 
-    /** Official build: the inventory opened before moving items in it, as a player must (see InvScreen). */
+    /** the inventory opened before moving items in it, as a player must (see InvScreen). */
     @Inject(method = "handleContainerInput", at = @At("HEAD"))
     private void printer_addon$openInventory(int containerId, int slot, int button, net.minecraft.world.inventory.ContainerInput input,
                                              net.minecraft.world.entity.player.Player player, CallbackInfo ci) {

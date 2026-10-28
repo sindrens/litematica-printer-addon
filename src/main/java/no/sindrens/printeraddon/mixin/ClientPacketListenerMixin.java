@@ -44,6 +44,7 @@ public class ClientPacketListenerMixin {
         if (!packet.overlay() && no.sindrens.printeraddon.config.Configs.enabled()) {
             no.sindrens.printeraddon.shop.ShopBuyer.INSTANCE.serverMessage(packet.content().getString());
             no.sindrens.printeraddon.build.Resume.serverMessage(packet.content().getString());
+            no.sindrens.printeraddon.build.Mover.flyAnswer(packet.content().getString());
         }
     }
 }

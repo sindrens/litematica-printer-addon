@@ -81,10 +81,6 @@ public final class DiscordLink {
         while (url.endsWith("/")) {
             url = url.substring(0, url.length() - 1);
         }
-        // Official build: only an encrypted address (the link token and status go over it)
-        if (no.sindrens.printeraddon.Edition.OFFICIAL && !url.startsWith("https://")) {
-            return "";
-        }
         return url;
     }
 

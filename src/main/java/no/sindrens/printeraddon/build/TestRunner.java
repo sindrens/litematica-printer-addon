@@ -151,7 +151,7 @@ public final class TestRunner {
         command(mc, "gamerule advance_time false");
         startedAt = System.currentTimeMillis();
         line("=== Test run " + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")) + ", Printer Addon "
-                + no.sindrens.printeraddon.compat.Compat.version(PrinterAddon.MOD_ID) + " (" + no.sindrens.printeraddon.Edition.name()
+                + no.sindrens.printeraddon.compat.Compat.version(PrinterAddon.MOD_ID) + " (" + "official"
                 + " build), " + titles.size() + " test" + (titles.size() == 1 ? "" : "s"));
         Chat.info("Tests started: " + titles.size() + ". Stand on flat open ground; the builds go next to you, in a row east."
                 + " Stop them from the Tests tab.");
@@ -245,8 +245,9 @@ public final class TestRunner {
     private void clear(Minecraft mc) {
         TestBuild build = build(current);
         // A floating build needs air place: without it nothing of it can be placed (a player can't either)
-        if (build != null && build.lift() > 0 && !Configs.Layers.USE_AIR_PLACE.getBooleanValue()) {
-            result(mc, "SKIP", "needs 'Air place floating blocks' on (Layers settings)");
+        if (build != null && build.lift() > 0 && !Configs.Layers.USE_AIR_PLACE.getBooleanValue()
+                && !Configs.Layers.TEMP_BLOCKS.getBooleanValue()) {
+            result(mc, "SKIP", "needs 'Temporary blocks for floating parts' or air place on (Layers settings)");
             phase = Phase.NEXT;
             return;
         }
@@ -527,6 +528,10 @@ public final class TestRunner {
         }
         if (needed.containsKey(Items.RAIL) || needed.containsKey(Items.POWERED_RAIL)) {
             needed.merge(Items.RAIL, 8, Integer::sum);
+        }
+        // Temporary blocks for the floating parts
+        if (TempBlocks.INSTANCE.enabled()) {
+            needed.merge(TempBlocks.INSTANCE.item(), 32, Integer::sum);
         }
         Inventory inventory = mc.player.getInventory();
         int freeSlots = 0;

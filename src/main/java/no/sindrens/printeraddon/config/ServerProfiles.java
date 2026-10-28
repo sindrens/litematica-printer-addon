@@ -7,7 +7,6 @@ import fi.dy.masa.malilib.config.IConfigValue;
 import fi.dy.masa.malilib.util.FileUtils;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ServerData;
-import no.sindrens.printeraddon.Edition;
 import no.sindrens.printeraddon.PrinterAddon;
 import no.sindrens.printeraddon.util.Chat;
 
@@ -19,7 +18,7 @@ import java.util.Locale;
 
 /**
  * The server commands (fly, shop, vaults, craft, feed, back to the build) and auto reconnect are kept per server: what
- * you allow on one server isn't used on another. Official build: on a server you haven't set up, they are all off, and
+ * you allow on one server isn't used on another. on a server you haven't set up, they are all off, and
  * you're told once where to turn on the ones you may use there. Saved in config/printer_addon/servers.json.
  */
 public final class ServerProfiles {
@@ -54,7 +53,12 @@ public final class ServerProfiles {
         boolean firstEver = !root.has("guideShown");
         if (servers.has(key)) {
             apply(servers.getAsJsonObject(key));
-        } else if (Edition.OFFICIAL && !key.equals("singleplayer")) {
+        } else if (root.has("keepForFirstServer") && !key.equals("singleplayer")) {
+            // Updated from a version without per-server settings: the commands set before are this server's
+            root.remove("keepForFirstServer");
+            capture();
+            Chat.info("Your server commands (fly, shop, vaults...) are kept for " + key + ". Other servers start with none.");
+        } else if (!key.equals("singleplayer")) {
             // A new server: nothing of another server's is sent here
             applying = true;
             Configs.loading = true;
@@ -74,7 +78,7 @@ public final class ServerProfiles {
         } else {
             capture();
         }
-        if (firstEver && Edition.OFFICIAL) {
+        if (firstEver) {
             root.addProperty("guideShown", true);
             save();
             guide();
@@ -101,7 +105,7 @@ public final class ServerProfiles {
             for (fi.dy.masa.malilib.config.options.ConfigBase<?> setting : settings()) {
                 if (profile.has(setting.getName())) {
                     str(setting).setValueFromString(profile.get(setting.getName()).getAsString());
-                } else if (Edition.OFFICIAL) {
+                } else {
                     setting.resetToDefault();
                 }
             }
@@ -142,6 +146,11 @@ public final class ServerProfiles {
         }
         root = new JsonObject();
         try {
+            if (!Files.exists(FILE) && Files.exists(FileUtils.getConfigDirectory().resolve(Configs.CONFIG_FILE_NAME))) {
+                // An update: the settings are kept as they were (no guide, no commands cleared)
+                root.addProperty("keepForFirstServer", true);
+                root.addProperty("guideShown", true);
+            }
             if (Files.exists(FILE)) {
                 root = JsonParser.parseString(Files.readString(FILE, StandardCharsets.UTF_8)).getAsJsonObject();
             }
