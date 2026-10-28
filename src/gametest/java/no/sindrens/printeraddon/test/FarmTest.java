@@ -276,6 +276,10 @@ public class FarmTest implements FabricClientGameTest {
                     no.sindrens.printeraddon.build.AreaBreaker.INSTANCE.start(mc, boxes);
                 } else {
                     AutoBuild.INSTANCE.start(mc);
+                    // PRINTER_ADDON_STOP_AFTER_LAYER=1: "stop after this layer" pressed right away
+                    if (System.getenv("PRINTER_ADDON_STOP_AFTER_LAYER") != null) {
+                        AutoBuild.INSTANCE.toggleStopAfterLayer(mc);
+                    }
                 }
             });
             if (System.getenv("PRINTER_ADDON_BREAK") != null) {

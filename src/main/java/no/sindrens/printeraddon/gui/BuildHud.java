@@ -85,7 +85,7 @@ public final class BuildHud {
     private static void build(AutoBuild build) {
         List<String> lines = new ArrayList<>();
         List<Integer> colors = new ArrayList<>();
-        add(lines, colors, "Printer Addon - " + build.layers.status(), TEXT);
+        add(lines, colors, "Printer Addon - " + build.layers.status() + (build.isStopAfterLayer() ? " (stops after this layer)" : ""), TEXT);
 
         int left = build.blocksLeft();
         double rate = build.stats.recentRate();

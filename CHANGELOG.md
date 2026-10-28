@@ -267,3 +267,4 @@
 - New "Controls" tab in the settings: Start, Stop, Pause / Go on, Stop after this layer, Stop everything, and layer up / down as buttons, with the build's state, and their keys listed below to change right there.
 - "Stop after this layer" (J+N): auto build stops by itself when the layer it's building is done (press again to keep going). Kept through a pause or a lost connection.
 - Separate keys for Start only and Stop only (no key by default, set them in Controls or Hotkeys); the old start/stop key (J+G) still toggles.
+- The on-screen status says "(stops after this layer)" while that's on.
