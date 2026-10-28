@@ -13,6 +13,7 @@ public class ClientTick implements IClientTickHandler {
         try {
             tick(mc);
             no.sindrens.printeraddon.build.InvScreen.tick(mc);
+            no.sindrens.printeraddon.build.TestRunner.INSTANCE.tick(mc);
         } catch (RuntimeException | LinkageError e) {
             AutoBuild.INSTANCE.error("the tick", e);
         }

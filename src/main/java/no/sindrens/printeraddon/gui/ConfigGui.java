@@ -92,6 +92,8 @@ public class ConfigGui extends GuiConfigsBase {
             addBreakTab(10, 52);
         } else if (tab == Tab.DISCORD) {
             addDiscordTab(10, 52);
+        } else if (tab == Tab.TESTS) {
+            addTestsTab(10, 52);
         } else if (tab == Tab.COMMANDS) {
             String server = no.sindrens.printeraddon.config.ServerProfiles.current();
             this.addLabel(this.width - 330, 30, 320, 10, 0xFFAAAAAA, server.isEmpty()
@@ -179,6 +181,78 @@ public class ConfigGui extends GuiConfigsBase {
                 (button, mouse) -> GuiBase.openGui(new no.sindrens.printeraddon.gui.ShareLogGui(this)));
         y += 22;
         this.addLabel(x, y, 600, 10, 0xFFAAAAAA, "Keys: click a key to change it, the arrow resets it. Keys left empty do nothing.");
+    }
+
+    /** Every test build, then Auto break. */
+    public static void runAllTests(Minecraft mc) {
+        List<String> all = new java.util.ArrayList<>();
+        for (no.sindrens.printeraddon.build.TestRunner.TestBuild b : no.sindrens.printeraddon.build.TestRunner.BUILDS) {
+            all.add(b.title());
+        }
+        all.add(no.sindrens.printeraddon.build.TestRunner.AUTO_BREAK_TEST);
+        no.sindrens.printeraddon.build.TestRunner.INSTANCE.start(mc, all);
+    }
+
+    /**
+     * Tests: the test builds placed next to you in a singleplayer world and built (or broken) while you watch, with the
+     * result of each. Run them all, or one.
+     */
+    private void addTestsTab(int x, int y) {
+        Minecraft mc = Minecraft.getInstance();
+        no.sindrens.printeraddon.build.TestRunner runner = no.sindrens.printeraddon.build.TestRunner.INSTANCE;
+        boolean single = mc.hasSingleplayerServer();
+        this.addLabel(x, y + 2, 700, 10, 0xFFAAAAAA, single
+                ? "Singleplayer world with cheats on, standing on flat open ground: the builds go in a row east of you (creative mode)."
+                : "\u00a7cThe tests only run in a singleplayer world (cheats on). Make a superflat creative world for them.");
+        y += 16;
+        ButtonGeneric all = new ButtonGeneric(x, y, 180, 20, "\u00a7a\u25b6 Run all tests");
+        all.setEnabled(single && !runner.isRunning());
+        this.addButton(all, (button, mouse) -> {
+            GuiBase.openGui(null);
+            runAllTests(mc);
+        });
+        ButtonGeneric stop = new ButtonGeneric(x + 184, y, 180, 20, "\u00a7c\u25a0 Stop tests");
+        stop.setEnabled(runner.isRunning());
+        this.addButton(stop, (button, mouse) -> {
+            runner.stop(mc, "stopped by you");
+            this.initGui();
+        });
+        if (no.sindrens.printeraddon.Edition.OFFICIAL) {
+            boolean rules = no.sindrens.printeraddon.ServerPolicy.serverRulesInSingleplayer;
+            this.addButton(new ButtonGeneric(x + 368, y, 260, 20, "Server rules in singleplayer: " + (rules ? "\u00a7aON" : "\u00a7cOFF")),
+                    (button, mouse) -> {
+                        no.sindrens.printeraddon.ServerPolicy.serverRulesInSingleplayer = !rules;
+                        this.initGui();
+                    });
+        }
+        y += 26;
+        int col = 0;
+        java.util.List<String> titles = new java.util.ArrayList<>();
+        for (no.sindrens.printeraddon.build.TestRunner.TestBuild b : no.sindrens.printeraddon.build.TestRunner.BUILDS) {
+            titles.add(b.title());
+        }
+        titles.add(no.sindrens.printeraddon.build.TestRunner.AUTO_BREAK_TEST);
+        for (String title : titles) {
+            ButtonGeneric one = new ButtonGeneric(x + col * 154, y, 150, 20, title);
+            one.setEnabled(single && !runner.isRunning());
+            this.addButton(one, (button, mouse) -> {
+                GuiBase.openGui(null);
+                runner.start(mc, List.of(title));
+            });
+            if (++col == 5) {
+                col = 0;
+                y += 22;
+            }
+        }
+        y += col == 0 ? 6 : 28;
+        if (!runner.status().isEmpty()) {
+            this.addLabel(x, y, 700, 10, 0xFFFFFFFF, runner.status());
+            y += 14;
+        }
+        for (String result : runner.results()) {
+            this.addLabel(x, y, 760, 10, result.contains(" PASS ") ? 0xFF55FF55 : 0xFFFF7777, result);
+            y += 12;
+        }
     }
 
     private void addBuildTab(int x, int y) {
@@ -411,7 +485,7 @@ public class ConfigGui extends GuiConfigsBase {
     @Override
     public List<ConfigOptionWrapper> getConfigs() {
         List<? extends IConfigBase> configs = switch (tab) {
-            case BUILD, BREAK_AREA, DISCORD -> List.<IConfigBase>of();
+            case BUILD, BREAK_AREA, DISCORD, TESTS -> List.<IConfigBase>of();
             case IMPORTANT -> Configs.important();
             case COMMANDS -> no.sindrens.printeraddon.config.ServerProfiles.settings();
             case ALL -> Configs.all();
@@ -434,6 +508,7 @@ public class ConfigGui extends GuiConfigsBase {
         BREAK_AREA("Auto break", false),
         IMPORTANT("Basic settings", false),
         COMMANDS("Commands (this server)", false),
+        TESTS("Tests", false),
         DISCORD("Discord", true),
         ALL("All settings", true),
         GENERIC("Generic", true),

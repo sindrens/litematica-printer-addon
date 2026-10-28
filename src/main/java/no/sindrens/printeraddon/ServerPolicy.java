@@ -124,9 +124,15 @@ public final class ServerPolicy {
      * Movement faster than vanilla may be used: always in the Mythian build; in the official build in singleplayer or LAN,
      * or when the server allows it.
      */
+    /** In-game tests: play by the server rules in singleplayer too (movement keys), to test them. */
+    public static boolean serverRulesInSingleplayer;
+
     public static boolean fastMovementAllowed() {
         if (!Edition.OFFICIAL) {
             return true;
+        }
+        if (serverRulesInSingleplayer && !fastMovement) {
+            return false;
         }
         Minecraft mc = Minecraft.getInstance();
         return mc.hasSingleplayerServer() || fastMovement;

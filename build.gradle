@@ -61,6 +61,11 @@ processResources {
     filesMatching('fabric.mod.json') {
         expand 'mod_version': project.mod_version + (edition == 'official' ? '' : '+mythian'), 'edition': edition
     }
+    // The test build library, for the in-game tests (Tests tab)
+    from('testdata/library') {
+        include '*.litematic'
+        into 'printer_addon/testbuilds'
+    }
 }
 
 tasks.withType(JavaCompile).configureEach {

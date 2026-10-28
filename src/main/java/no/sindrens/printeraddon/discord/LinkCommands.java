@@ -24,6 +24,19 @@ public final class LinkCommands {
                             Chat.info("Type §b/link§r on the Printer Addon Discord, then §b/printeraddon link PRINT-XXXX§r (or J+L).");
                             return 1;
                         }))
+                .then(ClientCommands.literal("test")
+                        .then(ClientCommands.literal("all").executes(c -> {
+                            no.sindrens.printeraddon.gui.ConfigGui.runAllTests(net.minecraft.client.Minecraft.getInstance());
+                            return 1;
+                        }))
+                        .then(ClientCommands.literal("stop").executes(c -> {
+                            no.sindrens.printeraddon.build.TestRunner.INSTANCE.stop(net.minecraft.client.Minecraft.getInstance(), "stopped by you");
+                            return 1;
+                        }))
+                        .executes(c -> {
+                            Chat.info("/printeraddon test all: runs every test build (singleplayer, cheats on). Or J+C, Tests tab.");
+                            return 1;
+                        }))
                 .then(ClientCommands.literal("why").executes(c -> {
                     Chat.info(no.sindrens.printeraddon.build.AutoBuild.whyStopped());
                     return 1;
