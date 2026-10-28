@@ -268,3 +268,14 @@
 - "Stop after this layer" (J+N): auto build stops by itself when the layer it's building is done (press again to keep going). Kept through a pause or a lost connection.
 - Separate keys for Start only and Stop only (no key by default, set them in Controls or Hotkeys); the old start/stop key (J+G) still toggles.
 - The on-screen status says "(stops after this layer)" while that's on.
+
+## 26.2-0.18.0
+- Two builds now: the official one (for Modrinth) and the Mythian one. The Mythian build works as before.
+- Official build: moves with the real movement keys (forward, back, left, right, jump, sneak, sprint), so the game moves you at a normal player's speed. Faster movement only works in singleplayer or where the server allows it.
+- Official build: the camera really turns to each block it clicks or breaks, and the sneak key is really held for clicks on chests and hoppers.
+- Official build: the inventory opens before items are moved in it, and you stand still while it's open. The setting "Open inventory to move items" turns this on or off.
+- Official build: placement speed, break speed and the Fast preset can all be set by you. Anything faster than a vanilla player gives a warning in chat. Reach is never more than vanilla.
+- Server commands (fly, shop, vaults, craft, feed, back-to-build) and auto reconnect are saved for each server. In the official build they're all off on a new server until you turn them on in the new "Commands (this server)" tab.
+- Servers can turn the add-on off with the MOTD tag [printer_addon:disable] or the plugin message printer_addon:policy "disable". They can allow faster movement with [printer_addon:allow-fast-movement].
+- Official build: log sharing and the Discord link are off by default. The Discord link only works over https. Air place is off by default.
+- A short guide in chat the first time you join a world (official build).

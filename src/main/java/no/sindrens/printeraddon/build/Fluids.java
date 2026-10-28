@@ -236,7 +236,7 @@ public class Fluids {
      */
     private void checkBucket(Minecraft mc, LocalPlayer player) {
         int wait = 4 + 2 * ServerLag.pingTicks(mc);
-        if (usedSlot < 0 || tick - usedAt < wait || mc.gui.screen() != null) {
+        if (usedSlot < 0 || tick - usedAt < wait || mc.gui.screen() != null && !InvScreen.isOurs(mc)) {
             return;
         }
         int slot = usedSlot;

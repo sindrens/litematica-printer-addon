@@ -34,7 +34,7 @@ public class HotbarPrep {
         LocalPlayer player = mc.player;
         // Also with the chat or the pause menu open (alt-tabbed): the printer goes on placing then, and an empty
         // hotbar stopped it. Not while a container or the inventory is open (the player may be moving items)
-        if (player == null || mc.gameMode == null || mc.gui.screen() instanceof net.minecraft.client.gui.screens.inventory.AbstractContainerScreen<?>
+        if (player == null || mc.gameMode == null || mc.gui.screen() instanceof net.minecraft.client.gui.screens.inventory.AbstractContainerScreen<?> && !InvScreen.isOurs(mc)
                 || layerNeeds.isEmpty() || ++tick % REFILL_EVERY != 0) {
             return false;
         }

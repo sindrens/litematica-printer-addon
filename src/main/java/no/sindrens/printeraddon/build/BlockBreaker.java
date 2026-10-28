@@ -203,14 +203,14 @@ public class BlockBreaker {
         Vec3 to = hopTo.subtract(player.position());
         if (to.lengthSqr() < 0.06 * 0.06 || ++hopTicks > HOP_TICKS + hopExtraTicks) {
             hopTo = null;
-            player.setDeltaMovement(Vec3.ZERO);
+            Motion.stop(player, false);
             standForBreaking(player, target);
             mc.gameMode.startDestroyBlock(target, face);
             player.swing(InteractionHand.MAIN_HAND);
             return false;
         }
         double length = to.length();
-        player.setDeltaMovement(to.scale(Math.min(0.2, length) / length));
+        Motion.set(player, to.scale(Math.min(0.2, length) / length));
         return true;
     }
 
@@ -247,8 +247,7 @@ public class BlockBreaker {
             // On the ground the game ends flying again after the tick's move (as when landing): up off it, as its own
             // double jump does. Else Auto break stood on its next block, waiting, and once broke it and fell
             if (player.onGround()) {
-                Vec3 motion = player.getDeltaMovement();
-                player.setDeltaMovement(motion.x, 0.42, motion.z);
+                Motion.jump(player);
             }
         }
     }
@@ -418,7 +417,7 @@ public class BlockBreaker {
             target = null;
             brokenCount++;
             // The vanilla wait between two mined blocks (5 ticks), never less
-            cooldown = Math.max(no.sindrens.printeraddon.Edition.OFFICIAL ? 5 : 0, Configs.Speed.breakCooldownTicks());
+            cooldown = Configs.Speed.breakCooldownTicks();
             // Standing stays for a moment: the next block in reach is broken from here too. Flying up after every
             // block and landing again for the next (Auto break) took longer than the breaking
             if (standing) {
@@ -820,6 +819,11 @@ public class BlockBreaker {
             Vec3 d = Vec3.atCenterOf(pos).subtract(player.getEyePosition());
             float yaw = (float) (Math.toDegrees(Math.atan2(d.z, d.x)) - 90.0);
             float pitch = (float) -Math.toDegrees(Math.atan2(d.y, Math.sqrt(d.x * d.x + d.z * d.z)));
+            if (no.sindrens.printeraddon.Edition.OFFICIAL) {
+                // Official build: the camera really looks at the block being broken
+                player.setYRot(yaw);
+                player.setXRot(pitch);
+            }
             player.connection.send(new net.minecraft.network.protocol.game.ServerboundMovePlayerPacket.Rot(yaw, pitch,
                     player.onGround(), player.horizontalCollision));
         }

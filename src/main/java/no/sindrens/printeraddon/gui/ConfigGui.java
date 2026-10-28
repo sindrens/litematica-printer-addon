@@ -77,6 +77,11 @@ public class ConfigGui extends GuiConfigsBase {
             addBreakTab(10, 52);
         } else if (tab == Tab.DISCORD) {
             addDiscordTab(10, 52);
+        } else if (tab == Tab.COMMANDS) {
+            String server = no.sindrens.printeraddon.config.ServerProfiles.current();
+            this.addLabel(this.width - 330, 30, 320, 10, 0xFFAAAAAA, server.isEmpty()
+                    ? "Kept per server: join a server to set its commands"
+                    : "Kept for " + server + " only (" + no.sindrens.printeraddon.ServerPolicy.describe() + ")");
         } else if (tab != Tab.HOTKEYS) {
             // Where the search is (MaLiLib's: the magnifier at the top left of the list)
             this.addLabel(this.width - 230, 30, 220, 10, 0xFFAAAAAA, tab == Tab.ALL
@@ -385,6 +390,7 @@ public class ConfigGui extends GuiConfigsBase {
         List<? extends IConfigBase> configs = switch (tab) {
             case BUILD, BREAK_AREA, DISCORD -> List.<IConfigBase>of();
             case IMPORTANT -> Configs.important();
+            case COMMANDS -> no.sindrens.printeraddon.config.ServerProfiles.settings();
             case ALL -> Configs.all();
             case GENERIC -> Configs.Generic.OPTIONS;
             case BREAKING -> Configs.Breaking.OPTIONS;
@@ -405,6 +411,7 @@ public class ConfigGui extends GuiConfigsBase {
         BREAK_AREA("Auto break"),
         DISCORD("Discord"),
         IMPORTANT("Important"),
+        COMMANDS("Commands (this server)"),
         ALL("All settings"),
         GENERIC("Generic"),
         BREAKING("Breaking"),

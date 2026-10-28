@@ -563,7 +563,7 @@ public class AutoBuild {
             // Optional cap for strict anticheats: no more than this many placements per second; and the speed
             // guard's limit while the server catches up
             // Never two placements closer than a vanilla player gets them (holding right-click: one every 4 ticks)
-            int spacing = Math.max(no.sindrens.printeraddon.Edition.OFFICIAL ? 4 : 0, Configs.Speed.MIN_TICKS_BETWEEN_PLACEMENTS.getIntegerValue());
+            int spacing = Configs.Speed.MIN_TICKS_BETWEEN_PLACEMENTS.getIntegerValue();
             if (spacing > 0 && clientTicks - lastPrinterClickTick < spacing) {
                 return "placement spacing";
             }
@@ -2075,6 +2075,12 @@ public class AutoBuild {
         if (running) {
             return;
         }
+        if (no.sindrens.printeraddon.ServerPolicy.disabled()) {
+            Chat.warn("This server doesn't allow Printer Addon's auto build (" + no.sindrens.printeraddon.ServerPolicy.describe() + ").");
+            Configs.Generic.AUTO_BUILD.setBooleanValue(false);
+            return;
+        }
+        Configs.Speed.warnIfRisky();
         remotePaused = false;
         if (AreaBreaker.INSTANCE.isRunning()) {
             Chat.warn("Auto break is running: stop it first (J+B, Auto break tab), then start auto build.");
@@ -2788,14 +2794,14 @@ public class AutoBuild {
             escapeTicks = 0;
             BuildLog.lineOrKeep("SAFETY", String.format(java.util.Locale.ROOT, "clear of it now at %.1f %.1f %.1f (health %.1f)",
                     player.getX(), player.getY(), player.getZ(), player.getHealth()));
-            player.setDeltaMovement(0, 0, 0);
+            Motion.stop(player, false);
             return;
         }
         if (!player.getAbilities().flying && player.getAbilities().mayfly) {
             player.getAbilities().flying = true;
             player.onUpdateAbilities();
         }
-        player.setDeltaMovement(0, 0.42, 0);
+        Motion.set(player, 0, 0.42, 0);
     }
 
     public void tick(Minecraft mc) {

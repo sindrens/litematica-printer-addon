@@ -400,7 +400,7 @@ public class Mover {
             rising = true;
             RunLog.harmLift();
         }
-        player.setDeltaMovement(motion.x * 0.6, Math.max(motion.y, 0.2), motion.z * 0.6);
+        Motion.set(player, motion.x * 0.6, Math.max(motion.y, 0.2), motion.z * 0.6);
         velocity = new Vec3(velocity.x * 0.6, Math.max(velocity.y, 0.2), velocity.z * 0.6);
         if (tick - lastHarmNote > 40) {
             lastHarmNote = tick;
@@ -440,7 +440,7 @@ public class Mover {
         Vec3 change = wanted.subtract(velocity);
         double length = change.length();
         velocity = length > ACCEL ? velocity.add(change.scale(ACCEL / length)) : wanted;
-        player.setDeltaMovement(velocity);
+        Motion.set(player, velocity);
     }
 
     /**
@@ -3042,7 +3042,7 @@ public class Mover {
             vy = 0.06;
         }
 
-        player.setDeltaMovement(dx / horizontal * speed, vy, dz / horizontal * speed);
+        Motion.set(player, dx / horizontal * speed, vy, dz / horizontal * speed);
     }
 
     private void fly(Minecraft mc, LocalPlayer player) {
@@ -3207,7 +3207,7 @@ public class Mover {
             // The sideways part as wanted straight away, not eased in with the speed: coming onto lane 8 from the side,
             // the speed it had sideways took the player 0.4 off the lane's line, into the cactus of the row beside it
             velocity = lanesAlongX ? new Vec3(velocity.x, velocity.y, motion.z) : new Vec3(motion.x, velocity.y, velocity.z);
-            player.setDeltaMovement(velocity);
+            Motion.set(player, velocity);
         }
     }
 
@@ -3549,8 +3549,12 @@ public class Mover {
 
     /** Stops at once (for chests, the shop, a change of plan): the rest of the time the mover slows down smoothly. */
     private void halt(LocalPlayer player) {
-        Vec3 motion = player.getDeltaMovement();
-        player.setDeltaMovement(0, flying(player) ? 0 : motion.y, 0);
+        if (Motion.keys()) {
+            Motion.stop(player, true);
+        } else {
+            Vec3 motion = player.getDeltaMovement();
+            player.setDeltaMovement(0, flying(player) ? 0 : motion.y, 0);
+        }
         velocity = Vec3.ZERO;
     }
 

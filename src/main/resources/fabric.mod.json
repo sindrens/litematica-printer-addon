@@ -3,7 +3,7 @@
   "id": "printer_addon",
   "version": "${mod_version}",
   "name": "Printer Addon",
-  "description": "Add-on for Litematica Printer: fixes wrong blocks, builds layer by layer, moves the player, safe build order for farms and buys missing items from /shop.",
+  "description": "Add-on for Litematica Printer: fixes wrong blocks, builds layer by layer, moves the player, safe build order for farms and buys missing items from a server shop you set up.",
   "authors": [
     "sindrens"
   ],

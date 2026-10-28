@@ -17,6 +17,7 @@
     "MultiPlayerGameModeAccessor",
     "MultiPlayerGameModeMixin",
     "InteractActionMixin",
+    "KeyboardInputMixin",
     "PrepareActionMixin",
     "PropertySpecificGuesserGuideMixin",
     "PrinterMixin"

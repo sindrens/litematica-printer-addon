@@ -221,6 +221,10 @@ public final class Clicks {
 
     /** Turns the view back (and tells the server), after something that needed another direction for one click. */
     public static void restoreView(LocalPlayer player, float yaw, float pitch) {
+        if (no.sindrens.printeraddon.Edition.OFFICIAL) {
+            // Official build: the camera really turned to the block and stays there, as a player's would
+            return;
+        }
         player.setYRot(yaw);
         player.setXRot(pitch);
         player.yRotO = yaw;

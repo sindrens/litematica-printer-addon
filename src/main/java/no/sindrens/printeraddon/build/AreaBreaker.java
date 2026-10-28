@@ -513,6 +513,10 @@ public final class AreaBreaker {
             Chat.warn("Auto build is running: stop it first (J+B), then start Auto break.");
             return false;
         }
+        if (no.sindrens.printeraddon.ServerPolicy.disabled()) {
+            Chat.warn("This server doesn't allow Printer Addon's Auto break (" + no.sindrens.printeraddon.ServerPolicy.describe() + ").");
+            return false;
+        }
         if (selected.isEmpty()) {
             Chat.warn("No area selected: select one with Litematica's area selection tool first (corner 1 and corner 2).");
             return false;
@@ -786,6 +790,10 @@ public final class AreaBreaker {
         Vec3 motion = player.getDeltaMovement();
         // Not on the hop to a spot to stand at (the breaker moves the player there)
         if (player.getAbilities().flying && !AutoBuild.INSTANCE.breaker.isStanding()) {
+            if (Motion.keys()) {
+                Motion.stop(player, false);
+                return;
+            }
             player.setDeltaMovement(motion.x * 0.3, Math.max(0, motion.y) * 0.5, motion.z * 0.3);
         }
     }

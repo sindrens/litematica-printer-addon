@@ -43,6 +43,13 @@ public class AddonInit implements IInitializationHandler {
         // preset was picked); picking Custom starts from the preset that was picked before
         no.sindrens.printeraddon.config.Configs.Speed.linkCustomToPreset();
 
+        // What the server allows (official build), and the server commands kept per server
+        ServerPolicy.register();
+        net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents.JOIN.register((handler, sender, mc) ->
+                mc.execute(() -> no.sindrens.printeraddon.config.ServerProfiles.onJoin(mc)));
+        net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents.DISCONNECT.register((handler, mc) ->
+                no.sindrens.printeraddon.config.ServerProfiles.onLeave());
+
         // Closing the game during a run ends it there, so its log is whole (sent on the next start, see LogShare)
         net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents.CLIENT_STOPPING.register(mc -> {
             try {

@@ -20,6 +20,17 @@ public abstract class MultiPlayerGameModeMixin {
     @Final
     private Minecraft minecraft;
 
+    /** Official build: the inventory opened before moving items in it, as a player must (see InvScreen). */
+    @Inject(method = "handleContainerInput", at = @At("HEAD"))
+    private void printer_addon$openInventory(int containerId, int slot, int button, net.minecraft.world.inventory.ContainerInput input,
+                                             net.minecraft.world.entity.player.Player player, CallbackInfo ci) {
+        try {
+            no.sindrens.printeraddon.build.InvScreen.beforeClick(minecraft, containerId);
+        } catch (RuntimeException | LinkageError e) {
+            no.sindrens.printeraddon.PrinterAddon.LOGGER.warn("[Printer Addon] inventory screen", e);
+        }
+    }
+
     @Inject(method = "ensureHasSentCarriedItem", at = @At("HEAD"))
     private void printer_addon$noteSwitch(CallbackInfo ci) {
         if (minecraft.player != null && minecraft.player.getInventory().getSelectedSlot() != carriedIndex) {

@@ -12,6 +12,7 @@ public class ClientTick implements IClientTickHandler {
         // An error in the add-on stops auto build and goes into the build log; the game doesn't crash for it
         try {
             tick(mc);
+            no.sindrens.printeraddon.build.InvScreen.tick(mc);
         } catch (RuntimeException | LinkageError e) {
             AutoBuild.INSTANCE.error("the tick", e);
         }

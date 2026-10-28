@@ -178,7 +178,8 @@ public class InteractActionMixin {
     private static void printer_addon$refillEmpty(Minecraft client, LocalPlayer player, InteractionHand hand) {
         net.minecraft.world.item.Item wanted = no.sindrens.printeraddon.build.AutoBuild.INSTANCE.lastTriedItem;
         if (wanted == null || hand != InteractionHand.MAIN_HAND || client.gameMode == null
-                || client.gui.screen() instanceof net.minecraft.client.gui.screens.inventory.AbstractContainerScreen<?>) {
+                || client.gui.screen() instanceof net.minecraft.client.gui.screens.inventory.AbstractContainerScreen<?>
+                && !no.sindrens.printeraddon.build.InvScreen.isOurs(client)) {
             return;
         }
         net.minecraft.world.entity.player.Inventory inventory = player.getInventory();
@@ -247,12 +248,22 @@ public class InteractActionMixin {
             // Back to what the keyboard says
             printer_addon$sneaked = false;
             player.input.keyPresses = printer_addon$keys;
-            player.connection.send(new net.minecraft.network.protocol.game.ServerboundPlayerInputPacket(printer_addon$keys));
+            if (no.sindrens.printeraddon.Edition.OFFICIAL) {
+                // Official build: the sneak key stays held a moment, so the player really crouches and lets go as
+                // a player does (the game tells the server when the keys change)
+                no.sindrens.printeraddon.build.Motion.sneak(3);
+            } else {
+                player.connection.send(new net.minecraft.network.protocol.game.ServerboundPlayerInputPacket(printer_addon$keys));
+            }
         }
         if (!printer_addon$turned) {
             return;
         }
         printer_addon$turned = false;
+        if (no.sindrens.printeraddon.Edition.OFFICIAL) {
+            // Official build: the camera stays turned to the block clicked
+            return;
+        }
         player.setYRot(printer_addon$yaw);
         player.setXRot(printer_addon$pitch);
         player.yRotO = printer_addon$yawO;
