@@ -273,6 +273,9 @@
 One version for everyone now (the one going to Modrinth). Updating keeps all your settings: the server commands you set
 (fly, shop, vaults...) are kept for the first server you join.
 
+- Updating: take the old printer_addon jar (the one ending in +mythian) out of your mods folder first. Your settings stay.
+- Logs and reports now go through the Printer Addon bot (no webhook in the jar).
+
 Plays like a player:
 - Moves with the movement keys at a player's speed on servers, and looks where it goes, turning smoothly ("Look where it goes").
 - Walks along straight lines where nothing's in the way, instead of zig-zagging over every block.

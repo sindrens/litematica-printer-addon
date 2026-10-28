@@ -73,7 +73,7 @@ public final class DiscordLink {
     private static final java.util.Set<String> OLD_DEFAULTS = java.util.Set.of("http://localhost:8787/api/v1",
             "http://139.59.156.198:8787/api/v1");
 
-    private static String api() {
+    public static String api() {
         String url = Configs.Generic.DISCORD_API.getStringValue().trim();
         if (OLD_DEFAULTS.contains(url)) {
             url = DEFAULT_API;

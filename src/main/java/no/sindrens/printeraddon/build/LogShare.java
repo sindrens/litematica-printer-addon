@@ -48,19 +48,12 @@ import java.util.zip.GZIPOutputStream;
  * is tried again (30 s, 2 min, 10 min ... for up to a week) and after a restart, and the log of a run that never ended
  * (the game crashed or was killed) goes on the next start. One thread sends them one by one, the player's own first.
  * Each report says which add-on version wrote the log (first in the line above it, last in its title, which starts
- * "Log from <player>" for the server's bot), and it's listed with its kind and version for the developer's tool (see
- * ReportIndex). With the log go a short summary and the full debug (see DebugInfo):
+ * "Log from <player>" for the server's bot). It goes to the Printer Addon bot (no webhook in the jar), which posts it
+ * for the developer; a webhook of your own (Log channel) goes first. With the log go a short summary and the full debug (see DebugInfo):
  * debug.txt, the game's own log without chat (of the game the run was in), a crash report from the last day, and the
  * screenshot the player adds. Each one sent is noted in logs/printer_addon/sent.txt.
  */
 public final class LogShare {
-    /**
-     * The developer's log channel, a Discord webhook URL ("Log channel" in the settings goes first). It's packed into
-     * the jar from src/main/resources/printer_addon/log-channel.txt (reversed, Base64), which never goes into the
-     * repository: a webhook URL in a public repository gets found and spammed. Without the file: nowhere to send logs.
-     */
-    @Nullable
-    private static volatile String developerChannel;
     /**
      * Discord takes 10 MB a message: everything sent stays under this, the run's log gzipped (or only its last part)
      * when it doesn't fit next to the rest, and the screenshot left out before the log is cut.
@@ -269,29 +262,44 @@ public final class LogShare {
         return e == null || e.isJsonNull() ? null : e.getAsString();
     }
 
-    /** Where logs go, or "" when nowhere. */
+    /** Logs go to the Printer Addon bot (it posts them for the developer): no webhook in the jar. */
+    static final String BOT = "bot:";
+
+    /** Where logs go: the player's own webhook, else the bot; "" when nowhere. */
     static String channel() {
         String own = Configs.Generic.LOG_CHANNEL.getStringValue().trim();
-        return own.isEmpty() ? developerChannel() : own;
+        if (!own.isEmpty()) {
+            return own;
+        }
+        String api = no.sindrens.printeraddon.discord.DiscordLink.api();
+        return api.isEmpty() ? "" : BOT + api;
     }
 
-    private static synchronized String developerChannel() {
-        if (developerChannel == null) {
-            String found = "";
-            try (java.io.InputStream in = LogShare.class.getResourceAsStream("/printer_addon/log-channel.txt")) {
-                if (in != null) {
-                    String text = new String(in.readAllBytes(), StandardCharsets.UTF_8).trim();
-                    if (!text.isEmpty()) {
-                        found = new StringBuilder(new String(java.util.Base64.getDecoder().decode(text), StandardCharsets.UTF_8))
-                                .reverse().toString();
-                    }
-                }
-            } catch (IOException | IllegalArgumentException e) {
-                PrinterAddon.LOGGER.warn("[Printer Addon] Couldn't read the log channel", e);
+    /** A place a log can go to: a webhook address, or the bot. */
+    static boolean usable(String url) {
+        return url.startsWith("https://") || url.startsWith(BOT);
+    }
+
+    /** This game's key for the bot's /report (asked once, kept in config/printer_addon/install-key.txt). */
+    private static synchronized String installKey(String api, boolean renew) throws IOException, InterruptedException {
+        Path file = fi.dy.masa.malilib.util.FileUtils.getConfigDirectory().resolve("printer_addon").resolve("install-key.txt");
+        if (!renew && Files.isRegularFile(file)) {
+            String key = Files.readString(file, StandardCharsets.UTF_8).trim();
+            if (!key.isEmpty()) {
+                return key;
             }
-            developerChannel = found;
         }
-        return developerChannel;
+        HttpRequest request = HttpRequest.newBuilder(URI.create(api + "/install")).timeout(Duration.ofSeconds(30))
+                .header("Content-Type", "application/json").header("User-Agent", "PrinterAddon/" + modVersion(PrinterAddon.MOD_ID))
+                .POST(HttpRequest.BodyPublishers.ofString("{}")).build();
+        HttpResponse<String> response = CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() / 100 != 2) {
+            throw new IOException("the bot answered " + response.statusCode());
+        }
+        String key = JsonParser.parseString(response.body()).getAsJsonObject().get("key").getAsString();
+        Files.createDirectories(file.getParent());
+        Files.writeString(file, key, StandardCharsets.UTF_8);
+        return key;
     }
 
     private static Path outbox() {
@@ -498,7 +506,7 @@ public final class LogShare {
             }
             return;
         }
-        if (!url.startsWith("https://")) {
+        if (!usable(url)) {
             Chat.warn("The log channel isn't a web address (https://...): set a Discord webhook URL as Log channel.");
             return;
         }
@@ -543,7 +551,7 @@ public final class LogShare {
      */
     public static boolean shareOther(Minecraft mc, String what, String why, Path file, String summary, boolean automatic) {
         String url = channel();
-        if (url.isEmpty() || !url.startsWith("https://") || automatic && !Configs.Generic.SHARE_LOGS.getBooleanValue()
+        if (url.isEmpty() || !usable(url) || automatic && !Configs.Generic.SHARE_LOGS.getBooleanValue()
                 || !Files.isRegularFile(file)) {
             return false;
         }
@@ -899,7 +907,7 @@ public final class LogShare {
      */
     private static Result send(Path gameDir, Job job) {
         String url = channel();
-        if (url.isEmpty() || !url.startsWith("https://")) {
+        if (url.isEmpty() || !usable(url)) {
             return Result.failed("no log channel", false, 0);
         }
         try {
@@ -1050,6 +1058,17 @@ public final class LogShare {
             embeds.add(embed);
             payload.add("embeds", embeds);
 
+            boolean toBot = url.startsWith(BOT);
+            String api = toBot ? url.substring(BOT.length()) : "";
+            if (toBot) {
+                // The bot's /report takes the embed's parts flat (it posts the embed itself)
+                JsonObject flat = new JsonObject();
+                flat.addProperty("title", embed.get("title").getAsString());
+                flat.addProperty("description", embed.get("description").getAsString());
+                flat.addProperty("color", color);
+                flat.addProperty("content", payload.get("content").getAsString());
+                payload = flat;
+            }
             String boundary = "PrinterAddon" + Long.toHexString(System.nanoTime());
             String json = payload.toString();
             int size = json.length() * 3 + 4096;
@@ -1057,7 +1076,7 @@ public final class LogShare {
                 size += part.bytes().length + 512;
             }
             ByteArrayOutputStream body = new ByteArrayOutputStream(size);
-            write(body, "--" + boundary + "\r\nContent-Disposition: form-data; name=\"payload_json\"\r\n"
+            write(body, "--" + boundary + "\r\nContent-Disposition: form-data; name=\"" + (toBot ? "payload" : "payload_json") + "\"\r\n"
                     + "Content-Type: application/json\r\n\r\n" + json + "\r\n");
             for (int i = 0; i < parts.size(); i++) {
                 Part part = parts.get(i);
@@ -1068,22 +1087,31 @@ public final class LogShare {
             }
             write(body, "--" + boundary + "--\r\n");
             // wait=true: Discord answers with the message, whose id goes into the developer's index
-            HttpRequest request = HttpRequest.newBuilder(URI.create(url + (url.contains("?") ? "&" : "?") + "wait=true"))
+            HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(toBot ? api + "/report"
+                            : url + (url.contains("?") ? "&" : "?") + "wait=true"))
                     .timeout(Duration.ofSeconds(120))
                     .header("Content-Type", "multipart/form-data; boundary=" + boundary)
-                    .header("User-Agent", "PrinterAddon/" + modVersion(PrinterAddon.MOD_ID))
-                    .POST(HttpRequest.BodyPublishers.ofByteArray(body.toByteArray()))
-                    .build();
-            HttpResponse<String> response = CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
+                    .header("User-Agent", "PrinterAddon/" + modVersion(PrinterAddon.MOD_ID));
+            byte[] bytes = body.toByteArray();
+            HttpResponse<String> response;
+            if (toBot) {
+                response = CLIENT.send(builder.copy().header("X-Install-Key", installKey(api, false))
+                        .POST(HttpRequest.BodyPublishers.ofByteArray(bytes)).build(), HttpResponse.BodyHandlers.ofString());
+                if (response.statusCode() == 401) {
+                    // The key is gone (or blocked): a new one, once
+                    response = CLIENT.send(builder.copy().header("X-Install-Key", installKey(api, true))
+                            .POST(HttpRequest.BodyPublishers.ofByteArray(bytes)).build(), HttpResponse.BodyHandlers.ofString());
+                }
+            } else {
+                response = CLIENT.send(builder.POST(HttpRequest.BodyPublishers.ofByteArray(bytes)).build(), HttpResponse.BodyHandlers.ofString());
+            }
             int status = response.statusCode();
             if (status / 100 == 2) {
                 delete(job);
                 String id = "?";
                 try {
                     id = JsonParser.parseString(response.body()).getAsJsonObject().get("id").getAsString();
-                    if (url.equals(developerChannel())) {
-                        ReportIndex.add(CLIENT, url, id, job.kind, job.version);
-                    }
+
                 } catch (RuntimeException e) {
                     PrinterAddon.LOGGER.warn("[Printer Addon] The report went, but couldn't be listed: {}", e.toString());
                 }
